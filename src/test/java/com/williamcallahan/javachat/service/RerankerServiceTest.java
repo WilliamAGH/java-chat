@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -40,7 +41,7 @@ class RerankerServiceTest {
     private static final Duration TEST_RERANKER_TIMEOUT = Duration.ofSeconds(45);
     private static final Duration REMAINING_STAGE_BUDGET_TEST_TIMEOUT = Duration.ofSeconds(60);
     private static final Duration NEARLY_EXHAUSTED_STAGE_BUDGET = Duration.ofSeconds(5);
-    private static final Duration CACHE_WAIT_DEADLINE_TEST_TIMEOUT = Duration.ofMillis(20);
+    private static final Duration CACHE_WAIT_DEADLINE_TEST_TIMEOUT = Duration.ofMillis(500);
     private static final Duration CACHE_WAIT_COMPLETION_TOLERANCE = Duration.ofSeconds(1);
     private static final Duration CACHE_TEST_COMPLETION_TIMEOUT = Duration.ofSeconds(5);
     private static final double TEST_RERANKER_TEMPERATURE = 0.2;
@@ -291,6 +292,9 @@ class RerankerServiceTest {
                 return rerankerService.rerank("query", sourceDocuments, 2, waitingCallerDeadlineNanos);
             });
             assertTrue(waitingCallerStarted.await(CACHE_TEST_COMPLETION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+            assertFalse(
+                    waitingRerank.isDone(),
+                    "A caller admitted before its deadline must wait on the existing same-key rerank");
             ExecutionException waitingFailure = assertThrows(
                     ExecutionException.class,
                     () -> waitingRerank.get(CACHE_TEST_COMPLETION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
