@@ -21,6 +21,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 
@@ -60,6 +61,16 @@ public class CustomErrorController implements ErrorController {
      */
     public CustomErrorController(ExceptionResponseBuilder exceptionBuilder) {
         this.exceptionBuilder = exceptionBuilder;
+    }
+
+    /**
+     * Rejects direct browser-error page requests so templates remain internal to error dispatches.
+     *
+     * @return a not-found response because browser error pages only render through the error controller
+     */
+    @GetMapping({"/errors", "/errors/**"})
+    public ResponseEntity<Void> rejectDirectErrorPageAccess() {
+        return ResponseEntity.notFound().build();
     }
 
     /**

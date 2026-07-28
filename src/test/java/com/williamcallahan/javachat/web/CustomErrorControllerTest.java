@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -19,6 +21,9 @@ import ch.qos.logback.core.Appender;
 import ch.qos.logback.core.ConsoleAppender;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import jakarta.servlet.RequestDispatcher;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +33,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.test.context.support.WithMockUser;
@@ -182,6 +188,54 @@ class CustomErrorControllerTest {
     }
 
     @Test
+    void does_not_publish_browser_error_pages_directly() throws Exception {
+        for (String directErrorPath : List.of("/errors", "/errors/not-found", "/errors/not-found.html")) {
+            mockMvc.perform(get(directErrorPath).accept(MediaType.TEXT_HTML)).andExpect(status().isNotFound());
+        }
+    }
+
+    @Test
+    void renders_browser_error_page_with_original_status() throws Exception {
+        mockMvc.perform(errorRequest(HttpStatus.NOT_FOUND, "/missing-page").accept(MediaType.TEXT_HTML))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_HTML))
+                .andExpect(content().string(containsString("404 Not Found")));
+    }
+
+    @Test
+    void renders_post_error_dispatch_with_original_status() throws Exception {
+        mockMvc.perform(post("/error")
+                        .with(csrf())
+                        .accept(MediaType.TEXT_HTML)
+                        .requestAttr(RequestDispatcher.ERROR_STATUS_CODE, HttpStatus.METHOD_NOT_ALLOWED.value())
+                        .requestAttr(RequestDispatcher.ERROR_REQUEST_URI, "/submit"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_HTML))
+                .andExpect(content().string(containsString("Java Chat does not support that action")));
+    }
+
+    @Test
+    void logs_browser_error_page_read_failure() throws Exception {
+        ClassLoader originalContextClassLoader = Thread.currentThread().getContextClassLoader();
+        try {
+            Thread.currentThread().setContextClassLoader(new UnreadableResourceClassLoader(originalContextClassLoader));
+
+            mockMvc.perform(errorRequest(HttpStatus.NOT_FOUND, "/missing-page").accept(MediaType.TEXT_HTML))
+                    .andExpect(status().isInternalServerError());
+        } finally {
+            Thread.currentThread().setContextClassLoader(originalContextClassLoader);
+        }
+
+        ILoggingEvent pageReadFailure = controllerLogEvents.events().stream()
+                .filter(logEvent -> logEvent.getThrowableProxy() != null)
+                .findFirst()
+                .orElseThrow();
+        assertEquals(Level.ERROR, pageReadFailure.getLevel());
+        assertEquals(
+                IOException.class.getName(), pageReadFailure.getThrowableProxy().getClassName());
+    }
+
+    @Test
     void returns_the_same_non_empty_servlet_request_id_that_it_logs() {
         String expectedRequestId = "servlet-request-123";
         MockHttpServletRequest servletRequest = new MockHttpServletRequest() {
@@ -246,5 +300,29 @@ class CustomErrorControllerTest {
             throw new AssertionError("Console pattern layout must be initialized");
         }
         return patternEncoder;
+    }
+
+    /** Forces classpath resource reads to fail after discovery succeeds. */
+    private static final class UnreadableResourceClassLoader extends ClassLoader {
+
+        private UnreadableResourceClassLoader(ClassLoader parentClassLoader) {
+            super(parentClassLoader);
+        }
+
+        @Override
+        public URL getResource(String resourcePath) {
+            return CustomErrorControllerTest.class.getResource(
+                    CustomErrorControllerTest.class.getSimpleName() + ".class");
+        }
+
+        @Override
+        public InputStream getResourceAsStream(String resourcePath) {
+            return new InputStream() {
+                @Override
+                public int read() throws IOException {
+                    throw new IOException("Unreadable test resource");
+                }
+            };
+        }
     }
 }
