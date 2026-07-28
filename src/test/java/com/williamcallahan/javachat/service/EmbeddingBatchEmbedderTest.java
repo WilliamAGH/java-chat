@@ -192,6 +192,11 @@ class EmbeddingBatchEmbedderTest {
         }
 
         @Override
+        public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier, java.time.Duration requestTimeout) {
+            return embed(texts, requestTier);
+        }
+
+        @Override
         public String modelName() {
             return "test-embedding-model";
         }

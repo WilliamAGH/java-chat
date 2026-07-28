@@ -1,14 +1,17 @@
 package com.williamcallahan.javachat.service;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
@@ -26,9 +29,11 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
     private final String modelName;
     private final int dimensions;
     private final int batchSize;
-    private final RestTemplate restTemplate;
+    private final RestTemplateBuilder restTemplateBuilder;
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
     private static final int READ_TIMEOUT_SECONDS = 60;
+    private static final int DEADLINE_CONNECT_BUDGET_DIVISOR = 4;
+    private static final long MINIMUM_TRANSPORT_BUDGET_MILLIS = 2;
     private static final String EMBEDDINGS_PATH = "/v1/embeddings";
     private static final int MAX_ERROR_SNIPPET = 512;
 
@@ -59,10 +64,7 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
             throw new IllegalArgumentException("batchSize must be positive");
         }
         this.batchSize = batchSize;
-        this.restTemplate = restTemplateBuilder
-                .connectTimeout(java.time.Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
-                .readTimeout(java.time.Duration.ofSeconds(READ_TIMEOUT_SECONDS))
-                .build();
+        this.restTemplateBuilder = Objects.requireNonNull(restTemplateBuilder, "restTemplateBuilder");
     }
 
     @Override
@@ -71,12 +73,32 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
         if (texts == null || texts.isEmpty()) {
             return List.of();
         }
-        return fetchValidatedEmbeddings(texts);
+        return fetchValidatedEmbeddings(texts, configuredOperationTimeout(texts.size()));
+    }
+
+    /**
+     * Bounds the embedding call by the tighter of the caller budget and the configured socket timeouts.
+     *
+     * <p>The local provider's {@code RestTemplate} socket timeouts are fixed at build time, so a
+     * caller-owned stage budget tighter than those defaults is applied by deriving a per-call
+     * template whose connect and read timeouts cannot exceed the remaining budget.</p>
+     */
+    @Override
+    public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier, Duration requestTimeout) {
+        Objects.requireNonNull(requestTier, "requestTier");
+        Duration requiredRequestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout");
+        if (texts == null || texts.isEmpty()) {
+            return List.of();
+        }
+        if (requiredRequestTimeout.isNegative() || requiredRequestTimeout.isZero()) {
+            throw localDeadlineFailure();
+        }
+        return fetchValidatedEmbeddings(texts, requiredRequestTimeout);
     }
 
     @Override
     public void warmUp() {
-        fetchValidatedEmbeddings(List.of(EMBEDDING_WARM_UP_PROBE_TEXT));
+        fetchValidatedEmbeddings(List.of(EMBEDDING_WARM_UP_PROBE_TEXT), configuredOperationTimeout(1));
     }
 
     @Override
@@ -84,12 +106,18 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
         return modelName;
     }
 
-    private List<float[]> fetchValidatedEmbeddings(List<String> texts) {
+    private List<float[]> fetchValidatedEmbeddings(List<String> texts, Duration operationTimeout) {
         try {
-            return callEmbeddingApi(texts);
+            return callEmbeddingApi(texts, operationTimeout);
         } catch (org.springframework.web.client.RestClientResponseException apiException) {
             String details = formatHttpFailure(apiException);
             throw new EmbeddingServiceUnavailableException(details, apiException);
+        } catch (ResourceAccessException transportException) {
+            String details = sanitizeMessage(transportException.getMessage());
+            String failureMessage = details.isBlank()
+                    ? "Local embedding transport failed against " + baseUrl
+                    : "Local embedding transport failed against " + baseUrl + ": " + details;
+            throw new EmbeddingServiceTemporarilyUnavailableException(failureMessage, transportException);
         } catch (RestClientException | IllegalStateException apiException) {
             String details = sanitizeMessage(apiException.getMessage());
             String failureMessage = details.isBlank()
@@ -99,21 +127,58 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
         }
     }
 
-    private List<float[]> callEmbeddingApi(List<String> texts) {
+    private List<float[]> callEmbeddingApi(List<String> texts, Duration operationTimeout) {
         log.debug("[EMBEDDING] Generating embeddings for request payload");
+        long operationDeadlineNanos = System.nanoTime() + operationTimeout.toNanos();
         List<float[]> embeddings = new ArrayList<>(texts.size());
         for (int startIndex = 0; startIndex < texts.size(); startIndex += batchSize) {
+            RestTemplate batchRestTemplate = budgetedRestTemplate(operationDeadlineNanos);
             int endIndex = Math.min(startIndex + batchSize, texts.size());
             List<String> batchInputTexts = List.copyOf(texts.subList(startIndex, endIndex));
-            List<float[]> batchEmbeddings = fetchEmbeddingsFromApi(batchInputTexts);
+            List<float[]> batchEmbeddings = fetchEmbeddingsFromApi(batchInputTexts, batchRestTemplate);
             if (batchEmbeddings.size() != batchInputTexts.size()) {
                 throw new EmbeddingServiceUnavailableException(
                         "Local embedding response size mismatch for batch starting at index " + startIndex);
             }
             embeddings.addAll(batchEmbeddings);
         }
+        requireRemainingOperationBudgetMillis(operationDeadlineNanos);
         log.info("Generated {} embeddings successfully", embeddings.size());
         return List.copyOf(embeddings);
+    }
+
+    private Duration configuredOperationTimeout(int textCount) {
+        long batchCount = Math.max(1L, (textCount + (long) batchSize - 1L) / batchSize);
+        return Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS + READ_TIMEOUT_SECONDS)
+                .multipliedBy(batchCount);
+    }
+
+    private RestTemplate budgetedRestTemplate(long operationDeadlineNanos) {
+        long remainingBudgetMillis = requireRemainingOperationBudgetMillis(operationDeadlineNanos);
+        long connectBudgetMillis = Math.min(
+                Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS).toMillis(),
+                Math.max(1L, remainingBudgetMillis / DEADLINE_CONNECT_BUDGET_DIVISOR));
+        long readBudgetMillis = Math.min(
+                Duration.ofSeconds(READ_TIMEOUT_SECONDS).toMillis(), remainingBudgetMillis - connectBudgetMillis);
+        return restTemplateBuilder
+                .connectTimeout(Duration.ofMillis(connectBudgetMillis))
+                .readTimeout(Duration.ofMillis(readBudgetMillis))
+                .build();
+    }
+
+    private static long requireRemainingOperationBudgetMillis(long operationDeadlineNanos) {
+        long remainingBudgetMillis = Duration.ofNanos(Math.max(0L, operationDeadlineNanos - System.nanoTime()))
+                .toMillis();
+        if (remainingBudgetMillis < MINIMUM_TRANSPORT_BUDGET_MILLIS) {
+            throw localDeadlineFailure();
+        }
+        return remainingBudgetMillis;
+    }
+
+    private static EmbeddingServiceTemporarilyUnavailableException localDeadlineFailure() {
+        String failureMessage = "Local embedding request deadline elapsed locally";
+        return new EmbeddingServiceTemporarilyUnavailableException(
+                failureMessage, new TimeoutException(failureMessage));
     }
 
     /**
@@ -123,7 +188,7 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
      * @return embedding vectors matching batch input order
      * @throws EmbeddingServiceUnavailableException when the provider returns invalid data
      */
-    private List<float[]> fetchEmbeddingsFromApi(List<String> batchInputTexts) {
+    private List<float[]> fetchEmbeddingsFromApi(List<String> batchInputTexts, RestTemplate embeddingRestTemplate) {
         Objects.requireNonNull(batchInputTexts, "batchInputTexts");
         if (batchInputTexts.isEmpty()) {
             return List.of();
@@ -138,7 +203,8 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
 
         log.debug("[EMBEDDING] Calling embedding API batch with {} texts", batchInputTexts.size());
 
-        EmbeddingResponsePayload response = restTemplate.postForObject(url, entity, EmbeddingResponsePayload.class);
+        EmbeddingResponsePayload response =
+                embeddingRestTemplate.postForObject(url, entity, EmbeddingResponsePayload.class);
 
         return parseEmbeddingResponse(response, batchInputTexts.size());
     }

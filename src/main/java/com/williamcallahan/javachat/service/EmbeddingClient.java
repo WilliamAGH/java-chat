@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 
@@ -20,6 +21,22 @@ public interface EmbeddingClient {
     List<float[]> embed(List<String> texts, LlmGatewayTier requestTier);
 
     /**
+     * Produces one dense embedding vector per input text within a caller-owned budget.
+     *
+     * <p>Retrieval runs inside one stage deadline shared by every dependency hop, so the
+     * caller hands its remaining stage budget down instead of letting each hop start an
+     * independent clock. Implementations bound the whole operation by the tighter of
+     * {@code requestTimeout} and the tier's configured request timeout, keeping the
+     * configured timeout meaningful as a per-request ceiling.</p>
+     *
+     * @param texts input texts
+     * @param requestTier gateway capacity tier for this embedding request
+     * @param requestTimeout caller-owned budget bounding the whole embedding operation
+     * @return embedding vectors in the same order as {@code texts}
+     */
+    List<float[]> embed(List<String> texts, LlmGatewayTier requestTier, Duration requestTimeout);
+
+    /**
      * Returns the provider model identifier used for embedding requests.
      *
      * @return configured embedding model identifier
@@ -37,6 +54,25 @@ public interface EmbeddingClient {
         Objects.requireNonNull(requestTier, "requestTier");
         String safeText = Objects.requireNonNullElse(text, "");
         List<float[]> embeddingVectors = embed(List.of(safeText), requestTier);
+        if (embeddingVectors.isEmpty()) {
+            throw new EmbeddingServiceUnavailableException("Embedding response was empty");
+        }
+        return embeddingVectors.get(0);
+    }
+
+    /**
+     * Produces a dense embedding vector for a single text within a caller-owned budget.
+     *
+     * @param text input text
+     * @param requestTier gateway capacity tier for this embedding request
+     * @param requestTimeout caller-owned budget bounding the whole embedding operation
+     * @return embedding vector
+     */
+    default float[] embed(String text, LlmGatewayTier requestTier, Duration requestTimeout) {
+        Objects.requireNonNull(requestTier, "requestTier");
+        Objects.requireNonNull(requestTimeout, "requestTimeout");
+        String safeText = Objects.requireNonNullElse(text, "");
+        List<float[]> embeddingVectors = embed(List.of(safeText), requestTier, requestTimeout);
         if (embeddingVectors.isEmpty()) {
             throw new EmbeddingServiceUnavailableException("Embedding response was empty");
         }

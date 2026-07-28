@@ -54,6 +54,7 @@ class OpenAiCompatibleEmbeddingClientTest {
     private static final Duration TEST_SLOW_SDK_DISPATCH_DURATION = Duration.ofMillis(1_200);
     private static final Duration MINIMUM_EXPECTED_STRICT_LAUNCH_INTERVAL = Duration.ofSeconds(1);
     private static final Duration TEST_SATURATED_LIVE_REQUEST_BUDGET = Duration.ofMillis(250);
+    private static final Duration CALLER_OWNED_LIVE_REQUEST_BUDGET = Duration.ofSeconds(5);
     private static final Duration MAXIMUM_EXPECTED_SATURATION_DELAY = Duration.ofSeconds(1);
 
     @Test
@@ -308,6 +309,43 @@ class OpenAiCompatibleEmbeddingClientTest {
             assertRemainingTransportBudget(
                     EXPECTED_BATCH_EMBEDDING_TIMEOUT,
                     batchRequestOptionsCaptor.getValue().getTimeout().read());
+        }
+    }
+
+    @Test
+    void callerOwnedBudgetTightensTheLiveRequestTimeoutBelowTheConfiguredCap() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        EmbeddingServiceAsync liveEmbeddingService = mockAsyncEmbeddingService(liveClient);
+
+        CreateEmbeddingResponse response = CreateEmbeddingResponse.builder()
+                .model("qwen/qwen3-embedding-4b")
+                .usage(CreateEmbeddingResponse.Usage.builder()
+                        .promptTokens(1L)
+                        .totalTokens(1L)
+                        .build())
+                .data(List.of(com.openai.models.embeddings.Embedding.builder()
+                        .index(0L)
+                        .embedding(List.of(0.4f, 0.6f))
+                        .build()))
+                .build();
+        when(liveEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.completedFuture(response));
+
+        try (OpenAiCompatibleEmbeddingClient clientAdapter =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
+            ArgumentCaptor<RequestOptions> liveRequestOptionsCaptor = ArgumentCaptor.forClass(RequestOptions.class);
+            clientAdapter.embed(List.of("live query"), LlmGatewayTier.LIVE, CALLER_OWNED_LIVE_REQUEST_BUDGET);
+            verify(liveEmbeddingService).create(any(), liveRequestOptionsCaptor.capture());
+            assertRemainingTransportBudget(
+                    CALLER_OWNED_LIVE_REQUEST_BUDGET,
+                    liveRequestOptionsCaptor.getValue().getTimeout().connect());
+            assertRemainingTransportBudget(
+                    CALLER_OWNED_LIVE_REQUEST_BUDGET,
+                    liveRequestOptionsCaptor.getValue().getTimeout().request());
+            assertRemainingTransportBudget(
+                    CALLER_OWNED_LIVE_REQUEST_BUDGET,
+                    liveRequestOptionsCaptor.getValue().getTimeout().read());
         }
     }
 

@@ -257,12 +257,26 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     @Override
     public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier) {
         Objects.requireNonNull(requestTier, "requestTier");
+        return embed(texts, requestTier, requestTimeoutFor(requestTier));
+    }
+
+    /**
+     * Bounds the whole embedding operation by the tighter of the caller budget and the tier ceiling.
+     *
+     * <p>The caller's remaining stage budget can only tighten the configured tier timeout, never
+     * relax it, so a nearly exhausted retrieval stage fails this hop fast while an unhurried
+     * caller observes exactly the configured timeout.</p>
+     */
+    @Override
+    public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier, Duration requestTimeout) {
+        Objects.requireNonNull(requestTier, "requestTier");
+        Duration requiredRequestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout");
         if (texts == null || texts.isEmpty()) {
             return List.of();
         }
         activeForegroundEmbeddingCount.incrementAndGet();
         try {
-            return createEmbeddings(texts, requestTier);
+            return createEmbeddings(texts, requestTier, tighterRequestTimeout(requestTier, requiredRequestTimeout));
         } finally {
             activeForegroundEmbeddingCount.decrementAndGet();
         }
@@ -283,7 +297,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         if (activeForegroundEmbeddingCount.get() > 0) {
             throw new EmbeddingProbeDeferredException();
         }
-        createEmbeddings(List.of(EMBEDDING_WARM_UP_PROBE_TEXT), LlmGatewayTier.BATCH);
+        createEmbeddings(List.of(EMBEDDING_WARM_UP_PROBE_TEXT), LlmGatewayTier.BATCH, batchRequestTimeout);
     }
 
     @Override
@@ -291,14 +305,13 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         return modelName;
     }
 
-    private List<float[]> createEmbeddings(List<String> texts, LlmGatewayTier requestTier) {
+    private List<float[]> createEmbeddings(List<String> texts, LlmGatewayTier requestTier, Duration requestTimeout) {
         EmbeddingCreateParams embeddingRequest = EmbeddingCreateParams.builder()
                 .model(modelName)
                 .inputOfArrayOfStrings(texts)
                 .build();
         Semaphore requestPermits = requestPermitsFor(requestTier);
-        long requestDeadlineNanos =
-                System.nanoTime() + requestTimeoutFor(requestTier).toNanos();
+        long requestDeadlineNanos = System.nanoTime() + requestTimeout.toNanos();
         boolean requestPermitAcquired = false;
         try {
             if (!requestPermits.tryAcquire(remainingRequestNanos(requestDeadlineNanos), TimeUnit.NANOSECONDS)) {
@@ -713,6 +726,11 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
             case LIVE -> liveRequestTimeout;
             case BATCH -> batchRequestTimeout;
         };
+    }
+
+    private Duration tighterRequestTimeout(LlmGatewayTier requestTier, Duration requestTimeout) {
+        Duration configuredTierTimeout = requestTimeoutFor(requestTier);
+        return requestTimeout.compareTo(configuredTierTimeout) < 0 ? requestTimeout : configuredTierTimeout;
     }
 
     private static void validateDimensions(int dimensionsHint) {

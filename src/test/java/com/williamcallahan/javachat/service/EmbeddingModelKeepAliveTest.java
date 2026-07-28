@@ -157,6 +157,11 @@ class EmbeddingModelKeepAliveTest {
         }
 
         @Override
+        public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier, java.time.Duration requestTimeout) {
+            throw new AssertionError("keep-alive probes must not call embed(List, LlmGatewayTier, Duration)");
+        }
+
+        @Override
         public String modelName() {
             return "test-embedding-model";
         }
