@@ -122,7 +122,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
             this.providerCooldown = Objects.requireNonNull(providerCooldown, "providerCooldown");
         }
 
-        private synchronized CompletableFuture<CreateEmbeddingResponse> dispatch(
+        private CompletableFuture<CreateEmbeddingResponse> dispatch(
                 long requestDeadlineNanos,
                 Supplier<CompletableFuture<CreateEmbeddingResponse>> embeddingRequestDispatch)
                 throws InterruptedException {
