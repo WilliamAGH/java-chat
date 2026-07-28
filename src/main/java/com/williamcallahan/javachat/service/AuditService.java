@@ -9,7 +9,6 @@ import com.williamcallahan.javachat.config.QdrantCollectionNames;
 import com.williamcallahan.javachat.config.QdrantRestConnection;
 import com.williamcallahan.javachat.model.AuditReport;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -44,7 +43,6 @@ public class AuditService {
     private final QdrantRestConnection qdrantRestConnection;
     private final Function<String, String> safeNameResolver;
     private final Supplier<Path> parsedDirSupplier;
-    private final ContentHasher hasher;
     private final RestTemplate restTemplate;
     private final List<String> collectionNames;
 
@@ -52,14 +50,12 @@ public class AuditService {
      * Creates an audit service that compares locally parsed chunks against the vector store state.
      *
      * @param localStore local snapshot and chunk storage
-     * @param hasher content hashing helper
      * @param restTemplateBuilder Spring-managed builder for creating RestTemplate instances
      * @param qdrantRestConnection shared Qdrant REST connection details
      * @param appProperties application configuration for collection names
      */
     public AuditService(
             LocalStoreService localStore,
-            ContentHasher hasher,
             RestTemplateBuilder restTemplateBuilder,
             QdrantRestConnection qdrantRestConnection,
             AppProperties appProperties) {
@@ -70,7 +66,6 @@ public class AuditService {
                 requiredAppProperties.getQdrant().getCollections();
         this.safeNameResolver = requiredLocalStore::toSafeName;
         this.parsedDirSupplier = requiredLocalStore::getParsedDir;
-        this.hasher = Objects.requireNonNull(hasher, "hasher");
         this.restTemplate = restTemplateBuilder.build();
         this.collectionNames = List.of(
                 configuredCollections.getBooks(),
@@ -93,7 +88,7 @@ public class AuditService {
         return compareAndReport(url, expectedHashes, qdrantHashes);
     }
 
-    private Set<String> getExpectedHashes(String url) throws IOException {
+    Set<String> getExpectedHashes(String url) throws IOException {
         // 1) Enumerate parsed chunks for this URL
         String safeName = safeNameResolver.apply(url);
         if (safeName == null || safeName.isEmpty()) {
@@ -128,10 +123,13 @@ public class AuditService {
             if (!matcher.matches()) {
                 continue;
             }
-            int chunkIndex = Integer.parseInt(matcher.group(1));
-            String chunkText = Files.readString(parsedFile, StandardCharsets.UTF_8);
-            String fullHash = hasher.generateChunkHash(url, chunkIndex, chunkText);
-            expectedHashes.add(fullHash);
+            String persistedHash = matcher.group(2);
+            if (persistedHash.length() != SHA_256_HEX_LENGTH) {
+                throw new IllegalStateException(
+                        "Legacy parsed chunk identity cannot be audited; re-ingest the source to write full hashes: "
+                                + fileName);
+            }
+            expectedHashes.add(persistedHash);
         }
         return expectedHashes;
     }
