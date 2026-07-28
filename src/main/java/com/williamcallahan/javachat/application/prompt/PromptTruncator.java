@@ -50,7 +50,6 @@ public class PromptTruncator {
         List<ContextDocumentSegment> authoritativeContextDocuments = prompt.contextDocuments().stream()
                 .filter(contextDocument -> contextDocument.priority() == PromptSegmentPriority.HIGH)
                 .toList();
-        requireAuthoritativeContextFits(authoritativeContextDocuments, maxTokens, reservedTokens);
 
         if (reservedTokens >= maxTokens) {
             log.warn(
@@ -64,6 +63,7 @@ public class PromptTruncator {
             return new TruncatedPrompt(minimalPrompt, true);
         }
 
+        requireAuthoritativeContextFits(authoritativeContextDocuments, maxTokens, reservedTokens);
         int available = maxTokens - reservedTokens;
         boolean wasTruncated = false;
         int originalDocCount = prompt.contextDocuments().size();
