@@ -12,6 +12,11 @@ const NEWLINE = "\n";
 const ZERO_WIDTH_SPACE_CODE_POINT = 0x200b;
 const WORD_JOINER_CODE_POINT = 0x2060;
 
+/** Matches absolute web URLs; relative and fragment links stay in the current tab. */
+const EXTERNAL_LINK_PATTERN = /^https?:\/\//i;
+/** noopener prevents the opened page from reaching window.opener; noreferrer drops the referrer. */
+const EXTERNAL_LINK_REL = "noopener noreferrer";
+
 interface EnrichmentToken extends Tokens.Generic {
   type: "enrichment";
   raw: string;
@@ -673,6 +678,14 @@ function createMarkdownParser(isStreaming: boolean): Marked {
       html(token: Tokens.HTML | Tokens.Tag): string {
         return escapeHtml(token.text);
       },
+      link(token: Tokens.Link): string {
+        const linkText = this.parser.parseInline(token.tokens);
+        const titleAttribute = token.title ? ` title="${escapeHtml(token.title)}"` : "";
+        const externalLinkAttributes = EXTERNAL_LINK_PATTERN.test(token.href)
+          ? ` target="_blank" rel="${EXTERNAL_LINK_REL}"`
+          : "";
+        return `<a href="${escapeHtml(token.href)}"${titleAttribute}${externalLinkAttributes}>${linkText}</a>`;
+      },
     },
     extensions: [createEnrichmentExtension(isStreaming, markdownParser)],
   });
@@ -705,7 +718,7 @@ export function parseMarkdown(
 
     return DOMPurify.sanitize(rawHtml, {
       USE_PROFILES: { html: true },
-      ADD_ATTR: ["class", "data-enrichment-type"],
+      ADD_ATTR: ["class", "data-enrichment-type", "target"],
     });
   } catch (parseError) {
     console.error("[markdown] Failed to parse markdown content:", parseError);
