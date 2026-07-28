@@ -68,7 +68,7 @@ class GuidedLearningServiceCitationTest {
 
         Document officialSourceDocument = officialSourceDocument(guidedLesson);
         RetrievalService retrievalService = mock(RetrievalService.class);
-        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
+        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class), any()))
                 .thenReturn(List.of(officialSourceDocument));
         Citation officialCitation = new Citation(officialSourceUrl(guidedLesson), "Strings", "", "substring");
         when(retrievalService.toCitationsForRetainedContext(
@@ -120,7 +120,7 @@ class GuidedLearningServiceCitationTest {
         ArgumentCaptor<RetrievalConstraint> retrievalConstraintCaptor =
                 ArgumentCaptor.forClass(RetrievalConstraint.class);
         verify(retrievalService, org.mockito.Mockito.times(2))
-                .retrieve(anyString(), retrievalConstraintCaptor.capture());
+                .retrieve(anyString(), retrievalConstraintCaptor.capture(), any());
         for (RetrievalConstraint guidedConstraint : retrievalConstraintCaptor.getAllValues()) {
             assertEquals("official", guidedConstraint.sourceKind());
             assertEquals(guidedLesson.getDocSet(), guidedConstraint.docSet());
@@ -180,7 +180,7 @@ class GuidedLearningServiceCitationTest {
     void guidedLoopsPromptSuppliesTheCanonicalJava25CompactSourceLessonAsContext() throws IOException {
         GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
         RetrievalService retrievalService = mock(RetrievalService.class);
-        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
+        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class), any()))
                 .thenReturn(List.of());
         ChatService chatService = mock(ChatService.class);
         when(chatService.buildStructuredPromptWithContextAndGuidance(any(), anyString(), any(), anyString()))
@@ -212,7 +212,7 @@ class GuidedLearningServiceCitationTest {
     void guidedKotlinPromptFollowsCanonicalContentWithoutJavaCompactSyntaxGuidance() throws IOException {
         GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
         RetrievalService retrievalService = mock(RetrievalService.class);
-        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
+        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class), any()))
                 .thenReturn(List.of());
         ChatService chatService = mock(ChatService.class);
         when(chatService.buildStructuredPromptWithContextAndGuidance(any(), anyString(), any(), anyString()))
@@ -250,7 +250,7 @@ class GuidedLearningServiceCitationTest {
                 .text("Java 24 String documentation")
                 .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "24")
                 .build();
-        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
+        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class), any()))
                 .thenReturn(List.of(java21Document, java24Document));
         ChatService chatService = mock(ChatService.class);
         when(chatService.buildStructuredPromptWithContextAndGuidance(any(), anyString(), any(), anyString()))
@@ -266,7 +266,7 @@ class GuidedLearningServiceCitationTest {
         assertEquals(List.of(java21Document, java24Document), promptOutcome.lessonContextDocuments());
         ArgumentCaptor<RetrievalConstraint> retrievalConstraintCaptor =
                 ArgumentCaptor.forClass(RetrievalConstraint.class);
-        verify(retrievalService).retrieve(anyString(), retrievalConstraintCaptor.capture());
+        verify(retrievalService).retrieve(anyString(), retrievalConstraintCaptor.capture(), any());
         assertEquals(
                 List.of("java/java21-complete", "java/java24-complete"),
                 retrievalConstraintCaptor.getValue().docSet());
@@ -313,7 +313,7 @@ class GuidedLearningServiceCitationTest {
     void nonJavaLessonKeepsItsOwnScopeForAnOffTopicJavaVersionQuestion() {
         GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
         RetrievalService retrievalService = mock(RetrievalService.class);
-        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
+        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class), any()))
                 .thenReturn(List.of());
         ChatService chatService = mock(ChatService.class);
         when(chatService.buildStructuredPromptWithContextAndGuidance(any(), anyString(), any(), anyString()))
@@ -327,7 +327,7 @@ class GuidedLearningServiceCitationTest {
         ArgumentCaptor<String> retrievalQueryCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<RetrievalConstraint> retrievalConstraintCaptor =
                 ArgumentCaptor.forClass(RetrievalConstraint.class);
-        verify(retrievalService).retrieve(retrievalQueryCaptor.capture(), retrievalConstraintCaptor.capture());
+        verify(retrievalService).retrieve(retrievalQueryCaptor.capture(), retrievalConstraintCaptor.capture(), any());
         assertTrue(retrievalQueryCaptor.getValue().contains(offTopicQuestion));
         assertEquals(List.of("kotlin"), retrievalConstraintCaptor.getValue().docSet());
         assertTrue(retrievalConstraintCaptor.getValue().docVersions().isEmpty());
@@ -388,7 +388,7 @@ class GuidedLearningServiceCitationTest {
     void largestPackagedLessonRetainsAuthoritativeSectionsUnderGpt54InputBudget() throws IOException {
         GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
         RetrievalService retrievalService = mock(RetrievalService.class);
-        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
+        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class), any()))
                 .thenReturn(List.of());
         SystemPromptConfig promptConfig = systemPromptConfig();
         ChatService chatService = new ChatService(
