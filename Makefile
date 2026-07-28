@@ -21,7 +21,7 @@ build-with-lock: frontend-build-with-lock
 
 test: test-shell ## Run tests (loads .env if present)
 	@$(call load_env); \
-	  $(LOCKED_GRADLEW) test
+	  $(LOCKED_GRADLEW) --no-daemon cleanTest test
 
 test-shell: ## Run deterministic ingestion and fetch shell contract tests
 	bash scripts/test_documentation_fetch_projection.sh
