@@ -298,68 +298,6 @@ class ChatControllerStreamingFailureTest {
     }
 
     @Test
-    void admissionTimeoutUsesRetrievalTimeoutContractWithoutStartingProvider() throws JsonProcessingException {
-        ChatService chatService = mock(ChatService.class);
-        ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
-        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
-        RetrievalService retrievalService = mock(RetrievalService.class);
-        ChatController chatController = new ChatController(
-                chatService,
-                chatMemoryService,
-                streamingService,
-                retrievalService,
-                createSseSupport(),
-                new ExceptionResponseBuilder(),
-                new AppProperties());
-        TimeoutException admissionDeadline =
-                new TimeoutException("Qdrant search admission exhausted the shared 200ms query budget");
-        HybridSearchPartialFailureException admissionTimeout = new HybridSearchPartialFailureException(
-                "Qdrant search admission failed",
-                List.of(new HybridSearchPartialFailureException.CollectionSearchFailure(
-                        "java-chat-dev-docs",
-                        "AdmissionTimeout",
-                        admissionDeadline.getMessage(),
-                        HybridSearchPartialFailureException.FailureDisposition.TRANSIENT)),
-                List.of(admissionDeadline));
-        when(streamingService.canAttemptRequest()).thenReturn(true);
-        when(streamingService.isAvailable()).thenReturn(true);
-        when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
-                .thenThrow(admissionTimeout);
-
-        List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
-                chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
-                        .collectList()
-                        .block(),
-                "chat stream events");
-
-        assertEquals(2, streamEvents.size());
-        assertEquals(EVENT_STATUS, streamEvents.getFirst().event());
-        ServerSentEvent<String> terminalErrorEvent = streamEvents.getLast();
-        assertEquals(EVENT_ERROR, terminalErrorEvent.event());
-        SseSupport.SseEventPayload timeoutError = objectMapper.readValue(
-                Objects.requireNonNull(terminalErrorEvent.data(), "admission timeout error data"),
-                SseSupport.SseEventPayload.class);
-        assertEquals(STATUS_CODE_RETRIEVAL_TIMEOUT, timeoutError.code());
-        assertEquals(Boolean.TRUE, timeoutError.retryable());
-        assertEquals(STATUS_STAGE_RETRIEVAL, timeoutError.stage());
-        verify(streamingService, never()).streamResponse(any(StructuredPrompt.class), anyDouble());
-        ILoggingEvent retrievalTimeoutWarning = pipelineLogEvents.events().stream()
-                .filter(logEvent -> logEvent.getLevel() == Level.WARN
-                        && "Response preparation timeout".equals(logEvent.getFormattedMessage()))
-                .findFirst()
-                .orElseThrow();
-        assertLogField(
-                retrievalTimeoutWarning, "exceptionType", HybridSearchPartialFailureException.class.getSimpleName());
-        assertEquals(
-                1.0,
-                meterRegistry
-                        .get(SseSupport.RETRIEVAL_TIMEOUT_COUNTER_NAME)
-                        .counter()
-                        .count());
-    }
-
-    @Test
     void streamEmitsPreparationStatusBeforeDeferredRetrievalAndProviderWork() {
         ChatService chatService = mock(ChatService.class);
         ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
