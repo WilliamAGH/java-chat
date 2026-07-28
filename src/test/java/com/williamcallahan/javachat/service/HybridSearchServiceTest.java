@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -41,7 +42,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -81,10 +81,9 @@ class HybridSearchServiceTest {
     private static final Duration EXHAUSTED_DISPATCH_BLOCKING_DURATION = Duration.ofMillis(25);
     private static final Duration SHARED_QUERY_TIMEOUT = Duration.ofMillis(150);
     private static final Duration SHARED_DEADLINE_ASSERTION_LIMIT = Duration.ofMillis(450);
-    private static final Duration ADMITTED_QUERY_TIMEOUT = Duration.ofSeconds(2);
-    private static final Duration SATURATED_ADMISSION_TIMEOUT = Duration.ofMillis(200);
-    private static final Duration PARTIAL_ADMISSION_HOLD = Duration.ofMillis(250);
-    private static final Duration PARTIAL_ADMISSION_DISPATCH_LIMIT = Duration.ofMillis(1_900);
+    private static final Duration CONCURRENT_FAN_OUT_QUERY_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration STAGE_BUDGET_TEST_TIMEOUT = Duration.ofSeconds(60);
+    private static final Duration NEARLY_EXHAUSTED_STAGE_BUDGET = Duration.ofMillis(300);
     private static final int TEST_DENSE_PREFETCH_HNSW_EF = 37;
     private static final UUID SCORED_POINT_UUID = UUID.fromString("97c1f646-bd04-443e-a29f-e0283fe27e5b");
 
@@ -107,7 +106,8 @@ class HybridSearchServiceTest {
         appProperties.getQdrant().setDensePrefetchHnswEf(TEST_DENSE_PREFETCH_HNSW_EF);
         appProperties.getQdrant().setQueryTimeout(DISPATCH_BUDGET_TEST_TIMEOUT);
 
-        when(embeddingClient.embed(HYBRID_QUERY, LlmGatewayTier.LIVE)).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
+        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+                .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L, 3L), List.of(2.0f, 1.0f)));
 
@@ -125,7 +125,7 @@ class HybridSearchServiceTest {
         RetrievalConstraint retrievalConstraint =
                 RetrievalConstraint.forDocVersions(List.of(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
 
-        hybridSearchService.searchOutcome(HYBRID_QUERY, 5, retrievalConstraint);
+        hybridSearchService.searchOutcome(HYBRID_QUERY, 5, retrievalConstraint, stageDeadlineNanos());
 
         assertEquals(4, capturedQueries.size());
         assertTrue(capturedQueryTimeouts.stream()
@@ -151,7 +151,7 @@ class HybridSearchServiceTest {
 
     @Test
     void primaryHybridSearchDoesNotTreatProjectTypeSyntaxAsAnOfficialJavadocConstraint() {
-        when(embeddingClient.embed(EXACT_JAVA_API_QUERY, LlmGatewayTier.LIVE))
+        when(embeddingClient.embed(eq(EXACT_JAVA_API_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
                 .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(EXACT_JAVA_API_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
@@ -163,7 +163,7 @@ class HybridSearchServiceTest {
                 .when(qdrantClient)
                 .queryAsync(notNull(), notNull());
 
-        buildSearchService().searchOutcome(EXACT_JAVA_API_QUERY, 5, RetrievalConstraint.none());
+        buildSearchService().searchOutcome(EXACT_JAVA_API_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos());
 
         assertEquals(4, capturedQueries.size());
         for (QueryPoints capturedQuery : capturedQueries) {
@@ -176,7 +176,8 @@ class HybridSearchServiceTest {
 
     @Test
     void multipleVersionScopesShareOneEncodingAndRetainIndependentResultBudgets() {
-        when(embeddingClient.embed(HYBRID_QUERY, LlmGatewayTier.LIVE)).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
+        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+                .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
         List<QueryPoints> capturedQueries = new ArrayList<>();
@@ -198,7 +199,8 @@ class HybridSearchServiceTest {
                         5,
                         List.of(
                                 officialDocumentationConstraint.withDocVersions(List.of("21")),
-                                officialDocumentationConstraint.withDocVersions(List.of("24"))));
+                                officialDocumentationConstraint.withDocVersions(List.of("24"))),
+                        stageDeadlineNanos());
 
         assertEquals(2, versionOutcomes.size());
         assertEquals(1, versionOutcomes.get(0).documents().size());
@@ -214,35 +216,35 @@ class HybridSearchServiceTest {
                         appProperties.getQdrant().getCollections().getDocs(),
                         appProperties.getQdrant().getCollections().getPdfs())
                 .contains(queryRequest.getCollectionName())));
-        verify(embeddingClient, times(1)).embed(HYBRID_QUERY, LlmGatewayTier.LIVE);
+        verify(embeddingClient, times(1)).embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class));
         verify(sparseEncoder, times(1)).encode(HYBRID_QUERY);
         verify(gitHubCollectionDiscovery, never()).getDiscoveredCollections();
     }
 
     @Test
-    void admitsOneWholeSearchBeforeStartingTheNextQdrantFanOut()
+    void concurrentSearchesDispatchTheirQdrantFanOutsIndependently()
             throws InterruptedException, ExecutionException, TimeoutException {
-        appProperties.getQdrant().setQueryTimeout(ADMITTED_QUERY_TIMEOUT);
+        appProperties.getQdrant().setQueryTimeout(CONCURRENT_FAN_OUT_QUERY_TIMEOUT);
         int collectionCount = appProperties.getQdrant().getCollections().all().size();
         CountDownLatch firstSearchDispatches = new CountDownLatch(collectionCount);
-        CountDownLatch secondSearchEncoded = new CountDownLatch(1);
+        CountDownLatch secondSearchDispatches = new CountDownLatch(collectionCount);
         SettableFuture<List<ScoredPoint>> heldFirstSearchQuery = SettableFuture.create();
         AtomicInteger queryDispatchCount = new AtomicInteger();
-        when(embeddingClient.embed(HYBRID_QUERY, LlmGatewayTier.LIVE)).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
-        when(embeddingClient.embed(SECOND_HYBRID_QUERY, LlmGatewayTier.LIVE))
+        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+                .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
+        when(embeddingClient.embed(eq(SECOND_HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
                 .thenReturn(new float[] {0.3f, 0.2f, 0.1f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
-        when(sparseEncoder.encode(SECOND_HYBRID_QUERY)).thenAnswer(invocation -> {
-            secondSearchEncoded.countDown();
-            return new LexicalSparseVectorEncoder.SparseVector(List.of(2L), List.of(1.0f));
-        });
+        when(sparseEncoder.encode(SECOND_HYBRID_QUERY))
+                .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(2L), List.of(1.0f)));
         doAnswer(invocation -> {
                     int dispatchOrdinal = queryDispatchCount.incrementAndGet();
                     if (dispatchOrdinal <= collectionCount) {
                         firstSearchDispatches.countDown();
                         return heldFirstSearchQuery;
                     }
+                    secondSearchDispatches.countDown();
                     return Futures.immediateFuture(List.of(scoredPoint()));
                 })
                 .when(qdrantClient)
@@ -252,33 +254,29 @@ class HybridSearchServiceTest {
         try (ExecutorService searchExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
             try {
                 CompletableFuture<HybridSearchService.SearchOutcome> firstSearch = CompletableFuture.supplyAsync(
-                        () -> hybridSearchService.searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none()),
+                        () -> hybridSearchService.searchOutcome(
+                                HYBRID_QUERY,
+                                5,
+                                RetrievalConstraint.none(),
+                                System.nanoTime() + CONCURRENT_FAN_OUT_QUERY_TIMEOUT.toNanos()),
                         searchExecutor);
                 assertTrue(firstSearchDispatches.await(1, TimeUnit.SECONDS));
-                appProperties.getQdrant().setQueryTimeout(SATURATED_ADMISSION_TIMEOUT);
                 CompletableFuture<HybridSearchService.SearchOutcome> secondSearch = CompletableFuture.supplyAsync(
-                        () -> hybridSearchService.searchOutcome(SECOND_HYBRID_QUERY, 5, RetrievalConstraint.none()),
+                        () -> hybridSearchService.searchOutcome(
+                                SECOND_HYBRID_QUERY,
+                                5,
+                                RetrievalConstraint.none(),
+                                System.nanoTime() + CONCURRENT_FAN_OUT_QUERY_TIMEOUT.toNanos()),
                         searchExecutor);
-                assertTrue(secondSearchEncoded.await(1, TimeUnit.SECONDS));
+                assertTrue(secondSearchDispatches.await(1, TimeUnit.SECONDS));
+                assertFalse(firstSearch.isDone());
 
-                ExecutionException secondSearchFailure =
-                        assertThrows(ExecutionException.class, () -> secondSearch.get(1, TimeUnit.SECONDS));
-                HybridSearchPartialFailureException admissionFailure =
-                        assertInstanceOf(HybridSearchPartialFailureException.class, secondSearchFailure.getCause());
-                assertTrue(admissionFailure.isRetryable());
-                assertInstanceOf(TimeoutException.class, admissionFailure.getCause());
-                verify(qdrantClient, times(collectionCount)).queryAsync(notNull(), notNull());
+                assertEquals(
+                        1, secondSearch.get(1, TimeUnit.SECONDS).documents().size());
+                verify(qdrantClient, times(collectionCount * 2)).queryAsync(notNull(), notNull());
 
                 heldFirstSearchQuery.set(List.of(scoredPoint()));
                 assertEquals(1, firstSearch.get(1, TimeUnit.SECONDS).documents().size());
-                appProperties.getQdrant().setQueryTimeout(ADMITTED_QUERY_TIMEOUT);
-                assertEquals(
-                        1,
-                        hybridSearchService
-                                .searchOutcome(SECOND_HYBRID_QUERY, 5, RetrievalConstraint.none())
-                                .documents()
-                                .size());
-                verify(qdrantClient, times(collectionCount * 2)).queryAsync(notNull(), notNull());
             } finally {
                 heldFirstSearchQuery.set(List.of(scoredPoint()));
             }
@@ -286,64 +284,39 @@ class HybridSearchServiceTest {
     }
 
     @Test
-    void admittedSearchDispatchesOnlyTheRemainingDeadlineAfterPermitWait()
-            throws InterruptedException, ExecutionException, TimeoutException {
-        appProperties.getQdrant().setQueryTimeout(ADMITTED_QUERY_TIMEOUT);
-        int collectionCount = appProperties.getQdrant().getCollections().all().size();
-        CountDownLatch firstSearchDispatches = new CountDownLatch(collectionCount);
-        CountDownLatch secondSearchEncoded = new CountDownLatch(1);
-        SettableFuture<List<ScoredPoint>> heldFirstSearchQuery = SettableFuture.create();
-        AtomicInteger queryDispatchCount = new AtomicInteger();
-        List<Duration> secondSearchDispatchBudgets = new CopyOnWriteArrayList<>();
-        when(embeddingClient.embed(HYBRID_QUERY, LlmGatewayTier.LIVE)).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
-        when(embeddingClient.embed(SECOND_HYBRID_QUERY, LlmGatewayTier.LIVE))
-                .thenReturn(new float[] {0.3f, 0.2f, 0.1f});
+    void nearlyExhaustedStageDeadlineTightensEmbeddingAndQdrantBudgetsBelowTheirConfiguredCaps() {
+        appProperties.getQdrant().setQueryTimeout(CONCURRENT_FAN_OUT_QUERY_TIMEOUT);
+        List<Duration> capturedEmbeddingBudgets = new ArrayList<>();
+        doAnswer(invocation -> {
+                    capturedEmbeddingBudgets.add(invocation.getArgument(2));
+                    return new float[] {0.1f, 0.2f, 0.3f};
+                })
+                .when(embeddingClient)
+                .embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class));
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
-        when(sparseEncoder.encode(SECOND_HYBRID_QUERY)).thenAnswer(invocation -> {
-            secondSearchEncoded.countDown();
-            return new LexicalSparseVectorEncoder.SparseVector(List.of(2L), List.of(1.0f));
-        });
+        List<Duration> capturedQueryTimeouts = new ArrayList<>();
         doAnswer(invocation -> {
-                    int dispatchOrdinal = queryDispatchCount.incrementAndGet();
-                    if (dispatchOrdinal <= collectionCount) {
-                        firstSearchDispatches.countDown();
-                        return heldFirstSearchQuery;
-                    }
-                    secondSearchDispatchBudgets.add(invocation.getArgument(1));
+                    capturedQueryTimeouts.add(invocation.getArgument(1));
                     return Futures.immediateFuture(List.of(scoredPoint()));
                 })
                 .when(qdrantClient)
                 .queryAsync(notNull(), notNull());
-        HybridSearchService hybridSearchService = buildSearchService();
 
-        try (ExecutorService searchExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
-            try {
-                CompletableFuture<HybridSearchService.SearchOutcome> firstSearch = CompletableFuture.supplyAsync(
-                        () -> hybridSearchService.searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none()),
-                        searchExecutor);
-                assertTrue(firstSearchDispatches.await(1, TimeUnit.SECONDS));
-                CompletableFuture<HybridSearchService.SearchOutcome> secondSearch = CompletableFuture.supplyAsync(
-                        () -> hybridSearchService.searchOutcome(SECOND_HYBRID_QUERY, 5, RetrievalConstraint.none()),
-                        searchExecutor);
-                assertTrue(secondSearchEncoded.await(1, TimeUnit.SECONDS));
-                assertFalse(secondSearch.isDone());
+        long nearlyExhaustedStageDeadlineNanos = System.nanoTime() + NEARLY_EXHAUSTED_STAGE_BUDGET.toNanos();
+        HybridSearchService.SearchOutcome nearlyExhaustedStageOutcome = buildSearchService()
+                .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none(), nearlyExhaustedStageDeadlineNanos);
 
-                TimeUnit.MILLISECONDS.sleep(PARTIAL_ADMISSION_HOLD.toMillis());
-                heldFirstSearchQuery.set(List.of(scoredPoint()));
-
-                assertEquals(1, firstSearch.get(1, TimeUnit.SECONDS).documents().size());
-                assertEquals(
-                        1, secondSearch.get(1, TimeUnit.SECONDS).documents().size());
-                assertEquals(collectionCount, secondSearchDispatchBudgets.size());
-                assertTrue(secondSearchDispatchBudgets.stream()
-                        .allMatch(dispatchBudget -> !dispatchBudget.isZero()
-                                && !dispatchBudget.isNegative()
-                                && dispatchBudget.compareTo(PARTIAL_ADMISSION_DISPATCH_LIMIT) < 0));
-            } finally {
-                heldFirstSearchQuery.set(List.of(scoredPoint()));
-            }
-        }
+        assertEquals(1, nearlyExhaustedStageOutcome.documents().size());
+        assertEquals(1, capturedEmbeddingBudgets.size());
+        Duration capturedEmbeddingBudget = capturedEmbeddingBudgets.getFirst();
+        assertFalse(capturedEmbeddingBudget.isNegative());
+        assertTrue(capturedEmbeddingBudget.compareTo(NEARLY_EXHAUSTED_STAGE_BUDGET) <= 0);
+        assertFalse(capturedQueryTimeouts.isEmpty());
+        assertTrue(capturedQueryTimeouts.stream()
+                .allMatch(dispatchBudget -> !dispatchBudget.isZero()
+                        && !dispatchBudget.isNegative()
+                        && dispatchBudget.compareTo(NEARLY_EXHAUSTED_STAGE_BUDGET) <= 0));
     }
 
     @Test
@@ -370,7 +343,7 @@ class HybridSearchServiceTest {
 
         HybridSearchService.SearchOutcome citationSearchOutcome =
                 hybridSearchService.searchDocumentationCitationsOutcome(
-                        CITATION_QUERY, 3, officialDocumentationConstraint);
+                        CITATION_QUERY, 3, officialDocumentationConstraint, stageDeadlineNanos());
 
         assertEquals(2, capturedQueries.size());
         assertEquals(2, capturedQueryTimeouts.size());
@@ -429,7 +402,8 @@ class HybridSearchServiceTest {
                 hybridSearchService.searchDocumentationCitationsOutcome(
                         VERSIONED_SELECTOR_CITATION_QUERY,
                         3,
-                        RetrievalConstraint.forDocVersions(List.of(REPRESENTED_JAVA_API_SOURCE.javaRelease())));
+                        RetrievalConstraint.forDocVersions(List.of(REPRESENTED_JAVA_API_SOURCE.javaRelease())),
+                        stageDeadlineNanos());
 
         assertEquals(1, capturedScrolls.size());
         assertEquals(1, capturedScrollTimeouts.size());
@@ -467,7 +441,8 @@ class HybridSearchServiceTest {
                 .queryAsync(notNull(), notNull());
 
         HybridSearchService.SearchOutcome citationOutcome = buildSearchService()
-                .searchDocumentationCitationsOutcome(RUNTIME_VALUE_JAVA_API_QUERY, 3, RetrievalConstraint.none());
+                .searchDocumentationCitationsOutcome(
+                        RUNTIME_VALUE_JAVA_API_QUERY, 3, RetrievalConstraint.none(), stageDeadlineNanos());
 
         assertEquals(2, capturedQueries.size());
         assertTrue(capturedQueries.stream()
@@ -487,7 +462,8 @@ class HybridSearchServiceTest {
         HybridSearchPartialFailureException citationSearchFailure;
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(HYBRID_SEARCH_LOGGER)) {
             citationSearchFailure = assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
-                    .searchDocumentationCitationsOutcome(EXACT_JAVA_API_QUERY, 3, RetrievalConstraint.none()));
+                    .searchDocumentationCitationsOutcome(
+                            EXACT_JAVA_API_QUERY, 3, RetrievalConstraint.none(), stageDeadlineNanos()));
 
             assertEquals(1, expectedLogEvents.events().size());
             assertEquals(
@@ -507,7 +483,8 @@ class HybridSearchServiceTest {
         when(qdrantClient.scrollAsync(notNull(), notNull())).thenReturn(stalledScrollFuture);
 
         assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
-                .searchDocumentationCitationsOutcome(EXACT_JAVA_API_QUERY, 3, RetrievalConstraint.none()));
+                .searchDocumentationCitationsOutcome(
+                        EXACT_JAVA_API_QUERY, 3, RetrievalConstraint.none(), stageDeadlineNanos()));
 
         assertTrue(stalledScrollFuture.isCancelled());
     }
@@ -528,7 +505,7 @@ class HybridSearchServiceTest {
             citationSearchFailure = assertThrows(
                     HybridSearchPartialFailureException.class,
                     () -> hybridSearchService.searchDocumentationCitationsOutcome(
-                            CITATION_QUERY, 3, officialDocumentationConstraint));
+                            CITATION_QUERY, 3, officialDocumentationConstraint, stageDeadlineNanos()));
 
             assertEquals(2, expectedLogEvents.events().size());
             assertTrue(expectedLogEvents.events().stream()
@@ -549,7 +526,8 @@ class HybridSearchServiceTest {
     @Test
     void sharesOneDispatchDeadlineAcrossMultipleStalledHybridQueries() {
         appProperties.getQdrant().setQueryTimeout(SHARED_QUERY_TIMEOUT);
-        when(embeddingClient.embed(HYBRID_QUERY, LlmGatewayTier.LIVE)).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
+        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+                .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
         List<SettableFuture<List<ScoredPoint>>> stalledQdrantQueryFutures = new ArrayList<>();
@@ -568,7 +546,8 @@ class HybridSearchServiceTest {
                     SHARED_DEADLINE_ASSERTION_LIMIT,
                     () -> assertThrows(
                             HybridSearchPartialFailureException.class,
-                            () -> hybridSearchService.searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none())));
+                            () -> hybridSearchService.searchOutcome(
+                                    HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos())));
 
             assertEquals(4, expectedLogEvents.events().size());
             assertTrue(expectedLogEvents.events().stream()
@@ -585,7 +564,8 @@ class HybridSearchServiceTest {
     @Test
     void exhaustedDispatchBudgetFailsUndispatchedCollectionsImmediately() {
         appProperties.getQdrant().setQueryTimeout(EXHAUSTED_DISPATCH_QUERY_TIMEOUT);
-        when(embeddingClient.embed(HYBRID_QUERY, LlmGatewayTier.LIVE)).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
+        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+                .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
         AtomicInteger dispatchedQueryCount = new AtomicInteger();
@@ -599,7 +579,7 @@ class HybridSearchServiceTest {
 
         HybridSearchPartialFailureException searchFailure =
                 assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
-                        .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none()));
+                        .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()));
 
         assertEquals(1, dispatchedQueryCount.get());
         assertFalse(searchFailure.collectionFailures().isEmpty());
@@ -609,38 +589,9 @@ class HybridSearchServiceTest {
     }
 
     @Test
-    void interruptedAdmissionPreservesInterruptStatusWithoutDispatchingQueries() {
-        when(embeddingClient.embed(HYBRID_QUERY, LlmGatewayTier.LIVE)).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
-        when(sparseEncoder.encode(HYBRID_QUERY))
-                .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
-        HybridSearchService hybridSearchService = buildSearchService();
-        HybridSearchPartialFailureException interruptionFailure;
-        boolean interruptStatusPreserved;
-        Thread.currentThread().interrupt();
-        try {
-            interruptionFailure = assertThrows(
-                    HybridSearchPartialFailureException.class,
-                    () -> hybridSearchService.searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none()));
-        } finally {
-            interruptStatusPreserved = Thread.interrupted();
-        }
-
-        assertTrue(interruptStatusPreserved);
-        assertEquals("Qdrant search admission failed", interruptionFailure.getMessage());
-        assertEquals(
-                appProperties.getQdrant().getCollections().all(),
-                interruptionFailure.collectionFailures().stream()
-                        .map(HybridSearchPartialFailureException.CollectionSearchFailure::collectionName)
-                        .toList());
-        assertTrue(interruptionFailure.collectionFailures().stream()
-                .allMatch(collectionFailure ->
-                        "Qdrant search admission was interrupted".equals(collectionFailure.failureDetails())));
-        verify(qdrantClient, never()).queryAsync(notNull(), notNull());
-    }
-
-    @Test
     void interruptionAfterFanOutCancelsEveryPendingQuery() throws InterruptedException {
-        when(embeddingClient.embed(HYBRID_QUERY, LlmGatewayTier.LIVE)).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
+        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+                .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
         int collectionCount = appProperties.getQdrant().getCollections().all().size();
@@ -663,7 +614,8 @@ class HybridSearchServiceTest {
                     () -> {
                         searchThread.set(Thread.currentThread());
                         try {
-                            return hybridSearchService.searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none());
+                            return hybridSearchService.searchOutcome(
+                                    HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos());
                         } finally {
                             interruptStatusPreserved.set(Thread.currentThread().isInterrupted());
                         }
@@ -694,7 +646,8 @@ class HybridSearchServiceTest {
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(HYBRID_SEARCH_LOGGER)) {
             assertThrows(
                     HybridSearchPartialFailureException.class,
-                    () -> hybridSearchService.searchOutcome("collections health", 5, retrievalConstraint));
+                    () -> hybridSearchService.searchOutcome(
+                            "collections health", 5, retrievalConstraint, stageDeadlineNanos()));
             assertCollectionFailureWarning(expectedLogEvents);
         }
     }
@@ -709,14 +662,16 @@ class HybridSearchServiceTest {
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(HYBRID_SEARCH_LOGGER)) {
             assertThrows(
                     HybridSearchPartialFailureException.class,
-                    () -> hybridSearchService.searchOutcome("collections health", 5, retrievalConstraint));
+                    () -> hybridSearchService.searchOutcome(
+                            "collections health", 5, retrievalConstraint, stageDeadlineNanos()));
             assertCollectionFailureWarning(expectedLogEvents);
         }
     }
 
     @Test
     void unavailableGrpcFailureRemainsTypedAndRetryable() {
-        when(embeddingClient.embed(HYBRID_QUERY, LlmGatewayTier.LIVE)).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
+        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+                .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
         RuntimeException unavailableFailure = Status.UNAVAILABLE.asRuntimeException();
@@ -729,7 +684,7 @@ class HybridSearchServiceTest {
 
         HybridSearchPartialFailureException searchFailure =
                 assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
-                        .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none()));
+                        .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()));
 
         assertTrue(searchFailure.isRetryable());
         assertSame(unavailableFailure, searchFailure.getCause());
@@ -740,7 +695,8 @@ class HybridSearchServiceTest {
 
     @Test
     void permissionDeniedGrpcFailureRemainsTypedAndPermanent() {
-        when(embeddingClient.embed(HYBRID_QUERY, LlmGatewayTier.LIVE)).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
+        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+                .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
         RuntimeException permissionDeniedFailure = Status.PERMISSION_DENIED.asRuntimeException();
@@ -753,13 +709,17 @@ class HybridSearchServiceTest {
 
         HybridSearchPartialFailureException searchFailure =
                 assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
-                        .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none()));
+                        .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()));
 
         assertFalse(searchFailure.isRetryable());
         assertSame(permissionDeniedFailure, searchFailure.getCause());
         assertEquals(
                 HybridSearchPartialFailureException.FailureDisposition.PERMANENT,
                 searchFailure.collectionFailures().getFirst().failureDisposition());
+    }
+
+    private static long stageDeadlineNanos() {
+        return System.nanoTime() + STAGE_BUDGET_TEST_TIMEOUT.toNanos();
     }
 
     private HybridSearchService buildSearchService() {
@@ -778,7 +738,8 @@ class HybridSearchServiceTest {
     }
 
     private void stubPartialFailureQueryResponses(String queryText) {
-        when(embeddingClient.embed(queryText, LlmGatewayTier.LIVE)).thenReturn(new float[] {0.5f, 0.1f, 0.4f});
+        when(embeddingClient.embed(eq(queryText), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+                .thenReturn(new float[] {0.5f, 0.1f, 0.4f});
         when(sparseEncoder.encode(queryText))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(2L), List.of(1.0f)));
 

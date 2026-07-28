@@ -24,6 +24,8 @@ import reactor.core.publisher.Mono;
 /** Verifies reranker ordering and failure behavior. */
 class RerankerServiceTest {
     private static final Duration TEST_RERANKER_TIMEOUT = Duration.ofSeconds(45);
+    private static final Duration REMAINING_STAGE_BUDGET_TEST_TIMEOUT = Duration.ofSeconds(60);
+    private static final Duration NEARLY_EXHAUSTED_STAGE_BUDGET = Duration.ofSeconds(5);
     private static final double TEST_RERANKER_TEMPERATURE = 0.2;
     private static final int TEST_RERANKER_OUTPUT_TOKEN_BUDGET = 384;
 
@@ -44,7 +46,8 @@ class RerankerServiceTest {
         List<Document> sourceDocuments = List.of(new Document("first"), new Document("second"));
 
         RerankingFailureException rerankingFailure = assertThrows(
-                RerankingFailureException.class, () -> rerankerService.rerank("query", sourceDocuments, 2));
+                RerankingFailureException.class,
+                () -> rerankerService.rerank("query", sourceDocuments, 2, REMAINING_STAGE_BUDGET_TEST_TIMEOUT));
 
         assertEquals(admissionFailure, rerankingFailure.getCause());
     }
@@ -63,7 +66,8 @@ class RerankerServiceTest {
                 new RerankerService(streamingService, new ObjectMapper(), configuredRerankerProperties());
         List<Document> sourceDocuments = List.of(new Document("first"), new Document("second"));
 
-        List<Document> rankedDocuments = rerankerService.rerank("query", sourceDocuments, 2);
+        List<Document> rankedDocuments =
+                rerankerService.rerank("query", sourceDocuments, 2, REMAINING_STAGE_BUDGET_TEST_TIMEOUT);
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Integer> outputBudgetCaptor = ArgumentCaptor.forClass(Integer.class);
@@ -95,7 +99,8 @@ class RerankerServiceTest {
                 new RerankerService(streamingService, new ObjectMapper(), configuredRerankerProperties());
         List<Document> sourceDocuments = List.of(new Document("first"), new Document("second"), new Document("third"));
 
-        List<Document> selectedDocuments = rerankerService.rerank("query", sourceDocuments, 5);
+        List<Document> selectedDocuments =
+                rerankerService.rerank("query", sourceDocuments, 5, REMAINING_STAGE_BUDGET_TEST_TIMEOUT);
 
         assertEquals(List.of(sourceDocuments.get(2), sourceDocuments.get(0)), selectedDocuments);
     }
@@ -114,7 +119,8 @@ class RerankerServiceTest {
                 new RerankerService(streamingService, new ObjectMapper(), configuredRerankerProperties());
         List<Document> sourceDocuments = List.of(new Document("first"), new Document("second"));
 
-        List<Document> selectedDocuments = rerankerService.rerank("query", sourceDocuments, 5);
+        List<Document> selectedDocuments =
+                rerankerService.rerank("query", sourceDocuments, 5, REMAINING_STAGE_BUDGET_TEST_TIMEOUT);
 
         assertTrue(selectedDocuments.isEmpty());
     }
@@ -146,7 +152,9 @@ class RerankerServiceTest {
                             eq(TEST_RERANKER_TIMEOUT)))
                     .thenReturn(Mono.just(invalidOrderingJson));
 
-            assertThrows(RerankingFailureException.class, () -> rerankerService.rerank("query", sourceDocuments, 4));
+            assertThrows(
+                    RerankingFailureException.class,
+                    () -> rerankerService.rerank("query", sourceDocuments, 4, REMAINING_STAGE_BUDGET_TEST_TIMEOUT));
         }
     }
 
@@ -164,10 +172,37 @@ class RerankerServiceTest {
         List<Document> sourceDocuments = List.of(new Document("first"), new Document("second"));
 
         RerankingFailureException rerankingFailure = assertThrows(
-                RerankingFailureException.class, () -> rerankerService.rerank("query", sourceDocuments, 2));
+                RerankingFailureException.class,
+                () -> rerankerService.rerank("query", sourceDocuments, 2, REMAINING_STAGE_BUDGET_TEST_TIMEOUT));
 
         assertEquals("Reranking response was empty", rerankingFailure.getMessage());
         verify(streamingService, never()).complete(anyString(), eq(TEST_RERANKER_TEMPERATURE));
+    }
+
+    @Test
+    void rerankTightensItsTimeoutToTheRemainingStageBudget() {
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        when(streamingService.completeJsonObject(
+                        anyString(),
+                        eq(TEST_RERANKER_TEMPERATURE),
+                        eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
+                        eq(NEARLY_EXHAUSTED_STAGE_BUDGET)))
+                .thenReturn(Mono.just("{\"order\":[1,0]}"));
+
+        RerankerService rerankerService =
+                new RerankerService(streamingService, new ObjectMapper(), configuredRerankerProperties());
+        List<Document> sourceDocuments = List.of(new Document("first"), new Document("second"));
+
+        List<Document> rankedDocuments =
+                rerankerService.rerank("query", sourceDocuments, 2, NEARLY_EXHAUSTED_STAGE_BUDGET);
+
+        verify(streamingService)
+                .completeJsonObject(
+                        anyString(),
+                        eq(TEST_RERANKER_TEMPERATURE),
+                        eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
+                        eq(NEARLY_EXHAUSTED_STAGE_BUDGET));
+        assertEquals(List.of(sourceDocuments.get(1), sourceDocuments.get(0)), rankedDocuments);
     }
 
     @Test

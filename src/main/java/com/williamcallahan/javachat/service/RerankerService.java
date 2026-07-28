@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -78,6 +79,17 @@ public class RerankerService {
      * <p>Returns only the documents the reranker judged relevant, most relevant first, capped at
      * {@code returnK}; the result is empty when no candidate is relevant. The cache key includes
      * document identities to prevent returning results for wrong document sets.</p>
+     *
+     * <p>The rerank LLM call runs inside the caller's retrieval stage deadline: its effective
+     * timeout is the tighter of {@code remainingStageBudget} and the configured reranker timeout,
+     * so this hop can never outlive the stage while the configured timeout stays the ceiling for
+     * unhurried stages.</p>
+     *
+     * @param query retrieval query
+     * @param documents candidate documents to order
+     * @param returnK maximum number of documents to return
+     * @param remainingStageBudget time remaining in the caller's retrieval stage deadline
+     * @return relevant documents ordered most relevant first
      */
     @Cacheable(
             value = "reranker-cache",
@@ -85,13 +97,32 @@ public class RerankerService {
             key =
                     "#query + ':' + T(com.williamcallahan.javachat.service.RerankerService).computeDocsHash(#documents) + ':' + #returnK")
     public List<Document> rerank(String query, List<Document> documents, int returnK) {
+        return rerank(query, documents, returnK, rerankerTimeout);
+    }
+
+    /**
+     * Reranks candidates within the caller's remaining retrieval-stage budget.
+     *
+     * @param query retrieval query
+     * @param documents candidate documents to order
+     * @param returnK maximum number of documents to return
+     * @param remainingStageBudget time remaining in the caller's retrieval stage deadline
+     * @return relevant documents ordered most relevant first
+     */
+    @Cacheable(
+            value = "reranker-cache",
+            sync = true,
+            key =
+                    "#query + ':' + T(com.williamcallahan.javachat.service.RerankerService).computeDocsHash(#documents) + ':' + #returnK")
+    public List<Document> rerank(String query, List<Document> documents, int returnK, Duration remainingStageBudget) {
         if (documents.size() <= 1) {
             return documents;
         }
 
         log.debug("Reranking {} documents", documents.size());
 
-        Optional<String> llmOutputOptional = callLlmForReranking(query, documents);
+        Duration rerankRequestTimeout = tighterRerankTimeout(remainingStageBudget);
+        Optional<String> llmOutputOptional = callLlmForReranking(query, documents, rerankRequestTimeout);
         if (llmOutputOptional.isEmpty() || llmOutputOptional.get().isBlank()) {
             throw new RerankingFailureException("Reranking response was empty");
         }
@@ -107,23 +138,35 @@ public class RerankerService {
         return limitDocuments(reordered, returnK);
     }
 
+    private Duration tighterRerankTimeout(Duration remainingStageBudget) {
+        Duration requiredRemainingStageBudget = Objects.requireNonNull(remainingStageBudget, "remainingStageBudget");
+        if (requiredRemainingStageBudget.isZero() || requiredRemainingStageBudget.isNegative()) {
+            String failureMessage = "Retrieval stage deadline elapsed before reranking";
+            throw new RerankingFailureException(failureMessage, new TimeoutException(failureMessage));
+        }
+        return requiredRemainingStageBudget.compareTo(rerankerTimeout) < 0
+                ? requiredRemainingStageBudget
+                : rerankerTimeout;
+    }
+
     /**
      * Calls LLM service to get reranking order.
      *
      * @return reranking response when the configured provider completes within its timeout
      */
-    private Optional<String> callLlmForReranking(String query, List<Document> documents) {
+    private Optional<String> callLlmForReranking(
+            String query, List<Document> documents, Duration rerankRequestTimeout) {
         String prompt = buildRerankPrompt(query, documents);
 
         try {
             return openAIStreamingService
-                    .completeJsonObject(prompt, rerankerTemperature, rerankerOutputTokenBudget, rerankerTimeout)
+                    .completeJsonObject(prompt, rerankerTemperature, rerankerOutputTokenBudget, rerankRequestTimeout)
                     .doOnError(
                             timeoutOrApiError -> log.debug("Reranker LLM call timed out or failed", timeoutOrApiError))
                     .blockOptional();
         } catch (RuntimeException rerankFailure) {
             throw new RerankingFailureException(
-                    "Reranking request failed within timeout " + rerankerTimeout, rerankFailure);
+                    "Reranking request failed within timeout " + rerankRequestTimeout, rerankFailure);
         }
     }
 

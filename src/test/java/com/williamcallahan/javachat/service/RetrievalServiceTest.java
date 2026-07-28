@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
@@ -16,8 +17,12 @@ import static org.mockito.Mockito.when;
 
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import com.williamcallahan.javachat.config.RetrievalAugmentationConfig;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
 
@@ -30,6 +35,7 @@ class RetrievalServiceTest {
             DocsSourceRegistry.javaApiDocumentationSources().getFirst();
     private static final List<String> OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES =
             DocsSourceRegistry.officialDocumentationSourceIdentities();
+    private static final Duration STAGE_DEADLINE_ASSERTION_TOLERANCE = Duration.ofSeconds(1);
 
     @Test
     void constrainedRetrievalPassesTheCallerConstraintInstanceToHybridSearch() {
@@ -39,13 +45,14 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint guidedConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(guidedConstraint)))
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(guidedConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(List.of(), List.of()));
-        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenReturn(List.of());
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), any(Duration.class)))
+                .thenReturn(List.of());
 
         retrievalService.retrieveOutcome("Java strings", guidedConstraint);
 
-        verify(hybridSearchService).searchOutcome(anyString(), anyInt(), same(guidedConstraint));
+        verify(hybridSearchService).searchOutcome(anyString(), anyInt(), same(guidedConstraint), anyLong());
     }
 
     @Test
@@ -56,9 +63,10 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint guidedConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(guidedConstraint)))
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(guidedConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(List.of(), List.of()));
-        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenReturn(List.of());
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), any(Duration.class)))
+                .thenReturn(List.of());
 
         List<String> progressSummaries = new ArrayList<>();
         retrievalService.retrieveOutcome(
@@ -75,16 +83,18 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint kotlinConstraint = RetrievalConstraint.forOfficialDocSets(List.of("kotlin"));
         Document kotlinDocument = versionedDocument("kotlin-interop", "", "kotlin-hash");
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(kotlinConstraint)))
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(kotlinConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(List.of(kotlinDocument), List.of()));
-        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenReturn(List.of(kotlinDocument));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), any(Duration.class)))
+                .thenReturn(List.of(kotlinDocument));
 
         RetrievalService.RetrievalOutcome retrievalOutcome =
                 retrievalService.retrieveOutcome("How does Kotlin interoperate with Java 21?", kotlinConstraint);
 
         assertEquals(List.of(kotlinDocument), retrievalOutcome.documents());
         verify(hybridSearchService)
-                .searchOutcome(eq("How does Kotlin interoperate with Java 21?"), anyInt(), same(kotlinConstraint));
+                .searchOutcome(
+                        eq("How does Kotlin interoperate with Java 21?"), anyInt(), same(kotlinConstraint), anyLong());
     }
 
     @Test
@@ -100,13 +110,16 @@ class RetrievalServiceTest {
         String versionedQuery = "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " List.of";
         Document versionedDocument =
                 versionedDocument("represented-version", REPRESENTED_JAVA_API_SOURCE.javaRelease(), "represented-hash");
-        when(hybridSearchService.searchOutcomes(anyString(), anyInt(), eq(List.of(expectedCombinedConstraint))))
+        when(hybridSearchService.searchOutcomes(
+                        anyString(), anyInt(), eq(List.of(expectedCombinedConstraint)), anyLong()))
                 .thenReturn(List.of(new HybridSearchService.SearchOutcome(List.of(versionedDocument), List.of())));
-        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenReturn(List.of(versionedDocument));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), any(Duration.class)))
+                .thenReturn(List.of(versionedDocument));
 
         retrievalService.retrieveOutcome(versionedQuery, officialDocumentationConstraint);
 
-        verify(hybridSearchService).searchOutcomes(anyString(), anyInt(), eq(List.of(expectedCombinedConstraint)));
+        verify(hybridSearchService)
+                .searchOutcomes(anyString(), anyInt(), eq(List.of(expectedCombinedConstraint)), anyLong());
         assertEquals(List.of(REPRESENTED_JAVA_API_SOURCE.javaRelease()), expectedCombinedConstraint.docVersions());
         assertEquals("official", expectedCombinedConstraint.sourceKind());
         assertEquals(officialDocumentationConstraint.docSet(), expectedCombinedConstraint.docSet());
@@ -133,7 +146,8 @@ class RetrievalServiceTest {
                 citationCandidateDocument(
                         "third-string-chunk", "Third String chunk", "third-hash", repeatedCitationUrl),
                 citationCandidateDocument("list-chunk", "List chunk", "list-hash", uniqueCitationUrl));
-        when(hybridSearchService.searchDocumentationCitationsOutcome(anyString(), eq(4), same(guidedConstraint)))
+        when(hybridSearchService.searchDocumentationCitationsOutcome(
+                        anyString(), eq(4), same(guidedConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(citationCandidates, List.of()));
 
         RetrievalService.CitationOutcome citationOutcome =
@@ -150,9 +164,11 @@ class RetrievalServiceTest {
                         .map(citation -> citation.getAnchor())
                         .toList());
         assertEquals(0, citationOutcome.failedConversionCount());
-        verify(hybridSearchService).searchDocumentationCitationsOutcome(anyString(), eq(4), same(guidedConstraint));
-        verify(hybridSearchService, never()).searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class));
-        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt());
+        verify(hybridSearchService)
+                .searchDocumentationCitationsOutcome(anyString(), eq(4), same(guidedConstraint), anyLong());
+        verify(hybridSearchService, never())
+                .searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), any(Duration.class));
     }
 
     @Test
@@ -175,7 +191,7 @@ class RetrievalServiceTest {
                 apiDocumentationCitationCandidate(
                         "list", "static <E> List<E> of(E element)", "java.util", "List.html"));
         when(hybridSearchService.searchDocumentationCitationsOutcome(
-                        eq(citationQuery), eq(4), same(officialDocumentationConstraint)))
+                        eq(citationQuery), eq(4), same(officialDocumentationConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(qdrantCandidates, List.of()));
 
         RetrievalService.CitationOutcome citationOutcome =
@@ -185,7 +201,7 @@ class RetrievalServiceTest {
         assertEquals(listPageUrl, citationOutcome.citations().getFirst().getUrl());
         assertTrue(citationOutcome.citations().stream().anyMatch(citation -> listPageUrl.equals(citation.getUrl())));
         assertEquals(0, citationOutcome.failedConversionCount());
-        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt());
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), any(Duration.class));
     }
 
     @Test
@@ -202,15 +218,15 @@ class RetrievalServiceTest {
         Document versionedCitation = versionedCitationDocument(
                 "represented-version-citation", REPRESENTED_JAVA_API_SOURCE.javaRelease(), "represented-hash");
         when(hybridSearchService.searchDocumentationCitationsOutcomes(
-                        eq(citationQuery), anyInt(), eq(List.of(expectedCombinedConstraint))))
+                        eq(citationQuery), anyInt(), eq(List.of(expectedCombinedConstraint)), anyLong()))
                 .thenReturn(List.of(new HybridSearchService.SearchOutcome(List.of(versionedCitation), List.of())));
 
         retrievalService.discoverCitations(citationQuery, officialDocumentationConstraint);
 
         verify(hybridSearchService)
                 .searchDocumentationCitationsOutcomes(
-                        eq(citationQuery), anyInt(), eq(List.of(expectedCombinedConstraint)));
-        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt());
+                        eq(citationQuery), anyInt(), eq(List.of(expectedCombinedConstraint)), anyLong());
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), any(Duration.class));
     }
 
     @Test
@@ -228,11 +244,12 @@ class RetrievalServiceTest {
         Document java21Document = versionedDocument("java-21", "21", "shared-content-hash");
         Document secondJava21Document = versionedDocument("java-21-secondary", "21", "secondary-hash");
         Document java24Document = versionedDocument("java-24", "24", "shared-content-hash");
-        when(hybridSearchService.searchOutcomes(anyString(), eq(10), eq(List.of(java21Constraint, java24Constraint))))
+        when(hybridSearchService.searchOutcomes(
+                        anyString(), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong()))
                 .thenReturn(List.of(
                         new HybridSearchService.SearchOutcome(List.of(java21Document, secondJava21Document), List.of()),
                         new HybridSearchService.SearchOutcome(List.of(java24Document), List.of())));
-        when(rerankerService.rerank(anyString(), anyList(), eq(2)))
+        when(rerankerService.rerank(anyString(), anyList(), eq(2), any(Duration.class)))
                 .thenReturn(List.of(java21Document, secondJava21Document));
 
         RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveOutcome(
@@ -244,7 +261,7 @@ class RetrievalServiceTest {
                         .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD))
                         .toList());
         verify(hybridSearchService)
-                .searchOutcomes(anyString(), eq(10), eq(List.of(java21Constraint, java24Constraint)));
+                .searchOutcomes(anyString(), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong());
     }
 
     @Test
@@ -264,7 +281,7 @@ class RetrievalServiceTest {
         Document java21ExactOverload = exactListOfOverloadDocument("java-21-exact", "21", "exact-hash-21");
         Document java24ExactOverload = exactListOfOverloadDocument("java-24-exact", "24", "exact-hash-24");
         when(hybridSearchService.searchDocumentationCitationsOutcomes(
-                        eq(exactComparisonQuery), eq(10), eq(List.of(java21Constraint, java24Constraint))))
+                        eq(exactComparisonQuery), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong()))
                 .thenReturn(List.of(
                         new HybridSearchService.SearchOutcome(List.of(java21ExactOverload), List.of()),
                         new HybridSearchService.SearchOutcome(List.of(java24ExactOverload), List.of())));
@@ -294,9 +311,10 @@ class RetrievalServiceTest {
                         .toList());
         verify(hybridSearchService)
                 .searchDocumentationCitationsOutcomes(
-                        eq(exactComparisonQuery), eq(10), eq(List.of(java21Constraint, java24Constraint)));
-        verify(hybridSearchService, never()).searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class));
-        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt());
+                        eq(exactComparisonQuery), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong());
+        verify(hybridSearchService, never())
+                .searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), any(Duration.class));
     }
 
     @Test
@@ -308,16 +326,17 @@ class RetrievalServiceTest {
         RetrievalConstraint kotlinConstraint = RetrievalConstraint.forOfficialDocSets(List.of("kotlin"));
         String kotlinQuery = "How can Kotlin call java.util.List.of(E, E)?";
         Document kotlinDocument = versionedDocument("kotlin-list-call", "", "kotlin-list-hash");
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(kotlinConstraint)))
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(kotlinConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(List.of(kotlinDocument), List.of()));
-        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenReturn(List.of(kotlinDocument));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), any(Duration.class)))
+                .thenReturn(List.of(kotlinDocument));
 
         RetrievalService.RetrievalOutcome retrievalOutcome =
                 retrievalService.retrieveOutcome(kotlinQuery, kotlinConstraint);
 
         assertEquals(List.of(kotlinDocument), retrievalOutcome.documents());
         verify(hybridSearchService, never())
-                .searchDocumentationCitationsOutcome(anyString(), anyInt(), any(RetrievalConstraint.class));
+                .searchDocumentationCitationsOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
     }
 
     @Test
@@ -332,7 +351,7 @@ class RetrievalServiceTest {
         String chainedInvocationQuery = "Using Java 21, explain Thread.ofVirtual().start(Runnable).";
         Document virtualThreadDocument = exactThreadBuilderStartDocument();
         when(hybridSearchService.searchDocumentationCitationsOutcomes(
-                        eq(chainedInvocationQuery), anyInt(), eq(List.of(java21Constraint))))
+                        eq(chainedInvocationQuery), anyInt(), eq(List.of(java21Constraint)), anyLong()))
                 .thenReturn(List.of(new HybridSearchService.SearchOutcome(List.of(virtualThreadDocument), List.of())));
 
         RetrievalService.RetrievalOutcome retrievalOutcome =
@@ -344,8 +363,9 @@ class RetrievalServiceTest {
         assertEquals(
                 "start(java.lang.Runnable)",
                 citationOutcome.citations().getFirst().getAnchor());
-        verify(hybridSearchService, never()).searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class));
-        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt());
+        verify(hybridSearchService, never())
+                .searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), any(Duration.class));
     }
 
     @Test
@@ -357,16 +377,17 @@ class RetrievalServiceTest {
         String projectQuery = "Explain Widget.of(E, E)";
         RetrievalConstraint unconstrained = RetrievalConstraint.none();
         Document projectDocument = versionedDocument("project-widget", "", "project-widget-hash");
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(unconstrained)))
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(unconstrained), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(List.of(projectDocument), List.of()));
-        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenReturn(List.of(projectDocument));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), any(Duration.class)))
+                .thenReturn(List.of(projectDocument));
 
         RetrievalService.RetrievalOutcome retrievalOutcome =
                 retrievalService.retrieveOutcome(projectQuery, unconstrained);
 
         assertEquals(List.of(projectDocument), retrievalOutcome.documents());
         verify(hybridSearchService, never())
-                .searchDocumentationCitationsOutcome(anyString(), anyInt(), any(RetrievalConstraint.class));
+                .searchDocumentationCitationsOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
     }
 
     @Test
@@ -385,15 +406,16 @@ class RetrievalServiceTest {
                 exactListOfOverloadDocument("java-24-exact", "24", "exact-hash-24"),
                 exactListOfOverloadDocument("java-25-exact", "25", "exact-hash-25"));
         when(hybridSearchService.searchDocumentationCitationsOutcome(
-                        eq(exactQuery), anyInt(), same(officialDocumentationConstraint)))
+                        eq(exactQuery), anyInt(), same(officialDocumentationConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(exactOverloadDocuments, List.of()));
 
         RetrievalService.RetrievalOutcome retrievalOutcome =
                 retrievalService.retrieveOutcome(exactQuery, officialDocumentationConstraint);
 
         assertEquals(exactOverloadDocuments.subList(0, 2), retrievalOutcome.documents());
-        verify(hybridSearchService, never()).searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class));
-        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt());
+        verify(hybridSearchService, never())
+                .searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), any(Duration.class));
     }
 
     @Test
@@ -408,7 +430,7 @@ class RetrievalServiceTest {
         RetrievalConstraint java24Constraint = officialDocumentationConstraint.withDocVersions(List.of("24"));
         String exactComparisonQuery = "Compare Java 21 and Java 24 for java.util.List.of(E, E).";
         when(hybridSearchService.searchDocumentationCitationsOutcomes(
-                        eq(exactComparisonQuery), eq(10), eq(List.of(java21Constraint, java24Constraint))))
+                        eq(exactComparisonQuery), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong()))
                 .thenReturn(List.of(
                         new HybridSearchService.SearchOutcome(
                                 List.of(exactListOfOverloadDocument("java-21-exact", "21", "exact-hash-21")),
@@ -418,8 +440,9 @@ class RetrievalServiceTest {
         assertThrows(
                 IllegalStateException.class,
                 () -> retrievalService.retrieveOutcome(exactComparisonQuery, officialDocumentationConstraint));
-        verify(hybridSearchService, never()).searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class));
-        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt());
+        verify(hybridSearchService, never())
+                .searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), any(Duration.class));
     }
 
     @Test
@@ -441,13 +464,15 @@ class RetrievalServiceTest {
                 versionedDocument("java-21-d", "21", "hash-21-d"),
                 versionedDocument("java-21-e", "21", "hash-21-e"));
         Document java24Document = versionedDocument("java-24", "24", "hash-24");
-        when(hybridSearchService.searchOutcomes(anyString(), eq(10), eq(List.of(java21Constraint, java24Constraint))))
+        when(hybridSearchService.searchOutcomes(
+                        anyString(), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong()))
                 .thenReturn(List.of(
                         new HybridSearchService.SearchOutcome(java21Documents, List.of()),
                         new HybridSearchService.SearchOutcome(List.of(java24Document), List.of())));
         List<Document> rerankedDocuments = new java.util.ArrayList<>(java21Documents);
         rerankedDocuments.add(java24Document);
-        when(rerankerService.rerank(anyString(), anyList(), eq(6))).thenReturn(rerankedDocuments);
+        when(rerankerService.rerank(anyString(), anyList(), eq(6), any(Duration.class)))
+                .thenReturn(rerankedDocuments);
 
         RetrievalService.RetrievalOutcome limitedOutcome = retrievalService.retrieveWithLimitOutcome(
                 "Compare Java 21 and Java 24 List.of", 3, 1_000, officialDocumentationConstraint);
@@ -477,9 +502,10 @@ class RetrievalServiceTest {
                 versionedDocument("document-d", "", "hash-d"),
                 versionedDocument("document-e", "", "hash-e"),
                 versionedDocument("document-f", "", "hash-f"));
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(officialDocumentationConstraint)))
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(officialDocumentationConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(retrievedDocuments, List.of()));
-        when(rerankerService.rerank(anyString(), anyList(), eq(6))).thenReturn(retrievedDocuments);
+        when(rerankerService.rerank(anyString(), anyList(), eq(6), any(Duration.class)))
+                .thenReturn(retrievedDocuments);
 
         RetrievalService.RetrievalOutcome limitedOutcome = retrievalService.retrieveWithLimitOutcome(
                 "Explain Java strings", 3, 1_000, officialDocumentationConstraint);
@@ -504,8 +530,8 @@ class RetrievalServiceTest {
         assertTrue(citationOutcome.citations().isEmpty());
         assertEquals(0, citationOutcome.failedConversionCount());
         verify(hybridSearchService, never())
-                .searchDocumentationCitationsOutcome(anyString(), anyInt(), any(RetrievalConstraint.class));
-        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt());
+                .searchDocumentationCitationsOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), any(Duration.class));
     }
 
     @Test
@@ -519,14 +545,15 @@ class RetrievalServiceTest {
         HybridSearchPartialFailureException.CollectionSearchFailure collectionFailure =
                 new HybridSearchPartialFailureException.CollectionSearchFailure(
                         "java-docs", "Timeout", "5s", HybridSearchPartialFailureException.FailureDisposition.TRANSIENT);
-        when(hybridSearchService.searchDocumentationCitationsOutcome(anyString(), anyInt(), same(guidedConstraint)))
+        when(hybridSearchService.searchDocumentationCitationsOutcome(
+                        anyString(), anyInt(), same(guidedConstraint), anyLong()))
                 .thenThrow(new HybridSearchPartialFailureException("collection failure", List.of(collectionFailure)));
 
         assertThrows(
                 HybridSearchPartialFailureException.class,
                 () -> retrievalService.discoverCitations("Java strings", guidedConstraint));
 
-        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt());
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), any(Duration.class));
     }
 
     private static Document citationCandidateDocument(
@@ -640,9 +667,10 @@ class RetrievalServiceTest {
 
         HybridSearchService.HybridSearchNotice searchNotice =
                 new HybridSearchService.HybridSearchNotice("Partial retrieval failure", "Timeout: java-docs");
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class)))
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(List.of(candidateDocument), List.of(searchNotice)));
-        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenReturn(List.of(candidateDocument));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), any(Duration.class)))
+                .thenReturn(List.of(candidateDocument));
 
         RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveOutcome("Java stream basics");
 
@@ -698,12 +726,13 @@ class RetrievalServiceTest {
                 firstJavadocChunk,
                 secondJavadocChunkWithDistinctHash,
                 sameContentHashWithDifferentUrl);
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class)))
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(retrievalCandidates, List.of()));
-        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenAnswer(rerankerInvocation -> {
-            List<Document> deduplicatedCandidates = rerankerInvocation.getArgument(1);
-            return deduplicatedCandidates;
-        });
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), any(Duration.class)))
+                .thenAnswer(rerankerInvocation -> {
+                    List<Document> deduplicatedCandidates = rerankerInvocation.getArgument(1);
+                    return deduplicatedCandidates;
+                });
 
         RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveOutcome("Java string basics");
         RetrievalService.CitationOutcome citationOutcome = retrievalService.toCitations(retrievalOutcome.documents());
@@ -741,12 +770,13 @@ class RetrievalServiceTest {
                 .metadata(QdrantPayloadFieldSchema.URL_FIELD, secondUnmappedLocalUrl)
                 .build();
         List<Document> retrievalCandidates = List.of(firstUnmappedLocalDocument, secondUnmappedLocalDocument);
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class)))
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(retrievalCandidates, List.of()));
-        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenAnswer(rerankerInvocation -> {
-            List<Document> deduplicatedCandidates = rerankerInvocation.getArgument(1);
-            return deduplicatedCandidates;
-        });
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), any(Duration.class)))
+                .thenAnswer(rerankerInvocation -> {
+                    List<Document> deduplicatedCandidates = rerankerInvocation.getArgument(1);
+                    return deduplicatedCandidates;
+                });
 
         RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveOutcome("Local documentation");
         RetrievalService.CitationOutcome citationOutcome = retrievalService.toCitations(retrievalOutcome.documents());
@@ -777,11 +807,48 @@ class RetrievalServiceTest {
         HybridSearchPartialFailureException.CollectionSearchFailure collectionFailure =
                 new HybridSearchPartialFailureException.CollectionSearchFailure(
                         "java-docs", "Timeout", "5s", HybridSearchPartialFailureException.FailureDisposition.TRANSIENT);
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class)))
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong()))
                 .thenThrow(new HybridSearchPartialFailureException("collection failure", List.of(collectionFailure)));
 
         assertThrows(
                 HybridSearchPartialFailureException.class,
                 () -> retrievalService.retrieveOutcome("Java stream basics"));
+    }
+
+    @Test
+    void sharesOneStageDeadlineAcrossSearchAndRerankHops() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint guidedConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        Document stageDeadlineDocument = versionedDocument("stage-deadline", "", "stage-deadline-hash");
+        long testStartNanos = System.nanoTime();
+        AtomicLong capturedStageDeadlineNanos = new AtomicLong();
+        AtomicReference<Duration> capturedRemainingStageBudget = new AtomicReference<>();
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(guidedConstraint), anyLong()))
+                .thenAnswer(searchInvocation -> {
+                    capturedStageDeadlineNanos.set(searchInvocation.getArgument(3));
+                    return new HybridSearchService.SearchOutcome(List.of(stageDeadlineDocument), List.of());
+                });
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), any(Duration.class)))
+                .thenAnswer(rerankerInvocation -> {
+                    capturedRemainingStageBudget.set(rerankerInvocation.getArgument(3));
+                    return List.of(stageDeadlineDocument);
+                });
+
+        retrievalService.retrieveOutcome("Java records", guidedConstraint);
+
+        long stageBudgetElapsedNanos = capturedStageDeadlineNanos.get() - testStartNanos;
+        assertTrue(stageBudgetElapsedNanos > 0);
+        assertTrue(stageBudgetElapsedNanos
+                <= RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT
+                        .plus(STAGE_DEADLINE_ASSERTION_TOLERANCE)
+                        .toNanos());
+        assertTrue(stageBudgetElapsedNanos >= RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.toNanos());
+        Duration remainingStageBudget = capturedRemainingStageBudget.get();
+        assertTrue(!remainingStageBudget.isNegative() && !remainingStageBudget.isZero());
+        assertTrue(remainingStageBudget.compareTo(RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT) <= 0);
     }
 }

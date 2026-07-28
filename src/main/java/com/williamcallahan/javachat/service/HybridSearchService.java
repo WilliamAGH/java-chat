@@ -90,40 +90,39 @@ public class HybridSearchService {
     }
 
     /**
-     * Performs hybrid search across all configured collections.
-     *
-     * @param query search query text
-     * @param topK maximum number of results to return
-     * @return documents sorted by fused score (highest first)
-     */
-    public List<Document> search(String query, int topK) {
-        return searchOutcome(query, topK, RetrievalConstraint.none()).documents();
-    }
-
-    /**
      * Performs hybrid search across all configured collections and returns retrieval notices.
      *
      * @param query search query text
      * @param topK maximum number of results to return
      * @param retrievalConstraint retrieval metadata constraint for server-side filtering
+     * @param stageDeadlineNanos absolute {@link System#nanoTime()} deadline shared by every
+     *     retrieval stage hop, so this search can never outlive the caller's stage budget
      * @return search outcome containing documents and optional non-fatal notices
      */
-    public SearchOutcome searchOutcome(String query, int topK, RetrievalConstraint retrievalConstraint) {
-        return searchOutcomes(query, topK, List.of(retrievalConstraint)).getFirst();
+    public SearchOutcome searchOutcome(
+            String query, int topK, RetrievalConstraint retrievalConstraint, long stageDeadlineNanos) {
+        return searchOutcomes(query, topK, List.of(retrievalConstraint), stageDeadlineNanos)
+                .getFirst();
     }
 
     /**
      * Performs one query encoding and parallel Qdrant fan-out for each required metadata scope.
      *
      * <p>Each scope receives its own top-K result budget, so one Java release cannot crowd another
-     * out. Every Qdrant request shares one operation deadline.</p>
+     * out. Every Qdrant request shares one operation deadline: the earlier of the caller-owned
+     * {@code stageDeadlineNanos} and the configured query timeout measured from dispatch. The
+     * embedding hop is likewise bounded by the remaining stage time, so the inner budgets can
+     * never sum past the stage deadline.</p>
      *
      * @param query search query text
      * @param topK maximum number of results returned for each scope
      * @param retrievalConstraints server-side metadata scopes searched with the shared encoding
+     * @param stageDeadlineNanos absolute {@link System#nanoTime()} deadline shared by every
+     *     retrieval stage hop
      * @return search outcomes in the same order as the supplied scopes
      */
-    public List<SearchOutcome> searchOutcomes(String query, int topK, List<RetrievalConstraint> retrievalConstraints) {
+    public List<SearchOutcome> searchOutcomes(
+            String query, int topK, List<RetrievalConstraint> retrievalConstraints, long stageDeadlineNanos) {
         Objects.requireNonNull(query, "query");
         List<RetrievalConstraint> requiredRetrievalConstraints = requireRetrievalConstraints(retrievalConstraints);
         if (query.isBlank() || topK <= 0) {
@@ -132,7 +131,9 @@ public class HybridSearchService {
                     .toList();
         }
 
-        float[] denseVector = queryEncoding.embeddingClient().embed(query, LlmGatewayTier.LIVE);
+        float[] denseVector = queryEncoding
+                .embeddingClient()
+                .embed(query, LlmGatewayTier.LIVE, remainingStageBudget(stageDeadlineNanos));
         LexicalSparseVectorEncoder.SparseVector sparseVector =
                 queryEncoding.sparseVectorEncoder().encode(query);
         Duration queryTimeout = qdrantQueryExecutor.queryTimeout();
@@ -150,24 +151,19 @@ public class HybridSearchService {
             }
             queryRequestsByConstraint.add(requestsByCollection);
         }
-        List<String> admissionCollectionNames = queryRequestsByConstraint.stream()
-                .flatMap(requestsByCollection -> requestsByCollection.keySet().stream())
-                .distinct()
-                .toList();
-        return qdrantQueryExecutor.executeAdmitted(queryTimeout, admissionCollectionNames, queryDeadlineNanos -> {
-            List<CollectionQueryDispatch> queryDispatches = new ArrayList<>(queryRequestsByConstraint.size());
-            for (Map<String, QueryPoints> requestsByCollection : queryRequestsByConstraint) {
-                Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
-                        LinkedHashMap.newLinkedHashMap(requestsByCollection.size());
-                for (Map.Entry<String, QueryPoints> queryRequestEntry : requestsByCollection.entrySet()) {
-                    CompletableFuture<List<ScoredPoint>> collectionQueryFuture =
-                            qdrantQueryExecutor.queryBeforeDeadline(queryRequestEntry.getValue(), queryDeadlineNanos);
-                    futuresByCollection.put(queryRequestEntry.getKey(), collectionQueryFuture);
-                }
-                queryDispatches.add(new CollectionQueryDispatch(futuresByCollection, queryTimeout, queryDeadlineNanos));
+        long queryDeadlineNanos = effectiveQueryDeadlineNanos(queryTimeout, stageDeadlineNanos);
+        List<CollectionQueryDispatch> queryDispatches = new ArrayList<>(queryRequestsByConstraint.size());
+        for (Map<String, QueryPoints> requestsByCollection : queryRequestsByConstraint) {
+            Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
+                    LinkedHashMap.newLinkedHashMap(requestsByCollection.size());
+            for (Map.Entry<String, QueryPoints> queryRequestEntry : requestsByCollection.entrySet()) {
+                CompletableFuture<List<ScoredPoint>> collectionQueryFuture =
+                        qdrantQueryExecutor.queryBeforeDeadline(queryRequestEntry.getValue(), queryDeadlineNanos);
+                futuresByCollection.put(queryRequestEntry.getKey(), collectionQueryFuture);
             }
-            return collectSearchOutcomes(queryDispatches, topK);
-        });
+            queryDispatches.add(new CollectionQueryDispatch(futuresByCollection, queryTimeout, queryDeadlineNanos));
+        }
+        return collectSearchOutcomes(queryDispatches, topK);
     }
 
     /**
@@ -181,11 +177,13 @@ public class HybridSearchService {
      * @param query citation-discovery query text
      * @param topK maximum number of citation candidates to return
      * @param retrievalConstraint official documentation metadata constraint
+     * @param stageDeadlineNanos absolute {@link System#nanoTime()} deadline shared by every
+     *     retrieval stage hop, so citation discovery can never outlive the caller's stage budget
      * @return citation search outcome containing documents
      */
     public SearchOutcome searchDocumentationCitationsOutcome(
-            String query, int topK, RetrievalConstraint retrievalConstraint) {
-        return searchDocumentationCitationsOutcomes(query, topK, List.of(retrievalConstraint))
+            String query, int topK, RetrievalConstraint retrievalConstraint, long stageDeadlineNanos) {
+        return searchDocumentationCitationsOutcomes(query, topK, List.of(retrievalConstraint), stageDeadlineNanos)
                 .getFirst();
     }
 
@@ -195,10 +193,12 @@ public class HybridSearchService {
      * @param query citation-discovery query text
      * @param topK maximum number of citation candidates returned for each scope
      * @param retrievalConstraints official-documentation scopes searched independently
+     * @param stageDeadlineNanos absolute {@link System#nanoTime()} deadline shared by every
+     *     retrieval stage hop
      * @return citation outcomes in the same order as the supplied scopes
      */
     public List<SearchOutcome> searchDocumentationCitationsOutcomes(
-            String query, int topK, List<RetrievalConstraint> retrievalConstraints) {
+            String query, int topK, List<RetrievalConstraint> retrievalConstraints, long stageDeadlineNanos) {
         Objects.requireNonNull(query, "query");
         List<RetrievalConstraint> requiredRetrievalConstraints = requireRetrievalConstraints(retrievalConstraints);
         if (query.isBlank() || topK <= 0) {
@@ -219,21 +219,17 @@ public class HybridSearchService {
                     .map(exactCitationFilter -> qdrantQueryExecutor.buildExactCitationScroll(
                             documentationCollectionName, exactCitationFilter, topK))
                     .toList();
-            return qdrantQueryExecutor.executeAdmitted(
-                    queryTimeout, List.of(documentationCollectionName), queryDeadlineNanos -> {
-                        List<CollectionQueryDispatch> queryDispatches =
-                                new ArrayList<>(documentationScrollRequests.size());
-                        for (ScrollPoints documentationScrollRequest : documentationScrollRequests) {
-                            CompletableFuture<List<ScoredPoint>> documentationScrollFuture =
-                                    qdrantQueryExecutor.scrollBeforeDeadline(
-                                            documentationScrollRequest, queryDeadlineNanos);
-                            queryDispatches.add(new CollectionQueryDispatch(
-                                    Map.of(documentationCollectionName, documentationScrollFuture),
-                                    queryTimeout,
-                                    queryDeadlineNanos));
-                        }
-                        return collectSearchOutcomes(queryDispatches, topK);
-                    });
+            long queryDeadlineNanos = effectiveQueryDeadlineNanos(queryTimeout, stageDeadlineNanos);
+            List<CollectionQueryDispatch> queryDispatches = new ArrayList<>(documentationScrollRequests.size());
+            for (ScrollPoints documentationScrollRequest : documentationScrollRequests) {
+                CompletableFuture<List<ScoredPoint>> documentationScrollFuture =
+                        qdrantQueryExecutor.scrollBeforeDeadline(documentationScrollRequest, queryDeadlineNanos);
+                queryDispatches.add(new CollectionQueryDispatch(
+                        Map.of(documentationCollectionName, documentationScrollFuture),
+                        queryTimeout,
+                        queryDeadlineNanos));
+            }
+            return collectSearchOutcomes(queryDispatches, topK);
         }
 
         String expandedCitationQuery = queryEncoding.expandSparseCitationQuery(query);
@@ -261,23 +257,34 @@ public class HybridSearchService {
             }
             queryRequestsByConstraint.add(requestsByCollection);
         }
-        return qdrantQueryExecutor.executeAdmitted(
-                queryTimeout, officialDocumentCollectionNames, queryDeadlineNanos -> {
-                    List<CollectionQueryDispatch> queryDispatches = new ArrayList<>(queryRequestsByConstraint.size());
-                    for (Map<String, QueryPoints> requestsByCollection : queryRequestsByConstraint) {
-                        Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
-                                LinkedHashMap.newLinkedHashMap(requestsByCollection.size());
-                        for (Map.Entry<String, QueryPoints> queryRequestEntry : requestsByCollection.entrySet()) {
-                            CompletableFuture<List<ScoredPoint>> documentationQueryFuture =
-                                    qdrantQueryExecutor.queryBeforeDeadline(
-                                            queryRequestEntry.getValue(), queryDeadlineNanos);
-                            futuresByCollection.put(queryRequestEntry.getKey(), documentationQueryFuture);
-                        }
-                        queryDispatches.add(
-                                new CollectionQueryDispatch(futuresByCollection, queryTimeout, queryDeadlineNanos));
-                    }
-                    return collectSearchOutcomes(queryDispatches, topK);
-                });
+        long queryDeadlineNanos = effectiveQueryDeadlineNanos(queryTimeout, stageDeadlineNanos);
+        List<CollectionQueryDispatch> queryDispatches = new ArrayList<>(queryRequestsByConstraint.size());
+        for (Map<String, QueryPoints> requestsByCollection : queryRequestsByConstraint) {
+            Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
+                    LinkedHashMap.newLinkedHashMap(requestsByCollection.size());
+            for (Map.Entry<String, QueryPoints> queryRequestEntry : requestsByCollection.entrySet()) {
+                CompletableFuture<List<ScoredPoint>> documentationQueryFuture =
+                        qdrantQueryExecutor.queryBeforeDeadline(queryRequestEntry.getValue(), queryDeadlineNanos);
+                futuresByCollection.put(queryRequestEntry.getKey(), documentationQueryFuture);
+            }
+            queryDispatches.add(new CollectionQueryDispatch(futuresByCollection, queryTimeout, queryDeadlineNanos));
+        }
+        return collectSearchOutcomes(queryDispatches, topK);
+    }
+
+    /**
+     * Bounds one fan-out by the earlier of the stage deadline and the configured query timeout.
+     *
+     * <p>The configured query timeout keeps its meaning as a per-search ceiling measured from
+     * dispatch, while the caller-owned stage deadline tightens it whenever earlier hops already
+     * consumed stage time, so nested hop budgets can never sum past the stage.</p>
+     */
+    private static long effectiveQueryDeadlineNanos(Duration queryTimeout, long stageDeadlineNanos) {
+        return Math.min(stageDeadlineNanos, System.nanoTime() + queryTimeout.toNanos());
+    }
+
+    private static Duration remainingStageBudget(long stageDeadlineNanos) {
+        return Duration.ofNanos(Math.max(0L, stageDeadlineNanos - System.nanoTime()));
     }
 
     private List<SearchOutcome> collectSearchOutcomes(List<CollectionQueryDispatch> queryDispatches, int topK) {
