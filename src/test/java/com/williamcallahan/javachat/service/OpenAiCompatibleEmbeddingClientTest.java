@@ -721,50 +721,66 @@ class OpenAiCompatibleEmbeddingClientTest {
     }
 
     @Test
-    void batchRetryAfterBlocksLiveRequestsWithoutDispatchingThem() {
+    void batchRetryAfterCooldownDoesNotBlockLiveRequests() {
         OpenAIClient liveClient = mock(OpenAIClient.class);
         OpenAIClient batchClient = mock(OpenAIClient.class);
         EmbeddingServiceAsync liveEmbeddingService = mockAsyncEmbeddingService(liveClient);
         EmbeddingServiceAsync batchEmbeddingService = mockAsyncEmbeddingService(batchClient);
         when(batchEmbeddingService.create(any(), any(RequestOptions.class)))
                 .thenReturn(CompletableFuture.failedFuture(rateLimitFailure()));
+        when(liveEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.completedFuture(successfulResponse()));
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter =
                 new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
             assertThrows(
                     EmbeddingServiceUnavailableException.class,
                     () -> clientAdapter.embed(List.of("batch document"), LlmGatewayTier.BATCH));
-            EmbeddingServiceUnavailableException liveCooldownFailure = assertThrows(
-                    EmbeddingServiceTemporarilyUnavailableException.class,
-                    () -> clientAdapter.embed(List.of("live query"), LlmGatewayTier.LIVE));
 
-            assertTrue(liveCooldownFailure.getMessage().contains("rate limited"));
+            assertEquals(
+                    1,
+                    clientAdapter
+                            .embed(List.of("live query"), LlmGatewayTier.LIVE)
+                            .size());
+            EmbeddingServiceUnavailableException batchCooldownFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
+                    () -> clientAdapter.embed(List.of("another batch document"), LlmGatewayTier.BATCH));
+
+            assertTrue(batchCooldownFailure.getMessage().contains("rate limited"));
+            verify(liveEmbeddingService).create(any(), any(RequestOptions.class));
             verify(batchEmbeddingService).create(any(), any(RequestOptions.class));
-            verifyNoInteractions(liveEmbeddingService);
         }
     }
 
     @Test
-    void liveRetryAfterBlocksBatchRequestsWithoutDispatchingThem() {
+    void liveRetryAfterCooldownDoesNotBlockBatchRequests() {
         OpenAIClient liveClient = mock(OpenAIClient.class);
         OpenAIClient batchClient = mock(OpenAIClient.class);
         EmbeddingServiceAsync liveEmbeddingService = mockAsyncEmbeddingService(liveClient);
         EmbeddingServiceAsync batchEmbeddingService = mockAsyncEmbeddingService(batchClient);
         when(liveEmbeddingService.create(any(), any(RequestOptions.class)))
                 .thenReturn(CompletableFuture.failedFuture(rateLimitFailure()));
+        when(batchEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.completedFuture(successfulResponse()));
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter =
                 new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
             assertThrows(
                     EmbeddingServiceUnavailableException.class,
                     () -> clientAdapter.embed(List.of("live query"), LlmGatewayTier.LIVE));
-            EmbeddingServiceUnavailableException batchCooldownFailure = assertThrows(
-                    EmbeddingServiceTemporarilyUnavailableException.class,
-                    () -> clientAdapter.embed(List.of("batch document"), LlmGatewayTier.BATCH));
 
-            assertTrue(batchCooldownFailure.getMessage().contains("rate limited"));
+            assertEquals(
+                    1,
+                    clientAdapter
+                            .embed(List.of("batch document"), LlmGatewayTier.BATCH)
+                            .size());
+            EmbeddingServiceUnavailableException liveCooldownFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
+                    () -> clientAdapter.embed(List.of("another live query"), LlmGatewayTier.LIVE));
+
+            assertTrue(liveCooldownFailure.getMessage().contains("rate limited"));
+            verify(batchEmbeddingService).create(any(), any(RequestOptions.class));
             verify(liveEmbeddingService).create(any(), any(RequestOptions.class));
-            verifyNoInteractions(batchEmbeddingService);
         }
     }
 

@@ -172,7 +172,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         }
     }
 
-    /** Owns the Retry-After window shared by every tier on the embedding endpoint. */
+    /** Owns the Retry-After window for one tier, so a batch 429 never stalls live requests. */
     private static final class EmbeddingProviderCooldown {
         private long providerCooldownDeadlineNanos;
 
@@ -247,9 +247,10 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         RequestLimits batchLimits = requiredGatewaySettings.batchRequestLimits();
         this.liveRequestPermits = new Semaphore(liveLimits.maxConcurrentRequests(), true);
         this.batchRequestPermits = new Semaphore(batchLimits.maxConcurrentRequests(), true);
-        EmbeddingProviderCooldown providerCooldown = new EmbeddingProviderCooldown();
-        this.liveRequestLaunchPacer = new RequestLaunchPacer(liveLimits.requestsPerSecond(), providerCooldown);
-        this.batchRequestLaunchPacer = new RequestLaunchPacer(batchLimits.requestsPerSecond(), providerCooldown);
+        this.liveRequestLaunchPacer =
+                new RequestLaunchPacer(liveLimits.requestsPerSecond(), new EmbeddingProviderCooldown());
+        this.batchRequestLaunchPacer =
+                new RequestLaunchPacer(batchLimits.requestsPerSecond(), new EmbeddingProviderCooldown());
         this.liveRequestTimeout = liveLimits.totalTimeout();
         this.batchRequestTimeout = batchLimits.totalTimeout();
         log.info(
