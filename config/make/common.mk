@@ -78,14 +78,26 @@ fi; \
 echo $$port
 endef
 
-# Free a specific port by killing any process using it
-# Usage: $(call free_port,8085)
-define free_port
-PIDS=$$(lsof -ti tcp:$(1) 2>/dev/null || true); \
-if [ -n "$$PIDS" ]; then \
-  echo "Killing process(es) on port $(1): $$PIDS" >&2; \
-  kill -9 $$PIDS 2>/dev/null || true; \
-  sleep 1; \
+# Require a specific TCP port to be unoccupied before starting an owned service.
+# Usage: $(call require_port_available,8085)
+define require_port_available
+if ! command -v lsof >/dev/null 2>&1; then \
+  echo "ERROR: Cannot verify availability of port $(1): lsof is unavailable." >&2; \
+  exit 1; \
+fi; \
+PORT_INSPECTION_REPORT=$$(lsof -nP -tiTCP:$(1) -sTCP:LISTEN 2>&1); \
+PORT_INSPECTION_STATUS=$$?; \
+if [ "$$PORT_INSPECTION_STATUS" -ne 0 ] && [ -n "$$PORT_INSPECTION_REPORT" ]; then \
+  echo "ERROR: Unable to verify availability of port $(1): $$PORT_INSPECTION_REPORT" >&2; \
+  exit 1; \
+fi; \
+if [ "$$PORT_INSPECTION_STATUS" -gt 1 ]; then \
+  echo "ERROR: Unable to verify availability of port $(1); lsof exited with status $$PORT_INSPECTION_STATUS." >&2; \
+  exit 1; \
+fi; \
+if [ -n "$$PORT_INSPECTION_REPORT" ]; then \
+  echo "ERROR: Port $(1) is already in use by process ID(s): $$PORT_INSPECTION_REPORT. Stop the owning process and retry." >&2; \
+  exit 1; \
 fi
 endef
 

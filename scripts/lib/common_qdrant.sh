@@ -221,7 +221,7 @@ stage_app_jar() {
     echo "$staged_jar_path"
 }
 
-# Manages PID file lifecycle: kills any existing process, registers cleanup trap.
+# Claims a new PID file lifecycle and registers cleanup traps.
 # Sets APP_PID to empty initially; the caller must set it after launching the Java process.
 #
 # Arguments:
@@ -234,15 +234,9 @@ setup_pid_and_cleanup() {
     fi
 
     COMMON_PID_FILE="$pid_file"
-    if [ -f "$COMMON_PID_FILE" ]; then
-        local existing_pid
-        existing_pid=$(cat "$COMMON_PID_FILE" 2>/dev/null || true)
-        if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
-            echo -e "${YELLOW}Stopping previous processor (PID: $existing_pid)...${NC}"
-            kill -TERM "$existing_pid" 2>/dev/null || true
-            sleep 2
-        fi
-        rm -f "$COMMON_PID_FILE"
+    if ! (set -o noclobber; : > "$COMMON_PID_FILE") 2>/dev/null; then
+        echo -e "${RED}Ingestion PID file already exists; refusing to signal or replace another run: $COMMON_PID_FILE${NC}" >&2
+        return 1
     fi
 
     APP_PID=""
