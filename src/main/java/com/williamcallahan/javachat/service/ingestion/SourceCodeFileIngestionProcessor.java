@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -48,6 +49,27 @@ public class SourceCodeFileIngestionProcessor {
     private final IngestionStorageServices storage;
     private final ProgressTracker progressTracker;
     private final IngestedFilePruneService ingestedFilePruneService;
+
+    /**
+     * Carries repository-wide identity and the authoritative pre-run vector snapshot.
+     *
+     * @param repositoryRoot normalized repository root
+     * @param repositoryMetadata canonical repository metadata
+     * @param storedFileUrls source URLs present in the target collection before the run
+     */
+    public record RepositoryIngestionContext(
+            Path repositoryRoot, GitHubRepoMetadata repositoryMetadata, Set<String> storedFileUrls) {
+        /**
+         * Validates and snapshots repository-run state before file processing begins.
+         */
+        public RepositoryIngestionContext {
+            repositoryRoot = Objects.requireNonNull(repositoryRoot, "repositoryRoot")
+                    .toAbsolutePath()
+                    .normalize();
+            Objects.requireNonNull(repositoryMetadata, "repositoryMetadata");
+            storedFileUrls = Set.copyOf(Objects.requireNonNull(storedFileUrls, "storedFileUrls"));
+        }
+    }
 
     /**
      * Creates a source-code ingestion processor with required storage dependencies.
@@ -86,17 +108,12 @@ public class SourceCodeFileIngestionProcessor {
      * regardless of outcome, enabling callers to build a complete set of active file URLs
      * for deleted-file detection.</p>
      */
-    public SourceFileProcessingResult process(
-            Path repositoryRoot, Path sourceFilePath, GitHubRepoMetadata repositoryMetadata, String collectionName) {
-        Objects.requireNonNull(repositoryRoot, "repositoryRoot");
+    public SourceFileProcessingResult process(RepositoryIngestionContext repositoryContext, Path sourceFilePath) {
+        Objects.requireNonNull(repositoryContext, "repositoryContext");
         Objects.requireNonNull(sourceFilePath, "sourceFilePath");
-        Objects.requireNonNull(repositoryMetadata, "repositoryMetadata");
-        Objects.requireNonNull(collectionName, "collectionName");
+        Path repositoryRoot = repositoryContext.repositoryRoot();
+        GitHubRepoMetadata repositoryMetadata = repositoryContext.repositoryMetadata();
         String canonicalCollectionName = repositoryMetadata.collectionName();
-        if (!canonicalCollectionName.equals(collectionName)) {
-            throw new IllegalArgumentException(
-                    "collectionName must match repositoryMetadata.collectionName: " + canonicalCollectionName);
-        }
 
         String relativePath =
                 repositoryRoot.relativize(sourceFilePath).toString().replace('\\', '/');
@@ -144,7 +161,8 @@ public class SourceCodeFileIngestionProcessor {
                     fileContext.relativePath());
         }
 
-        boolean requiresFullReindex = previousFileRecord != null;
+        boolean requiresFullReindex =
+                previousFileRecord != null || repositoryContext.storedFileUrls().contains(fileContext.sourceUrl());
 
         LocalDocsFileOutcome chunkOutcome = chunkAndUpsert(
                 sourceFilePath,
