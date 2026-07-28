@@ -508,25 +508,43 @@ if ! (
         :
     }
     mutool() {
-        [ "$#" -eq 8 ] \
-            && [ "$1" = "draw" ] \
-            && [ "$2" = "-q" ] \
-            && [ "$3" = "-F" ] \
-            && [ "$4" = "txt" ] \
-            && [ "$5" = "-o" ] \
-            && [ "$6" = "-" ] \
-            && [ "$8" = "1" ] \
-            || return 1
-        case "$JAVA25_PDF_PARSER_TEST_CASE" in
-            java-se24)
-                write_java25_specification_parser_output \
-                    "The Java® Language Specification" "Java SE 24 Edition"
+        case "$#" in
+            8)
+                [ "$1" = "draw" ] \
+                    && [ "$2" = "-q" ] \
+                    && [ "$3" = "-F" ] \
+                    && [ "$4" = "txt" ] \
+                    && [ "$5" = "-o" ] \
+                    && [ "$6" = "-" ] \
+                    && [ "$8" = "1" ] \
+                    || return 1
+                case "$JAVA25_PDF_PARSER_TEST_CASE" in
+                    java-se24)
+                        write_java25_specification_parser_output \
+                            "The Java® Language Specification" "Java SE 24 Edition"
+                        ;;
+                    wrong-specification)
+                        write_java25_specification_parser_output \
+                            "The Java® Virtual Machine Specification" "Java SE 25 Edition"
+                        ;;
+                    parse-failure) return 69 ;;
+                    full-parse-failure)
+                        write_java25_specification_parser_output \
+                            "The Java® Language Specification" "Java SE 25 Edition"
+                        ;;
+                    *) return 1 ;;
+                esac
                 ;;
-            wrong-specification)
-                write_java25_specification_parser_output \
-                    "The Java® Virtual Machine Specification" "Java SE 25 Edition"
+            7)
+                [ "$1" = "draw" ] \
+                    && [ "$2" = "-q" ] \
+                    && [ "$3" = "-F" ] \
+                    && [ "$4" = "txt" ] \
+                    && [ "$5" = "-o" ] \
+                    && [ "$6" = "/dev/null" ] \
+                    || return 1
+                [ "$JAVA25_PDF_PARSER_TEST_CASE" != "full-parse-failure" ] || return 70
                 ;;
-            parse-failure) return 69 ;;
             *) return 1 ;;
         esac
     }
@@ -550,6 +568,14 @@ if ! (
     if validate_java25_specification_pdf \
         "$JAVA25_PDF_PARSER_INPUT" \
         "unparseable Java 25 specification" \
+        "Language Specification" \
+        "The Java® Language Specification"; then
+        exit 1
+    fi
+    JAVA25_PDF_PARSER_TEST_CASE="full-parse-failure"
+    if validate_java25_specification_pdf \
+        "$JAVA25_PDF_PARSER_INPUT" \
+        "partially parseable Java 25 specification" \
         "Language Specification" \
         "The Java® Language Specification"; then
         exit 1
@@ -644,24 +670,42 @@ if ! (
         esac
     }
     mutool() {
-        [ "$#" -eq 8 ] \
-            && [ "$1" = "draw" ] \
-            && [ "$2" = "-q" ] \
-            && [ "$3" = "-F" ] \
-            && [ "$4" = "txt" ] \
-            && [ "$5" = "-o" ] \
-            && [ "$6" = "-" ] \
-            && [ "$8" = "1" ] \
-            || return 1
-        printf '%s\n' "$@" >> "$JAVA25_PDF_SUCCESS_PARSER_CAPTURE"
-        case "$7" in
-            *jls25.pdf*)
-                write_java25_specification_parser_output \
-                    "The Java® Language Specification" "Java SE 25 Edition"
+        case "$#" in
+            8)
+                [ "$1" = "draw" ] \
+                    && [ "$2" = "-q" ] \
+                    && [ "$3" = "-F" ] \
+                    && [ "$4" = "txt" ] \
+                    && [ "$5" = "-o" ] \
+                    && [ "$6" = "-" ] \
+                    && [ "$8" = "1" ] \
+                    || return 1
+                printf '%s\n' "$@" >> "$JAVA25_PDF_SUCCESS_PARSER_CAPTURE"
+                case "$7" in
+                    *jls25.pdf*)
+                        write_java25_specification_parser_output \
+                            "The Java® Language Specification" "Java SE 25 Edition"
+                        ;;
+                    *jvms25.pdf*)
+                        write_java25_specification_parser_output \
+                            "The Java® Virtual Machine Specification" "Java SE 25 Edition"
+                        ;;
+                    *) return 1 ;;
+                esac
                 ;;
-            *jvms25.pdf*)
-                write_java25_specification_parser_output \
-                    "The Java® Virtual Machine Specification" "Java SE 25 Edition"
+            7)
+                [ "$1" = "draw" ] \
+                    && [ "$2" = "-q" ] \
+                    && [ "$3" = "-F" ] \
+                    && [ "$4" = "txt" ] \
+                    && [ "$5" = "-o" ] \
+                    && [ "$6" = "/dev/null" ] \
+                    || return 1
+                printf '%s\n' "$@" >> "$JAVA25_PDF_SUCCESS_PARSER_CAPTURE"
+                case "$7" in
+                    *jls25.pdf*|*jvms25.pdf*) return 0 ;;
+                    *) return 1 ;;
+                esac
                 ;;
             *) return 1 ;;
         esac
@@ -690,8 +734,9 @@ grep -Fxq -- "https://docs.oracle.com/javase/specs/jls/se25/jls25.pdf" "$JAVA25_
     || fail_documentation_fetch_test "Java 25 source refresh did not request the canonical JLS 25 PDF"
 grep -Fxq -- "https://docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf" "$JAVA25_PDF_SUCCESS_CAPTURE" \
     || fail_documentation_fetch_test "Java 25 source refresh did not request the canonical JVMS 25 PDF"
-if [ "$(grep -Fxc -- "draw" "$JAVA25_PDF_SUCCESS_PARSER_CAPTURE")" -ne 4 ]; then
-    fail_documentation_fetch_test "Java 25 source refresh did not parse each staged and installed specification"
+if [ "$(grep -Fxc -- "draw" "$JAVA25_PDF_SUCCESS_PARSER_CAPTURE")" -ne 8 ] \
+    || [ "$(grep -Fxc -- "/dev/null" "$JAVA25_PDF_SUCCESS_PARSER_CAPTURE")" -ne 4 ]; then
+    fail_documentation_fetch_test "Java 25 source refresh did not fully parse each staged and installed specification"
 fi
 
 JAVA25_PDF_FAILURE_ROOT="$TEST_WORK_DIRECTORY/java25-pdf-parse-failure"
@@ -750,21 +795,43 @@ if ! (
         esac
     }
     mutool() {
-        [ "$#" -eq 8 ] \
-            && [ "$1" = "draw" ] \
-            && [ "$2" = "-q" ] \
-            && [ "$3" = "-F" ] \
-            && [ "$4" = "txt" ] \
-            && [ "$5" = "-o" ] \
-            && [ "$6" = "-" ] \
-            && [ "$8" = "1" ] \
-            || return 1
-        printf '%s\n' "$@" >> "$JAVA25_PDF_FAILURE_PARSER_CAPTURE"
-        case "$7" in
-            *jls25.pdf*) return 70 ;;
-            *jvms25.pdf*)
-                write_java25_specification_parser_output \
-                    "The Java® Virtual Machine Specification" "Java SE 25 Edition"
+        case "$#" in
+            8)
+                [ "$1" = "draw" ] \
+                    && [ "$2" = "-q" ] \
+                    && [ "$3" = "-F" ] \
+                    && [ "$4" = "txt" ] \
+                    && [ "$5" = "-o" ] \
+                    && [ "$6" = "-" ] \
+                    && [ "$8" = "1" ] \
+                    || return 1
+                printf '%s\n' "$@" >> "$JAVA25_PDF_FAILURE_PARSER_CAPTURE"
+                case "$7" in
+                    *jls25.pdf*)
+                        write_java25_specification_parser_output \
+                            "The Java® Language Specification" "Java SE 25 Edition"
+                        ;;
+                    *jvms25.pdf*)
+                        write_java25_specification_parser_output \
+                            "The Java® Virtual Machine Specification" "Java SE 25 Edition"
+                        ;;
+                    *) return 1 ;;
+                esac
+                ;;
+            7)
+                [ "$1" = "draw" ] \
+                    && [ "$2" = "-q" ] \
+                    && [ "$3" = "-F" ] \
+                    && [ "$4" = "txt" ] \
+                    && [ "$5" = "-o" ] \
+                    && [ "$6" = "/dev/null" ] \
+                    || return 1
+                printf '%s\n' "$@" >> "$JAVA25_PDF_FAILURE_PARSER_CAPTURE"
+                case "$7" in
+                    *jls25.pdf*) return 70 ;;
+                    *jvms25.pdf*) return 0 ;;
+                    *) return 1 ;;
+                esac
                 ;;
             *) return 1 ;;
         esac
@@ -786,9 +853,10 @@ if ! (
 ); then
     fail_documentation_fetch_test "Java 25 specification parse failure replaced the active mirror"
 fi
-if ! grep -Fq -- "jls25.pdf" "$JAVA25_PDF_FAILURE_PARSER_CAPTURE" \
+if [ "$(grep -Fxc -- "/dev/null" "$JAVA25_PDF_FAILURE_PARSER_CAPTURE")" -ne 1 ] \
+    || ! grep -Fq -- "jls25.pdf" "$JAVA25_PDF_FAILURE_PARSER_CAPTURE" \
     || grep -Fq -- "jvms25.pdf" "$JAVA25_PDF_FAILURE_PARSER_CAPTURE"; then
-    fail_documentation_fetch_test "Java 25 specification pair continued after the JLS parse failure"
+    fail_documentation_fetch_test "Java 25 specification pair continued after the JLS full-parse failure"
 fi
 
 if ! (

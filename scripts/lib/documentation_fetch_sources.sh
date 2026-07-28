@@ -100,6 +100,10 @@ validate_java25_specification_pdf() {
         log "${RED}✗ $specification_name does not match its parsed specification title${NC}"
         return 1
     fi
+    if ! mutool draw -q -F txt -o /dev/null "$specification_path"; then
+        log "${RED}✗ $specification_name cannot be fully parsed by mutool${NC}"
+        return 1
+    fi
 }
 
 # Fetches one Java 25 specification into the staged Java API mirror.
