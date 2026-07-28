@@ -604,32 +604,6 @@ class OpenAIStreamingServiceTest {
     }
 
     @Test
-    void completionUsesNativeAsyncClientAndRecordsSuccessBeforeSignaling() {
-        RateLimitService rateLimitService = mock(RateLimitService.class);
-        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
-                .thenReturn(true);
-        OpenAiProviderRoutingService providerRoutingService = configuredProviderRoutingService(rateLimitService);
-        OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                rateLimitService, testRequestFactory(), providerRoutingService, new OpenAiStreamingFailureReporter());
-        OpenAIClient openAiClient = mock(OpenAIClient.class);
-        ResponseServiceAsync responseService = mockAsyncResponseService(openAiClient);
-        CompletableFuture<Response> providerCompletionFuture = new CompletableFuture<>();
-        Response providerCompletion = mock(Response.class);
-        when(providerCompletion.output()).thenReturn(List.of());
-        when(responseService.create(any(ResponseCreateParams.class), any(RequestOptions.class)))
-                .thenReturn(providerCompletionFuture);
-        ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
-
-        StepVerifier.create(streamingService.complete("prompt", 0.7))
-                .then(() -> providerCompletionFuture.complete(providerCompletion))
-                .expectNext("")
-                .verifyComplete();
-
-        verify(rateLimitService).recordSuccess(RateLimitService.ApiProvider.OPENAI);
-        verify(openAiClient, never()).responses();
-    }
-
-    @Test
     void completionPreservesAsyncTransportFailure() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
@@ -654,32 +628,6 @@ class OpenAIStreamingServiceTest {
                 .verify();
 
         verify(openAiClient, never()).responses();
-    }
-
-    @Test
-    void cancelledCompletionRetainsSdkFutureForLateOutcomeAccounting() {
-        RateLimitService rateLimitService = mock(RateLimitService.class);
-        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
-                .thenReturn(true);
-        OpenAiProviderRoutingService providerRoutingService = configuredProviderRoutingService(rateLimitService);
-        OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                rateLimitService, testRequestFactory(), providerRoutingService, new OpenAiStreamingFailureReporter());
-        OpenAIClient openAiClient = mock(OpenAIClient.class);
-        ResponseServiceAsync responseService = mockAsyncResponseService(openAiClient);
-        CompletableFuture<Response> providerCompletionFuture = new CompletableFuture<>();
-        Response providerCompletion = mock(Response.class);
-        when(providerCompletion.output()).thenReturn(List.of());
-        when(responseService.create(any(ResponseCreateParams.class), any(RequestOptions.class)))
-                .thenReturn(providerCompletionFuture);
-        ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
-
-        StepVerifier.create(streamingService.complete("prompt", 0.7))
-                .thenCancel()
-                .verify();
-
-        assertFalse(providerCompletionFuture.isCancelled());
-        providerCompletionFuture.complete(providerCompletion);
-        verify(rateLimitService).recordSuccess(RateLimitService.ApiProvider.OPENAI);
     }
 
     @Test

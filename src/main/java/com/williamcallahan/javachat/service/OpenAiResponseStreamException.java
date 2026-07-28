@@ -26,6 +26,7 @@ final class OpenAiResponseStreamException extends OpenAIException {
         RATE_LIMIT_EXCEEDED,
         ERROR,
         FAILED,
+        CANCELLED,
         MAX_OUTPUT_TOKENS,
         CONTENT_FILTER,
         INCOMPLETE,
@@ -55,6 +56,10 @@ final class OpenAiResponseStreamException extends OpenAIException {
                 .flatMap(OpenAiResponseStreamException::terminalReasonForIncompleteReason)
                 .orElse(TerminalReason.INCOMPLETE);
         return new OpenAiResponseStreamException(messageForIncompleteResponse(terminalReason), terminalReason);
+    }
+
+    static OpenAiResponseStreamException cancelled() {
+        return new OpenAiResponseStreamException("Provider response was cancelled", TerminalReason.CANCELLED);
     }
 
     static OpenAiResponseStreamException missingCompletion() {

@@ -7,9 +7,11 @@ import com.openai.core.Timeout;
 import com.openai.core.http.AsyncStreamResponse;
 import com.openai.models.responses.Response;
 import com.openai.models.responses.ResponseCreateParams;
+import com.openai.models.responses.ResponseError;
 import com.openai.models.responses.ResponseOutputItem;
 import com.openai.models.responses.ResponseOutputMessage;
 import com.openai.models.responses.ResponseOutputText;
+import com.openai.models.responses.ResponseStatus;
 import com.openai.models.responses.ResponseStreamEvent;
 import com.openai.models.responses.ResponseTextDeltaEvent;
 import com.williamcallahan.javachat.application.completion.CompletionRequestConfiguration;
@@ -222,7 +224,7 @@ public class OpenAIStreamingService {
                     .async()
                     .responses()
                     .create(requestParameters, requestOptions)
-                    .thenApply(this::extractTextFromResponse);
+                    .thenApply(this::extractTextFromCompletedResponse);
             CompletableFuture<String> accountedCompletionFuture =
                     completionFuture.whenComplete((completionText, completionFailure) -> {
                         if (completionFailure == null) {
@@ -479,16 +481,36 @@ public class OpenAIStreamingService {
                 .or(() -> responseStreamEvent.refusalDelta().map(refusalDeltaEvent -> refusalDeltaEvent.delta())));
     }
 
-    private String extractTextFromResponse(Response response) {
-        if (response == null) {
-            return "";
+    private String extractTextFromCompletedResponse(Response providerResponse) {
+        if (providerResponse == null) {
+            throw OpenAiResponseStreamException.missingCompletion();
+        }
+        ResponseStatus responseStatus =
+                providerResponse.status().orElseThrow(OpenAiResponseStreamException::missingCompletion);
+        if (ResponseStatus.FAILED.equals(responseStatus)) {
+            Optional<String> providerCode =
+                    providerResponse.error().map(ResponseError::code).map(ResponseError.Code::asString);
+            throw OpenAiResponseStreamException.failed(providerCode);
+        }
+        if (ResponseStatus.INCOMPLETE.equals(responseStatus)) {
+            Optional<String> incompleteReason = providerResponse
+                    .incompleteDetails()
+                    .flatMap(Response.IncompleteDetails::reason)
+                    .map(Response.IncompleteDetails.Reason::asString);
+            throw OpenAiResponseStreamException.incomplete(incompleteReason);
+        }
+        if (ResponseStatus.CANCELLED.equals(responseStatus)) {
+            throw OpenAiResponseStreamException.cancelled();
+        }
+        if (!ResponseStatus.COMPLETED.equals(responseStatus)) {
+            throw OpenAiResponseStreamException.missingCompletion();
         }
         StringBuilder outputBuilder = new StringBuilder();
-        for (ResponseOutputItem outputItem : response.output()) {
-            if (!outputItem.isMessage()) {
+        for (ResponseOutputItem providerOutput : providerResponse.output()) {
+            if (!providerOutput.isMessage()) {
                 continue;
             }
-            ResponseOutputMessage message = outputItem.asMessage();
+            ResponseOutputMessage message = providerOutput.asMessage();
             for (ResponseOutputMessage.Content messageContent : message.content()) {
                 if (messageContent.isOutputText()) {
                     ResponseOutputText outputText = messageContent.asOutputText();
