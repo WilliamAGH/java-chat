@@ -150,19 +150,24 @@ public class HybridSearchService {
             }
             queryRequestsByConstraint.add(requestsByCollection);
         }
-        long queryDeadlineNanos = qdrantQueryExecutor.queryDeadlineNanos(queryTimeout);
-        List<CollectionQueryDispatch> queryDispatches = new ArrayList<>(queryRequestsByConstraint.size());
-        for (Map<String, QueryPoints> requestsByCollection : queryRequestsByConstraint) {
-            Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
-                    LinkedHashMap.newLinkedHashMap(requestsByCollection.size());
-            for (Map.Entry<String, QueryPoints> queryRequestEntry : requestsByCollection.entrySet()) {
-                CompletableFuture<List<ScoredPoint>> collectionQueryFuture =
-                        qdrantQueryExecutor.queryBeforeDeadline(queryRequestEntry.getValue(), queryDeadlineNanos);
-                futuresByCollection.put(queryRequestEntry.getKey(), collectionQueryFuture);
+        List<String> admissionCollectionNames = queryRequestsByConstraint.stream()
+                .flatMap(requestsByCollection -> requestsByCollection.keySet().stream())
+                .distinct()
+                .toList();
+        return qdrantQueryExecutor.executeAdmitted(queryTimeout, admissionCollectionNames, queryDeadlineNanos -> {
+            List<CollectionQueryDispatch> queryDispatches = new ArrayList<>(queryRequestsByConstraint.size());
+            for (Map<String, QueryPoints> requestsByCollection : queryRequestsByConstraint) {
+                Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
+                        LinkedHashMap.newLinkedHashMap(requestsByCollection.size());
+                for (Map.Entry<String, QueryPoints> queryRequestEntry : requestsByCollection.entrySet()) {
+                    CompletableFuture<List<ScoredPoint>> collectionQueryFuture =
+                            qdrantQueryExecutor.queryBeforeDeadline(queryRequestEntry.getValue(), queryDeadlineNanos);
+                    futuresByCollection.put(queryRequestEntry.getKey(), collectionQueryFuture);
+                }
+                queryDispatches.add(new CollectionQueryDispatch(futuresByCollection, queryTimeout, queryDeadlineNanos));
             }
-            queryDispatches.add(new CollectionQueryDispatch(futuresByCollection, queryTimeout, queryDeadlineNanos));
-        }
-        return collectSearchOutcomes(queryDispatches, topK);
+            return collectSearchOutcomes(queryDispatches, topK);
+        });
     }
 
     /**
@@ -214,17 +219,21 @@ public class HybridSearchService {
                     .map(exactCitationFilter -> qdrantQueryExecutor.buildExactCitationScroll(
                             documentationCollectionName, exactCitationFilter, topK))
                     .toList();
-            long queryDeadlineNanos = qdrantQueryExecutor.queryDeadlineNanos(queryTimeout);
-            List<CollectionQueryDispatch> queryDispatches = new ArrayList<>(documentationScrollRequests.size());
-            for (ScrollPoints documentationScrollRequest : documentationScrollRequests) {
-                CompletableFuture<List<ScoredPoint>> documentationScrollFuture =
-                        qdrantQueryExecutor.scrollBeforeDeadline(documentationScrollRequest, queryDeadlineNanos);
-                queryDispatches.add(new CollectionQueryDispatch(
-                        Map.of(documentationCollectionName, documentationScrollFuture),
-                        queryTimeout,
-                        queryDeadlineNanos));
-            }
-            return collectSearchOutcomes(queryDispatches, topK);
+            return qdrantQueryExecutor.executeAdmitted(
+                    queryTimeout, List.of(documentationCollectionName), queryDeadlineNanos -> {
+                        List<CollectionQueryDispatch> queryDispatches =
+                                new ArrayList<>(documentationScrollRequests.size());
+                        for (ScrollPoints documentationScrollRequest : documentationScrollRequests) {
+                            CompletableFuture<List<ScoredPoint>> documentationScrollFuture =
+                                    qdrantQueryExecutor.scrollBeforeDeadline(
+                                            documentationScrollRequest, queryDeadlineNanos);
+                            queryDispatches.add(new CollectionQueryDispatch(
+                                    Map.of(documentationCollectionName, documentationScrollFuture),
+                                    queryTimeout,
+                                    queryDeadlineNanos));
+                        }
+                        return collectSearchOutcomes(queryDispatches, topK);
+                    });
         }
 
         String expandedCitationQuery = queryEncoding.expandSparseCitationQuery(query);
@@ -252,19 +261,23 @@ public class HybridSearchService {
             }
             queryRequestsByConstraint.add(requestsByCollection);
         }
-        long queryDeadlineNanos = qdrantQueryExecutor.queryDeadlineNanos(queryTimeout);
-        List<CollectionQueryDispatch> queryDispatches = new ArrayList<>(queryRequestsByConstraint.size());
-        for (Map<String, QueryPoints> requestsByCollection : queryRequestsByConstraint) {
-            Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
-                    LinkedHashMap.newLinkedHashMap(requestsByCollection.size());
-            for (Map.Entry<String, QueryPoints> queryRequestEntry : requestsByCollection.entrySet()) {
-                CompletableFuture<List<ScoredPoint>> documentationQueryFuture =
-                        qdrantQueryExecutor.queryBeforeDeadline(queryRequestEntry.getValue(), queryDeadlineNanos);
-                futuresByCollection.put(queryRequestEntry.getKey(), documentationQueryFuture);
-            }
-            queryDispatches.add(new CollectionQueryDispatch(futuresByCollection, queryTimeout, queryDeadlineNanos));
-        }
-        return collectSearchOutcomes(queryDispatches, topK);
+        return qdrantQueryExecutor.executeAdmitted(
+                queryTimeout, officialDocumentCollectionNames, queryDeadlineNanos -> {
+                    List<CollectionQueryDispatch> queryDispatches = new ArrayList<>(queryRequestsByConstraint.size());
+                    for (Map<String, QueryPoints> requestsByCollection : queryRequestsByConstraint) {
+                        Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
+                                LinkedHashMap.newLinkedHashMap(requestsByCollection.size());
+                        for (Map.Entry<String, QueryPoints> queryRequestEntry : requestsByCollection.entrySet()) {
+                            CompletableFuture<List<ScoredPoint>> documentationQueryFuture =
+                                    qdrantQueryExecutor.queryBeforeDeadline(
+                                            queryRequestEntry.getValue(), queryDeadlineNanos);
+                            futuresByCollection.put(queryRequestEntry.getKey(), documentationQueryFuture);
+                        }
+                        queryDispatches.add(
+                                new CollectionQueryDispatch(futuresByCollection, queryTimeout, queryDeadlineNanos));
+                    }
+                    return collectSearchOutcomes(queryDispatches, topK);
+                });
     }
 
     private List<SearchOutcome> collectSearchOutcomes(List<CollectionQueryDispatch> queryDispatches, int topK) {
