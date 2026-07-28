@@ -15,6 +15,7 @@ public class QdrantProperties {
     private boolean ensureCollections;
     private int prefetchLimit = 20;
     private int rrfK = 60;
+    private int densePrefetchHnswEf = 24;
     private Duration queryTimeout = Duration.ofSeconds(5);
 
     /**
@@ -170,6 +171,24 @@ public class QdrantProperties {
         this.rrfK = rrfK;
     }
 
+    /**
+     * Returns the measured HNSW candidate breadth for dense hybrid prefetch.
+     *
+     * @return positive dense prefetch HNSW candidate count
+     */
+    public int getDensePrefetchHnswEf() {
+        return densePrefetchHnswEf;
+    }
+
+    /**
+     * Sets the measured HNSW candidate breadth for dense hybrid prefetch.
+     *
+     * @param densePrefetchHnswEf positive dense prefetch HNSW candidate count
+     */
+    public void setDensePrefetchHnswEf(int densePrefetchHnswEf) {
+        this.densePrefetchHnswEf = densePrefetchHnswEf;
+    }
+
     QdrantProperties validateConfiguration() {
         if (collections == null) {
             throw new IllegalArgumentException(QDRANT_COLLECTIONS_CONFIGURATION_KEY + " must not be null");
@@ -187,6 +206,10 @@ public class QdrantProperties {
         }
         if (rrfK <= 0) {
             throw new IllegalArgumentException("app.qdrant.rrf-k must be positive, got: " + rrfK);
+        }
+        if (densePrefetchHnswEf <= 0L) {
+            throw new IllegalArgumentException(
+                    "app.qdrant.dense-prefetch-hnsw-ef must be positive, got: " + densePrefetchHnswEf);
         }
         if (queryTimeout == null || queryTimeout.isNegative() || queryTimeout.isZero()) {
             throw new IllegalArgumentException("app.qdrant.query-timeout must be positive");

@@ -1,10 +1,6 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.application.search.LexicalSparseVectorEncoder;
-import com.williamcallahan.javachat.config.AppProperties;
-import com.williamcallahan.javachat.config.DocsSourceRegistry;
-import com.williamcallahan.javachat.config.QdrantGitHubCollectionDiscovery;
-import io.qdrant.client.QdrantClient;
 import io.qdrant.client.grpc.Common.Filter;
 import io.qdrant.client.grpc.Points.QueryPoints;
 import io.qdrant.client.grpc.Points.ScoredPoint;
@@ -45,34 +41,24 @@ public class HybridSearchService {
     private static final Logger log = LoggerFactory.getLogger(HybridSearchService.class);
 
     private static final int MAX_FAILURE_DETAIL_LENGTH = 240;
-    private static final long MINIMUM_QDRANT_QUERY_DURATION_NANOS =
-            Duration.ofMillis(1).toNanos();
-
-    private final QdrantClient qdrantClient;
+    private final QdrantQueryExecutor qdrantQueryExecutor;
     private final QueryEncodingServices queryEncoding;
-    private final QdrantSearchRequestFactory queryRequestFactory;
-    private final AppProperties appProperties;
-    private final Optional<QdrantGitHubCollectionDiscovery> gitHubCollectionDiscovery;
+    private final QdrantCollectionScopeResolver collectionScopeResolver;
 
     /**
      * Wires gRPC client and encoding dependencies for hybrid search.
      *
-     * @param qdrantClient Qdrant gRPC client
+     * @param qdrantQueryExecutor bounded Qdrant query execution
      * @param queryEncoding grouped query-encoding collaborators
-     * @param appProperties application configuration
-     * @param gitHubCollectionDiscovery optional discovery of dynamically created GitHub collections
+     * @param collectionScopeResolver Qdrant collection selection for retrieval constraints
      */
     public HybridSearchService(
-            QdrantClient qdrantClient,
+            QdrantQueryExecutor qdrantQueryExecutor,
             QueryEncodingServices queryEncoding,
-            QdrantSearchRequestFactory queryRequestFactory,
-            AppProperties appProperties,
-            Optional<QdrantGitHubCollectionDiscovery> gitHubCollectionDiscovery) {
-        this.qdrantClient = Objects.requireNonNull(qdrantClient, "qdrantClient");
+            QdrantCollectionScopeResolver collectionScopeResolver) {
+        this.qdrantQueryExecutor = Objects.requireNonNull(qdrantQueryExecutor, "qdrantQueryExecutor");
         this.queryEncoding = Objects.requireNonNull(queryEncoding, "queryEncoding");
-        this.queryRequestFactory = Objects.requireNonNull(queryRequestFactory, "queryRequestFactory");
-        this.appProperties = Objects.requireNonNull(appProperties, "appProperties");
-        this.gitHubCollectionDiscovery = Objects.requireNonNull(gitHubCollectionDiscovery, "gitHubCollectionDiscovery");
+        this.collectionScopeResolver = Objects.requireNonNull(collectionScopeResolver, "collectionScopeResolver");
     }
 
     /**
@@ -149,27 +135,39 @@ public class HybridSearchService {
         float[] denseVector = queryEncoding.embeddingClient().embed(query, LlmGatewayTier.LIVE);
         LexicalSparseVectorEncoder.SparseVector sparseVector =
                 queryEncoding.sparseVectorEncoder().encode(query);
-        HybridQueryConfig queryConfig = HybridQueryConfig.fromProperties(appProperties);
-        long queryDeadlineNanos = queryDeadlineNanos(queryConfig.queryTimeout());
-        List<CollectionQueryDispatch> queryDispatches = new ArrayList<>(requiredRetrievalConstraints.size());
+        Duration queryTimeout = qdrantQueryExecutor.queryTimeout();
+        List<Map<String, QueryPoints>> queryRequestsByConstraint = new ArrayList<>(requiredRetrievalConstraints.size());
         for (RetrievalConstraint requiredRetrievalConstraint : requiredRetrievalConstraints) {
-            List<String> collectionNames = collectionNamesFor(requiredRetrievalConstraint);
+            List<String> collectionNames = collectionScopeResolver.collectionNamesFor(requiredRetrievalConstraint);
             Optional<Filter> retrievalFilter =
                     queryEncoding.constraintBuilder().buildFilter(requiredRetrievalConstraint);
             EncodedQuery encodedQuery = new EncodedQuery(denseVector, sparseVector, retrievalFilter);
-            Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
-                    LinkedHashMap.newLinkedHashMap(collectionNames.size());
+            Map<String, QueryPoints> requestsByCollection = LinkedHashMap.newLinkedHashMap(collectionNames.size());
             for (String collectionName : collectionNames) {
                 QueryPoints queryRequest = Objects.requireNonNull(
-                        buildHybridQueryRequest(collectionName, encodedQuery, queryConfig, topK), "QueryPoints");
-                CompletableFuture<List<ScoredPoint>> collectionQueryFuture =
-                        dispatchQueryBeforeDeadline(queryRequest, queryDeadlineNanos);
-                futuresByCollection.put(collectionName, collectionQueryFuture);
+                        buildHybridQueryRequest(collectionName, encodedQuery, topK), "QueryPoints");
+                requestsByCollection.put(collectionName, queryRequest);
             }
-            queryDispatches.add(
-                    new CollectionQueryDispatch(futuresByCollection, queryConfig.queryTimeout(), queryDeadlineNanos));
+            queryRequestsByConstraint.add(requestsByCollection);
         }
-        return collectSearchOutcomes(queryDispatches, topK);
+        List<String> admissionCollectionNames = queryRequestsByConstraint.stream()
+                .flatMap(requestsByCollection -> requestsByCollection.keySet().stream())
+                .distinct()
+                .toList();
+        return qdrantQueryExecutor.executeAdmitted(queryTimeout, admissionCollectionNames, queryDeadlineNanos -> {
+            List<CollectionQueryDispatch> queryDispatches = new ArrayList<>(queryRequestsByConstraint.size());
+            for (Map<String, QueryPoints> requestsByCollection : queryRequestsByConstraint) {
+                Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
+                        LinkedHashMap.newLinkedHashMap(requestsByCollection.size());
+                for (Map.Entry<String, QueryPoints> queryRequestEntry : requestsByCollection.entrySet()) {
+                    CompletableFuture<List<ScoredPoint>> collectionQueryFuture =
+                            qdrantQueryExecutor.queryBeforeDeadline(queryRequestEntry.getValue(), queryDeadlineNanos);
+                    futuresByCollection.put(queryRequestEntry.getKey(), collectionQueryFuture);
+                }
+                queryDispatches.add(new CollectionQueryDispatch(futuresByCollection, queryTimeout, queryDeadlineNanos));
+            }
+            return collectSearchOutcomes(queryDispatches, topK);
+        });
     }
 
     /**
@@ -210,25 +208,32 @@ public class HybridSearchService {
         }
 
         boolean exactOverloadSelected = queryEncoding.hasExactJavaApiOverload(query);
-        HybridQueryConfig queryConfig = HybridQueryConfig.fromProperties(appProperties);
-        String documentationCollectionName =
-                appProperties.getQdrant().getCollections().getDocs();
-        long queryDeadlineNanos = queryDeadlineNanos(queryConfig.queryTimeout());
-        List<CollectionQueryDispatch> queryDispatches = new ArrayList<>(requiredRetrievalConstraints.size());
         if (exactOverloadSelected) {
-            for (RetrievalConstraint requiredRetrievalConstraint : requiredRetrievalConstraints) {
-                Filter exactCitationFilter = queryEncoding
-                        .constraintBuilder()
-                        .buildCitationFilter(requiredRetrievalConstraint, query)
-                        .orElseThrow();
-                CompletableFuture<List<ScoredPoint>> documentationScrollFuture = dispatchExactDocumentationCitation(
-                        documentationCollectionName, exactCitationFilter, topK, queryDeadlineNanos);
-                queryDispatches.add(new CollectionQueryDispatch(
-                        Map.of(documentationCollectionName, documentationScrollFuture),
-                        queryConfig.queryTimeout(),
-                        queryDeadlineNanos));
-            }
-            return collectSearchOutcomes(queryDispatches, topK);
+            Duration queryTimeout = qdrantQueryExecutor.queryTimeout();
+            String documentationCollectionName = collectionScopeResolver.documentationCollectionName();
+            List<ScrollPoints> documentationScrollRequests = requiredRetrievalConstraints.stream()
+                    .map(requiredRetrievalConstraint -> queryEncoding
+                            .constraintBuilder()
+                            .buildCitationFilter(requiredRetrievalConstraint, query)
+                            .orElseThrow())
+                    .map(exactCitationFilter -> qdrantQueryExecutor.buildExactCitationScroll(
+                            documentationCollectionName, exactCitationFilter, topK))
+                    .toList();
+            return qdrantQueryExecutor.executeAdmitted(
+                    queryTimeout, List.of(documentationCollectionName), queryDeadlineNanos -> {
+                        List<CollectionQueryDispatch> queryDispatches =
+                                new ArrayList<>(documentationScrollRequests.size());
+                        for (ScrollPoints documentationScrollRequest : documentationScrollRequests) {
+                            CompletableFuture<List<ScoredPoint>> documentationScrollFuture =
+                                    qdrantQueryExecutor.scrollBeforeDeadline(
+                                            documentationScrollRequest, queryDeadlineNanos);
+                            queryDispatches.add(new CollectionQueryDispatch(
+                                    Map.of(documentationCollectionName, documentationScrollFuture),
+                                    queryTimeout,
+                                    queryDeadlineNanos));
+                        }
+                        return collectSearchOutcomes(queryDispatches, topK);
+                    });
         }
 
         String expandedCitationQuery = queryEncoding.expandSparseCitationQuery(query);
@@ -240,34 +245,39 @@ public class HybridSearchService {
                     .toList();
         }
 
+        Duration queryTimeout = qdrantQueryExecutor.queryTimeout();
+        List<String> officialDocumentCollectionNames = collectionScopeResolver.officialDocumentCollectionNames();
+        List<Map<String, QueryPoints>> queryRequestsByConstraint = new ArrayList<>(requiredRetrievalConstraints.size());
         for (RetrievalConstraint requiredRetrievalConstraint : requiredRetrievalConstraints) {
             Optional<Filter> retrievalFilter =
                     queryEncoding.constraintBuilder().buildCitationFilter(requiredRetrievalConstraint, query);
             EncodedCitationQuery encodedCitationQuery = new EncodedCitationQuery(sparseVector, retrievalFilter);
-            List<String> officialDocumentCollectionNames = officialDocumentCollectionNames();
-            Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
+            Map<String, QueryPoints> requestsByCollection =
                     LinkedHashMap.newLinkedHashMap(officialDocumentCollectionNames.size());
             for (String officialDocumentCollectionName : officialDocumentCollectionNames) {
                 QueryPoints queryRequest = buildDocumentationCitationQueryRequest(
-                        officialDocumentCollectionName, encodedCitationQuery, queryConfig, topK);
-                CompletableFuture<List<ScoredPoint>> documentationQueryFuture =
-                        dispatchQueryBeforeDeadline(queryRequest, queryDeadlineNanos);
-                futuresByCollection.put(officialDocumentCollectionName, documentationQueryFuture);
+                        officialDocumentCollectionName, encodedCitationQuery, topK);
+                requestsByCollection.put(officialDocumentCollectionName, queryRequest);
             }
-            queryDispatches.add(
-                    new CollectionQueryDispatch(futuresByCollection, queryConfig.queryTimeout(), queryDeadlineNanos));
+            queryRequestsByConstraint.add(requestsByCollection);
         }
-        return collectSearchOutcomes(queryDispatches, topK);
-    }
-
-    private CompletableFuture<List<ScoredPoint>> dispatchExactDocumentationCitation(
-            String documentationCollectionName,
-            Filter exactCitationFilter,
-            int citationCandidateLimit,
-            long queryDeadlineNanos) {
-        ScrollPoints scrollRequest = queryRequestFactory.buildExactCitationScroll(
-                documentationCollectionName, exactCitationFilter, citationCandidateLimit);
-        return dispatchScrollBeforeDeadline(scrollRequest, queryDeadlineNanos);
+        return qdrantQueryExecutor.executeAdmitted(
+                queryTimeout, officialDocumentCollectionNames, queryDeadlineNanos -> {
+                    List<CollectionQueryDispatch> queryDispatches = new ArrayList<>(queryRequestsByConstraint.size());
+                    for (Map<String, QueryPoints> requestsByCollection : queryRequestsByConstraint) {
+                        Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
+                                LinkedHashMap.newLinkedHashMap(requestsByCollection.size());
+                        for (Map.Entry<String, QueryPoints> queryRequestEntry : requestsByCollection.entrySet()) {
+                            CompletableFuture<List<ScoredPoint>> documentationQueryFuture =
+                                    qdrantQueryExecutor.queryBeforeDeadline(
+                                            queryRequestEntry.getValue(), queryDeadlineNanos);
+                            futuresByCollection.put(queryRequestEntry.getKey(), documentationQueryFuture);
+                        }
+                        queryDispatches.add(
+                                new CollectionQueryDispatch(futuresByCollection, queryTimeout, queryDeadlineNanos));
+                    }
+                    return collectSearchOutcomes(queryDispatches, topK);
+                });
     }
 
     private List<SearchOutcome> collectSearchOutcomes(List<CollectionQueryDispatch> queryDispatches, int topK) {
@@ -319,75 +329,6 @@ public class HybridSearchService {
         return new SearchOutcome(rankedDocuments, retrievalNotices);
     }
 
-    private static long queryDeadlineNanos(Duration queryTimeout) {
-        return System.nanoTime() + queryTimeout.toNanos();
-    }
-
-    private CompletableFuture<List<ScoredPoint>> dispatchQueryBeforeDeadline(
-            QueryPoints queryRequest, long queryDeadlineNanos) {
-        long remainingQueryDurationNanos = queryDeadlineNanos - System.nanoTime();
-        if (remainingQueryDurationNanos < MINIMUM_QDRANT_QUERY_DURATION_NANOS) {
-            return QdrantFutureAwaiter.exhaustedQueryBudgetFuture();
-        }
-        Duration remainingQueryDuration = Duration.ofNanos(remainingQueryDurationNanos);
-        try {
-            return QdrantListenableFutureBridge.toCompletableFuture(
-                    qdrantClient.queryAsync(queryRequest, remainingQueryDuration));
-        } catch (RuntimeException queryDispatchFailure) {
-            return CompletableFuture.failedFuture(queryDispatchFailure);
-        }
-    }
-
-    private CompletableFuture<List<ScoredPoint>> dispatchScrollBeforeDeadline(
-            ScrollPoints scrollRequest, long queryDeadlineNanos) {
-        long remainingQueryDurationNanos = queryDeadlineNanos - System.nanoTime();
-        if (remainingQueryDurationNanos < MINIMUM_QDRANT_QUERY_DURATION_NANOS) {
-            return QdrantFutureAwaiter.exhaustedQueryBudgetFuture();
-        }
-        Duration remainingQueryDuration = Duration.ofNanos(remainingQueryDurationNanos);
-        try {
-            return QdrantListenableFutureBridge.transformToCompletableFuture(
-                    qdrantClient.scrollAsync(scrollRequest, remainingQueryDuration),
-                    scrollResponse -> scrollResponse.getResultList().stream()
-                            .map(retrievedPoint -> ScoredPoint.newBuilder()
-                                    .setId(retrievedPoint.getId())
-                                    .setScore(1.0f)
-                                    .putAllPayload(retrievedPoint.getPayloadMap())
-                                    .build())
-                            .toList());
-        } catch (RuntimeException scrollDispatchFailure) {
-            return CompletableFuture.failedFuture(scrollDispatchFailure);
-        }
-    }
-
-    /**
-     * Groups Qdrant hybrid query configuration that travels together across search operations.
-     *
-     * @param denseVectorName Qdrant named vector key for dense embeddings
-     * @param sparseVectorName Qdrant named vector key for sparse tokens
-     * @param prefetchLimit per-collection prefetch candidate count
-     * @param rrfK reciprocal rank fusion k parameter
-     * @param queryTimeout shared timeout budget for the complete collection fan-out
-     */
-    record HybridQueryConfig(
-            String denseVectorName, String sparseVectorName, int prefetchLimit, int rrfK, Duration queryTimeout) {
-
-        HybridQueryConfig {
-            Objects.requireNonNull(denseVectorName, "denseVectorName");
-            Objects.requireNonNull(sparseVectorName, "sparseVectorName");
-            Objects.requireNonNull(queryTimeout, "queryTimeout");
-        }
-
-        static HybridQueryConfig fromProperties(AppProperties appProperties) {
-            return new HybridQueryConfig(
-                    appProperties.getQdrant().getDenseVectorName(),
-                    appProperties.getQdrant().getSparseVectorName(),
-                    appProperties.getQdrant().getPrefetchLimit(),
-                    appProperties.getQdrant().getRrfK(),
-                    appProperties.getQdrant().getQueryTimeout());
-        }
-    }
-
     /**
      * Groups the three query-encoding outputs that always travel together into a single search call.
      *
@@ -403,31 +344,6 @@ public class HybridSearchService {
             Objects.requireNonNull(denseVector, "denseVector");
             Objects.requireNonNull(sparseVector, "sparseVector");
             Objects.requireNonNull(retrievalFilter, "retrievalFilter");
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj) return true;
-            if (obj == null || getClass() != obj.getClass()) return false;
-            EncodedQuery that = (EncodedQuery) obj;
-            return java.util.Arrays.equals(denseVector, that.denseVector)
-                    && java.util.Objects.equals(sparseVector, that.sparseVector)
-                    && java.util.Objects.equals(retrievalFilter, that.retrievalFilter);
-        }
-
-        @Override
-        public int hashCode() {
-            int hash = java.util.Objects.hash(sparseVector, retrievalFilter);
-            hash = 31 * hash + java.util.Arrays.hashCode(denseVector);
-            return hash;
-        }
-
-        @Override
-        public String toString() {
-            return "EncodedQuery{" + "denseVector="
-                    + java.util.Arrays.toString(denseVector) + ", sparseVector="
-                    + sparseVector + ", retrievalFilter="
-                    + retrievalFilter + '}';
         }
     }
 
@@ -451,30 +367,21 @@ public class HybridSearchService {
         }
     }
 
-    private QueryPoints buildHybridQueryRequest(
-            String collectionName, EncodedQuery encodedQuery, HybridQueryConfig queryConfig, int limit) {
-        return queryRequestFactory.buildHybridQuery(
+    private QueryPoints buildHybridQueryRequest(String collectionName, EncodedQuery encodedQuery, int limit) {
+        return qdrantQueryExecutor.buildHybridQuery(
                 collectionName,
                 encodedQuery.denseVector(),
                 encodedQuery.sparseVector(),
                 encodedQuery.retrievalFilter(),
-                queryConfig.denseVectorName(),
-                queryConfig.sparseVectorName(),
-                queryConfig.prefetchLimit(),
-                queryConfig.rrfK(),
                 limit);
     }
 
     private QueryPoints buildDocumentationCitationQueryRequest(
-            String documentationCollectionName,
-            EncodedCitationQuery encodedCitationQuery,
-            HybridQueryConfig queryConfig,
-            int citationCandidateLimit) {
-        return queryRequestFactory.buildDocumentationCitationQuery(
+            String documentationCollectionName, EncodedCitationQuery encodedCitationQuery, int citationCandidateLimit) {
+        return qdrantQueryExecutor.buildDocumentationCitationQuery(
                 documentationCollectionName,
                 encodedCitationQuery.sparseVector(),
                 encodedCitationQuery.retrievalFilter(),
-                queryConfig.sparseVectorName(),
                 citationCandidateLimit);
     }
 
@@ -548,40 +455,6 @@ public class HybridSearchService {
                 scoredPointsByUuid.put(pointId, new ScoredPointMatch(pointId, point.getScore(), point, collectionName));
             }
         }
-    }
-
-    private List<String> allCollectionNames() {
-        List<String> coreCollections =
-                appProperties.getQdrant().getCollections().all();
-        List<String> gitHubCollections = gitHubCollectionDiscovery
-                .map(QdrantGitHubCollectionDiscovery::getDiscoveredCollections)
-                .orElse(List.of());
-        if (gitHubCollections.isEmpty()) {
-            return coreCollections;
-        }
-        List<String> combined = new ArrayList<>(coreCollections.size() + gitHubCollections.size());
-        combined.addAll(coreCollections);
-        combined.addAll(gitHubCollections);
-        return List.copyOf(combined);
-    }
-
-    private List<String> collectionNamesFor(RetrievalConstraint retrievalConstraint) {
-        if (!isCanonicalOfficialDocumentationScope(retrievalConstraint)) {
-            return allCollectionNames();
-        }
-        return officialDocumentCollectionNames();
-    }
-
-    private List<String> officialDocumentCollectionNames() {
-        var collections = appProperties.getQdrant().getCollections();
-        return List.of(collections.getDocs(), collections.getPdfs());
-    }
-
-    private static boolean isCanonicalOfficialDocumentationScope(RetrievalConstraint retrievalConstraint) {
-        List<String> officialDocumentationSourceIdentities = DocsSourceRegistry.officialDocumentationSourceIdentities();
-        return "official".equals(retrievalConstraint.sourceKind())
-                && !retrievalConstraint.docSet().isEmpty()
-                && officialDocumentationSourceIdentities.containsAll(retrievalConstraint.docSet());
     }
 
     private static String extractPointId(ScoredPoint point) {
