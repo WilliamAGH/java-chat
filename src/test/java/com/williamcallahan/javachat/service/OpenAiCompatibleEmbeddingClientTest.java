@@ -721,6 +721,40 @@ class OpenAiCompatibleEmbeddingClientTest {
     }
 
     @Test
+    void defersProbeDuringBatchCooldownWithoutContactingProvider() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        EmbeddingServiceAsync batchEmbeddingService = mockAsyncEmbeddingService(batchClient);
+        when(batchEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.failedFuture(rateLimitFailure()));
+
+        try (OpenAiCompatibleEmbeddingClient clientAdapter =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
+            assertThrows(
+                    EmbeddingServiceUnavailableException.class,
+                    () -> clientAdapter.embed(List.of("batch document"), LlmGatewayTier.BATCH));
+
+            assertThrows(OpenAiCompatibleEmbeddingClient.EmbeddingProbeDeferredException.class, clientAdapter::warmUp);
+            verify(batchEmbeddingService, times(1)).create(any(), any(RequestOptions.class));
+        }
+    }
+
+    @Test
+    void probeFailureFromProviderIsNotDeferred() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        EmbeddingServiceAsync batchEmbeddingService = mockAsyncEmbeddingService(batchClient);
+        when(batchEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("provider defect")));
+
+        try (OpenAiCompatibleEmbeddingClient clientAdapter =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
+            assertThrows(EmbeddingServiceUnavailableException.class, clientAdapter::warmUp);
+            verify(batchEmbeddingService, times(1)).create(any(), any(RequestOptions.class));
+        }
+    }
+
+    @Test
     void batchRetryAfterCooldownDoesNotBlockLiveRequests() {
         OpenAIClient liveClient = mock(OpenAIClient.class);
         OpenAIClient batchClient = mock(OpenAIClient.class);
