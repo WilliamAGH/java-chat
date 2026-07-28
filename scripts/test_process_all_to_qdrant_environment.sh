@@ -19,6 +19,9 @@ set --
 # shellcheck source=process_all_to_qdrant.sh
 source "$TEST_SCRIPT_DIRECTORY/process_all_to_qdrant.sh"
 
+export LOG_FILE="$TEST_WORK_DIRECTORY/process_qdrant.log"
+export PID_FILE="$TEST_WORK_DIRECTORY/process_qdrant.pid"
+
 load_env_file() {
     :
 }
@@ -41,6 +44,10 @@ build_application() {
 
 locate_app_jar() {
     printf '%s\n' "$TEST_WORK_DIRECTORY/application.jar"
+}
+
+stage_app_jar() {
+    printf '%s\n' "$1"
 }
 
 monitor_java_process() {
