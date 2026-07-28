@@ -31,6 +31,20 @@ class JavaInvocationSignatureTest {
     }
 
     @Test
+    void normalizesArrayVarargsForJavadocAnchors() {
+        assertEquals(
+                "foo(int[]...)",
+                JavaInvocationSignature.afterMethodName("foo(int[]...)", 3)
+                        .anchorFor("foo")
+                        .orElseThrow());
+        assertEquals(
+                "foo(int[][]...)",
+                JavaInvocationSignature.afterMethodName("foo(int[][]...)", 3)
+                        .anchorFor("foo")
+                        .orElseThrow());
+    }
+
+    @Test
     void refusesValuesNestedCallsGenericsAndIncompleteSyntax() {
         assertUnavailable("List.of(firstValue, secondValue)");
         assertUnavailable("List.of(factory.create(E))");
