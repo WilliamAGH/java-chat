@@ -379,7 +379,14 @@ class HybridSearchServiceTest {
         for (QueryPoints citationQuery : capturedQueries) {
             assertEquals("bm25", citationQuery.getUsing());
             assertEquals(3, citationQuery.getLimit());
-            assertTrue(citationQuery.getWithPayload().getEnable());
+            assertTrue(citationQuery
+                    .getWithPayload()
+                    .getInclude()
+                    .getFieldsList()
+                    .containsAll(List.of(
+                            QdrantPayloadFieldSchema.DOC_CONTENT_FIELD,
+                            QdrantPayloadFieldSchema.URL_FIELD,
+                            QdrantPayloadFieldSchema.TITLE_FIELD)));
             assertEquals(0, citationQuery.getPrefetchCount());
             assertTrue(citationQuery.getQuery().hasNearest());
             assertFalse(citationQuery.getQuery().hasRrf());
@@ -430,7 +437,14 @@ class HybridSearchServiceTest {
         ScrollPoints exactCitationScroll = capturedScrolls.getFirst();
         assertEquals(appProperties.getQdrant().getCollections().getDocs(), exactCitationScroll.getCollectionName());
         assertEquals(3, exactCitationScroll.getLimit());
-        assertTrue(exactCitationScroll.getWithPayload().getEnable());
+        assertTrue(exactCitationScroll
+                .getWithPayload()
+                .getInclude()
+                .getFieldsList()
+                .containsAll(List.of(
+                        QdrantPayloadFieldSchema.DOC_CONTENT_FIELD,
+                        QdrantPayloadFieldSchema.URL_FIELD,
+                        QdrantPayloadFieldSchema.TITLE_FIELD)));
         assertTrue(exactCitationScroll.hasFilter());
         String versionFilter = exactCitationScroll.getFilter().toString();
         assertTrue(versionFilter.contains(QdrantPayloadFieldSchema.DOC_VERSION_FIELD));
