@@ -294,13 +294,15 @@ body {
   }
 }
 
+/* Soft breathing blink: never fully invisible, so the cursor reads as a
+ * live caret rather than a terminal-style hard blink. */
 @keyframes typing-cursor {
   0%,
   100% {
     opacity: 1;
   }
   50% {
-    opacity: 0;
+    opacity: 0.25;
   }
 }
 

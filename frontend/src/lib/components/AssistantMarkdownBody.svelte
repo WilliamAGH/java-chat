@@ -141,6 +141,7 @@
     width: 2px;
     height: 1.2em;
     background: var(--color-accent);
+    border-radius: 1px;
     margin-left: 2px;
     vertical-align: text-bottom;
     opacity: 0;
@@ -149,12 +150,13 @@
 
   .cursor.visible {
     opacity: 1;
-    animation: typing-cursor 0.8s ease-in-out infinite;
+    animation: typing-cursor 1s ease-in-out infinite;
   }
 
-  @keyframes typing-cursor {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    .cursor.visible {
+      animation: none;
+    }
   }
 
   @media (max-width: 640px) {

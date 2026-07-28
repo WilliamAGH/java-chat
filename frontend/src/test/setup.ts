@@ -55,6 +55,24 @@ if (typeof HTMLDialogElement.prototype.close !== "function") {
   });
 }
 
+// jsdom doesn't implement the Web Animations API; Svelte transitions (fade/fly) rely on it.
+// The stub finishes asynchronously so outro transitions complete and elements unmount.
+// oxlint-disable-next-line no-extend-native -- jsdom polyfill, not production code
+Object.defineProperty(Element.prototype, "animate", {
+  writable: true,
+  value: () => {
+    const animationStub = {
+      onfinish: null as (() => void) | null,
+      playState: "finished",
+      currentTime: 0,
+      effect: null,
+      cancel: () => clearTimeout(finishTimer),
+    };
+    const finishTimer = setTimeout(() => animationStub.onfinish?.(), 0);
+    return animationStub;
+  },
+});
+
 // requestAnimationFrame is used for post-update DOM adjustments; provide a safe fallback.
 if (typeof window.requestAnimationFrame !== "function") {
   window.requestAnimationFrame = (callback: FrameRequestCallback) =>

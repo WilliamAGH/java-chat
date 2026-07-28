@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { fade } from 'svelte/transition'
+
   /**
    * ThinkingIndicator - Transparent AI processing status display.
    *
@@ -73,31 +75,36 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
       <path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />
     </svg>
-
-    <!-- Animated ring indicator -->
-    <div class="ring-pulse"></div>
   </div>
 
   <!-- Status card -->
   <div class="thinking-card">
-    <!-- Phase icon - dots for connecting, SVG icons for search/generate -->
-    <div class="phase-icon">
-      {#if iconType === 'dots'}
+    <!-- Phase icons cross-fade: dots for connecting, search/sparkle for later phases -->
+    <div class="phase-icon" aria-hidden="true">
+      <div class="phase-icon-layer" class:phase-icon-active={iconType === 'dots'}>
         <div class="dots-row">
           <span class="dot"></span>
           <span class="dot"></span>
           <span class="dot"></span>
         </div>
-      {:else}
-        <svg class="icon-{iconType}" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-          <path fill-rule={iconType === 'search' ? 'evenodd' : undefined} clip-rule={iconType === 'search' ? 'evenodd' : undefined} d={ICON_PATHS[iconType]}/>
+      </div>
+      <div class="phase-icon-layer" class:phase-icon-active={iconType === 'search'}>
+        <svg class="icon-search" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" clip-rule="evenodd" d={ICON_PATHS.search}/>
         </svg>
-      {/if}
+      </div>
+      <div class="phase-icon-layer" class:phase-icon-active={iconType === 'sparkle'}>
+        <svg class="icon-sparkle" viewBox="0 0 20 20" fill="currentColor">
+          <path d={ICON_PATHS.sparkle}/>
+        </svg>
+      </div>
     </div>
 
     <!-- Status content -->
     <div class="status-content">
-      <p class="status-message">{displayMessage}</p>
+      {#key displayMessage}
+        <p class="status-message" in:fade={{ duration: 180 }}>{displayMessage}</p>
+      {/key}
       {#if statusDetails}
         <p class="status-details">{statusDetails}</p>
       {/if}
@@ -116,15 +123,15 @@
   .thinking-indicator {
     --shimmer-duration: calc(var(--duration-bounce) * 1.07);
     --shimmer-duration-fast: calc(var(--duration-glow) * 0.8);
+    /* Decelerate curve reserved for phase-icon cross-fades. */
+    --ease-icon-swap: cubic-bezier(0.2, 0, 0, 1);
 
     display: flex;
     gap: var(--space-3);
-    animation: fade-in-up var(--duration-normal) var(--ease-out);
   }
 
-  /* Avatar with pulsing state */
+  /* Split enter: avatar lands first, card follows a beat later. */
   .thinking-avatar {
-    position: relative;
     flex-shrink: 0;
     width: 32px;
     height: 32px;
@@ -135,6 +142,7 @@
     border: 1px solid var(--color-accent-muted);
     border-radius: var(--radius-md);
     color: var(--color-accent);
+    animation: fade-in-up var(--duration-normal) var(--ease-out) backwards;
   }
 
   .thinking-avatar svg {
@@ -154,27 +162,6 @@
     }
   }
 
-  /* Animated ring around avatar */
-  .ring-pulse {
-    position: absolute;
-    inset: -3px;
-    border: var(--space-0, 2px) solid var(--color-accent);
-    border-radius: var(--radius-lg);
-    opacity: 0;
-    animation: ring-expand var(--duration-pulse) ease-out infinite;
-  }
-
-  @keyframes ring-expand {
-    0% {
-      opacity: 0.6;
-      transform: scale(0.9);
-    }
-    100% {
-      opacity: 0;
-      transform: scale(1.2);
-    }
-  }
-
   /* Status card */
   .thinking-card {
     position: relative;
@@ -189,17 +176,39 @@
     overflow: hidden;
     min-width: 180px;
     max-width: 320px;
+    animation: fade-in-up var(--duration-normal) var(--ease-out) 80ms backwards;
   }
 
-  /* Phase icon container */
+  /* Phase icon container: stacked layers cross-fade on phase change
+   * (scale 0.25→1, opacity 0→1, blur 4px→0) so swaps feel continuous
+   * rather than hard cuts. */
   .phase-icon {
+    position: relative;
     flex-shrink: 0;
     width: 24px;
     height: 24px;
+    color: var(--color-accent);
+  }
+
+  .phase-icon-layer {
+    position: absolute;
+    inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--color-accent);
+    opacity: 0;
+    transform: scale(0.25);
+    filter: blur(4px);
+    transition:
+      opacity var(--duration-normal) var(--ease-icon-swap),
+      transform var(--duration-normal) var(--ease-icon-swap),
+      filter var(--duration-normal) var(--ease-icon-swap);
+  }
+
+  .phase-icon-layer.phase-icon-active {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
   }
 
   /* Dots animation for connecting phase */
@@ -244,14 +253,16 @@
     animation: sparkle-glow var(--duration-glow) ease-in-out infinite;
   }
 
+  /* Gentle opacity/scale pulse; animating filter (drop-shadow) forces
+   * expensive repaints every frame, so the glow is conveyed by motion. */
   @keyframes sparkle-glow {
     0%, 100% {
-      opacity: 0.7;
-      filter: drop-shadow(0 0 0 transparent);
+      opacity: 0.75;
+      transform: scale(0.92);
     }
     50% {
       opacity: 1;
-      filter: drop-shadow(0 0 var(--loading-dot-gap) var(--color-accent));
+      transform: scale(1);
     }
   }
 
@@ -336,6 +347,30 @@
       transparent 100%
     );
     background-size: 200% 100%;
+  }
+
+  /* Reduced motion: keep the status readable, drop all ambient motion. */
+  @media (prefers-reduced-motion: reduce) {
+    .thinking-avatar,
+    .thinking-card {
+      animation: fade-in var(--duration-fast) ease-out backwards;
+    }
+
+    .thinking-avatar svg,
+    .dot,
+    .icon-search,
+    .icon-sparkle,
+    .shimmer {
+      animation: none;
+    }
+
+    .phase-icon-layer {
+      transition-property: opacity;
+    }
+
+    .shimmer {
+      opacity: 0.4;
+    }
   }
 
   /* Mobile adjustments */
