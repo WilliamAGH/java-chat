@@ -126,6 +126,26 @@ class HtmlContentExtractorTest {
     }
 
     @Test
+    void skipsBlankMemberAnchorWithoutDroppingValidSiblings() {
+        Document document = Jsoup.parse("""
+            <html><body class="class-declaration-page"><main>
+              <section class="detail" id="">
+                <div class="member-signature">void malformed()</div>
+              </section>
+              <section class="detail" id="map(java.util.function.Function)">
+                <div class="member-signature">Stream map(Function mapper)</div>
+              </section>
+            </main></body></html>
+            """);
+        HtmlContentExtractor extractor = new HtmlContentExtractor();
+
+        JavaApiPageExtraction extraction = extractor.extractJavaApiPage(document);
+
+        assertEquals(1, extraction.anchoredSections().size());
+        assertEquals(MAP_MEMBER_ANCHOR, extraction.anchoredSections().getFirst().anchor());
+    }
+
+    @Test
     void explicitlyExcludesModernClassUsePages() {
         Document document = Jsoup.parse("""
             <html><body class="class-use-page"><main>

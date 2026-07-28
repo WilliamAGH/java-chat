@@ -92,9 +92,10 @@ public final class JavaApiPageExtractor {
     private List<JavaApiAnchoredSection> extractAnchoredSections(Document extractionDocument) {
         List<JavaApiAnchoredSection> anchoredSections = new ArrayList<>();
         for (Element memberDetail : extractionDocument.select(JAVA_API_MEMBER_DETAIL_SELECTOR)) {
+            String memberDomIdentifier = memberDetail.id();
             String memberText = extractMemberText(memberDetail);
-            if (!memberText.isBlank()) {
-                JavadocMemberAnchor memberAnchor = new JavadocMemberAnchor(memberDetail.id());
+            if (!memberDomIdentifier.isBlank() && !memberText.isBlank()) {
+                JavadocMemberAnchor memberAnchor = new JavadocMemberAnchor(memberDomIdentifier);
                 anchoredSections.add(new JavaApiAnchoredSection(memberAnchor, memberText));
             }
         }
