@@ -12,6 +12,7 @@ type GuidedCitationFetchResult = Awaited<
 type GuidedCitationFetchOptions = Parameters<
   typeof import("../services/guided").fetchGuidedLessonCitations
 >[1];
+type GuidedStreamCallbacks = import("../services/guided").GuidedStreamCallbacks;
 
 const fetchTocMock = vi.fn<FetchTocFunction>();
 const streamLessonContentMock = vi.fn();
@@ -20,6 +21,7 @@ const streamGuidedChatMock = vi.fn();
 const TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE = "The guided provider ended the stream";
 const TEST_GUIDED_LESSON = createGuidedLessonFixture("intro", "Test Lesson", "Lesson summary");
 const OFFSCREEN_MESSAGES_SCROLL_HEIGHT = 1_000;
+const STREAMED_MESSAGES_SCROLL_HEIGHT = 3_657;
 const VISIBLE_MESSAGES_CONTAINER_HEIGHT = 200;
 const NEW_UPDATES_INDICATOR_NAME = "1 new updates, jump to bottom";
 const ANY_NEW_UPDATES_INDICATOR_NAME = /jump to/i;
@@ -634,6 +636,69 @@ describe("LearnView guided chat streaming stability", () => {
     await tick();
 
     expect(learnView.queryByRole("button", { name: ANY_NEW_UPDATES_INDICATOR_NAME })).toBeNull();
+  });
+
+  it("shows one new update when an active stream grows off-screen", async () => {
+    let activeGuidedStreamCallbacks: GuidedStreamCallbacks | undefined;
+    streamGuidedChatMock.mockImplementation(
+      async (
+        _sessionId: string,
+        _lessonSlug: string,
+        _guidedQuestion: string,
+        guidedStreamCallbacks: GuidedStreamCallbacks,
+      ) => {
+        activeGuidedStreamCallbacks = guidedStreamCallbacks;
+        return new Promise<void>(() => {});
+      },
+    );
+
+    const learnView = await renderLearnView();
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+
+    const messagesContainer = learnView.container.querySelector<HTMLElement>(
+      ".chat-panel--desktop .messages-container",
+    );
+    if (!messagesContainer) {
+      throw new Error("Expected the desktop messages container to be rendered");
+    }
+    Object.defineProperties(messagesContainer, {
+      scrollTop: { configurable: true, value: 800 },
+      scrollHeight: { configurable: true, value: OFFSCREEN_MESSAGES_SCROLL_HEIGHT },
+      clientHeight: {
+        configurable: true,
+        value: VISIBLE_MESSAGES_CONTAINER_HEIGHT,
+      },
+    });
+
+    await fireEvent.input(learnView.getByLabelText("Message input"), {
+      target: { value: "Explain the lesson" },
+    });
+    await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
+    await vi.waitFor(() => expect(activeGuidedStreamCallbacks).toBeDefined());
+
+    const guidedStreamCallbacks = activeGuidedStreamCallbacks;
+    if (!guidedStreamCallbacks) {
+      throw new Error("Expected guided stream callbacks to be captured");
+    }
+    expect(learnView.queryByRole("button", { name: ANY_NEW_UPDATES_INDICATOR_NAME })).toBeNull();
+
+    vi.useFakeTimers();
+    guidedStreamCallbacks.onChunk("First off-screen chunk");
+    Object.defineProperties(messagesContainer, {
+      scrollHeight: {
+        configurable: true,
+        value: STREAMED_MESSAGES_SCROLL_HEIGHT,
+      },
+    });
+    await tick();
+    await vi.advanceTimersByTimeAsync(100);
+
+    guidedStreamCallbacks.onChunk("Second off-screen chunk");
+    await tick();
+    await vi.advanceTimersByTimeAsync(50);
+    await tick();
+
+    expect(learnView.getByRole("button", { name: NEW_UPDATES_INDICATOR_NAME })).toBeInTheDocument();
   });
 
   it("clears the new-updates indicator when switching lessons", async () => {

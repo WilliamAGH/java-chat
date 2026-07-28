@@ -70,6 +70,49 @@ describe("createScrollAnchor final content", () => {
     expect(scrollToSpy).not.toHaveBeenCalled();
     expect(scrollAnchor.unseenCount).toBe(1);
     expect(scrollAnchor.showIndicator).toBe(true);
+
+    scrollAnchor.cleanup();
+  });
+
+  it("exposes the active message when streamed content grows off-screen", async () => {
+    vi.useFakeTimers();
+    const scrollContainer = document.createElement("div");
+    setScrollGeometry(scrollContainer, 800, 1_000, 200);
+    const scrollAnchor = createScrollAnchor({ indicatorDelayMs: 150 });
+    scrollAnchor.attach(scrollContainer);
+    scrollAnchor.onNewMessageStarted();
+
+    expect(scrollAnchor.unseenCount).toBe(0);
+
+    setScrollGeometry(scrollContainer, 800, 3_657, 200);
+    await scrollAnchor.onContentAdded();
+
+    expect(scrollAnchor.unseenCount).toBe(1);
+    expect(scrollAnchor.showIndicator).toBe(false);
+
+    vi.advanceTimersByTime(100);
+    await scrollAnchor.onContentAdded();
+    vi.advanceTimersByTime(50);
+
+    expect(scrollAnchor.unseenCount).toBe(1);
+    expect(scrollAnchor.showIndicator).toBe(true);
+    scrollAnchor.cleanup();
+  });
+
+  it("does not restore a pending update after the scroll state resets", async () => {
+    vi.useFakeTimers();
+    const scrollContainer = document.createElement("div");
+    setScrollGeometry(scrollContainer, 800, 3_657, 200);
+    const scrollAnchor = createScrollAnchor({ indicatorDelayMs: 150 });
+    scrollAnchor.attach(scrollContainer);
+
+    const pendingContentMeasurement = scrollAnchor.onContentAdded();
+    scrollAnchor.reset();
+    await pendingContentMeasurement;
+    vi.advanceTimersByTime(150);
+
+    expect(scrollAnchor.unseenCount).toBe(0);
+    expect(scrollAnchor.showIndicator).toBe(false);
     scrollAnchor.cleanup();
   });
 

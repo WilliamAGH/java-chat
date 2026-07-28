@@ -96,6 +96,7 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
   // Internal state
   let container: HTMLElement | null = null;
   let indicatorTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  let scrollStateVersion = 0;
 
   // Reactive state (Svelte 5 runes)
   let unseenCount = $state(0);
@@ -143,18 +144,19 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
    * Updates the indicator visibility with debouncing.
    */
   function updateIndicatorVisibility(): void {
+    if (unseenCount > 0 && !isNearBottom()) {
+      if (showIndicator || indicatorTimeoutId) return;
+      indicatorTimeoutId = setTimeout(() => {
+        indicatorTimeoutId = null;
+        showIndicator = unseenCount > 0 && !isNearBottom();
+      }, indicatorDelayMs);
+      return;
+    }
+
+    showIndicator = false;
     if (indicatorTimeoutId) {
       clearTimeout(indicatorTimeoutId);
       indicatorTimeoutId = null;
-    }
-
-    if (unseenCount > 0 && !isNearBottom()) {
-      // Delay showing indicator to prevent flicker
-      indicatorTimeoutId = setTimeout(() => {
-        showIndicator = true;
-      }, indicatorDelayMs);
-    } else {
-      showIndicator = false;
     }
   }
 
@@ -163,6 +165,7 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
    * Internal helper that doesn't rely on `this` binding.
    */
   function clearIndicatorStateInternal(): void {
+    scrollStateVersion++;
     unseenCount = 0;
     showIndicator = false;
 
@@ -225,6 +228,7 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      */
     cleanup(): void {
       detachUserIntentListeners();
+      scrollStateVersion++;
       container = null;
       if (indicatorTimeoutId) {
         clearTimeout(indicatorTimeoutId);
@@ -280,14 +284,25 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
     /**
      * Called when new content is added to the container (streaming chunks).
      *
-     * **Never auto-scrolls.** Only updates indicator visibility based on
-     * current scroll position. Does NOT increment the count—use
-     * `onNewMessageStarted()` when a new message begins.
+     * **Never auto-scrolls.** Waits for the streamed DOM update, claims the
+     * active message once when its content first grows off-screen, then keeps
+     * that message count stable for subsequent chunks.
      */
-    onContentAdded(): void {
+    async onContentAdded(): Promise<void> {
+      const contentContainer = container;
+      const contentScrollStateVersion = scrollStateVersion;
+      await tick();
+      if (
+        !contentContainer ||
+        container !== contentContainer ||
+        scrollStateVersion !== contentScrollStateVersion
+      ) {
+        return;
+      }
       if (!isNearBottom()) {
-        // User is scrolled up - update visibility but don't increment count
-        // (count is incremented once per message via onNewMessageStarted)
+        if (unseenCount === 0) {
+          unseenCount = 1;
+        }
         updateIndicatorVisibility();
       }
       // User at bottom - no need for indicator
