@@ -80,36 +80,36 @@
         </button>
       {/if}
     {/if}
-
-    {#if message.role === 'assistant'}
-      <div class="bubble-actions">
-        <button
-          type="button"
-          class="action-btn"
-          class:action-btn--success={copyState === 'success'}
-          class:action-btn--error={copyState === 'error'}
-          onclick={() => copyToClipboard(message.messageText)}
-          title={copyState === 'success' ? 'Copied!' : copyState === 'error' ? 'Copy failed' : 'Copy message'}
-          aria-label={copyState === 'success' ? 'Copied to clipboard' : copyState === 'error' ? 'Failed to copy' : 'Copy message'}
-        >
-          {#if copyState === 'success'}
-            <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd"/>
-            </svg>
-          {:else if copyState === 'error'}
-            <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z"/>
-            </svg>
-          {:else}
-            <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path d="M7 3.5A1.5 1.5 0 0 1 8.5 2h3.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 17 6.622V12.5a1.5 1.5 0 0 1-1.5 1.5h-1v-3.379a3 3 0 0 0-.879-2.121L10.5 5.379A3 3 0 0 0 8.379 4.5H7v-1Z"/>
-              <path d="M4.5 6A1.5 1.5 0 0 0 3 7.5v9A1.5 1.5 0 0 0 4.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L9.44 6.439A1.5 1.5 0 0 0 8.378 6H4.5Z"/>
-            </svg>
-          {/if}
-        </button>
-      </div>
-    {/if}
   </div>
+
+  {#if message.role === 'assistant'}
+    <div class="bubble-actions">
+      <button
+        type="button"
+        class="action-btn"
+        class:action-btn--success={copyState === 'success'}
+        class:action-btn--error={copyState === 'error'}
+        onclick={() => copyToClipboard(message.messageText)}
+        title={copyState === 'success' ? 'Copied!' : copyState === 'error' ? 'Copy failed' : 'Copy message'}
+        aria-label={copyState === 'success' ? 'Copied to clipboard' : copyState === 'error' ? 'Failed to copy' : 'Copy message'}
+      >
+        {#if copyState === 'success'}
+          <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd"/>
+          </svg>
+        {:else if copyState === 'error'}
+          <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z"/>
+          </svg>
+        {:else}
+          <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path d="M7 3.5A1.5 1.5 0 0 1 8.5 2h3.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 17 6.622V12.5a1.5 1.5 0 0 1-1.5 1.5h-1v-3.379a3 3 0 0 0-.879-2.121L10.5 5.379A3 3 0 0 0 8.379 4.5H7v-1Z"/>
+            <path d="M4.5 6A1.5 1.5 0 0 0 3 7.5v9A1.5 1.5 0 0 0 4.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L9.44 6.439A1.5 1.5 0 0 0 8.378 6H4.5Z"/>
+          </svg>
+        {/if}
+      </button>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -213,15 +213,17 @@
     background: var(--color-bg-hover);
   }
 
-  /* Actions - desktop hover only (never on touch / narrow viewports) */
+  /* Actions - desktop hover only (never on touch / narrow viewports).
+     In-flow flex sibling of the bubble so the layout always reserves its
+     width; an absolutely positioned overlay would be clipped by the chat
+     panel's overflow-x: hidden in narrow containers. */
   .bubble-actions {
     display: none;
-    position: absolute;
-    top: var(--space-2);
-    left: 100%;
-    /* Keep a hover bridge between bubble edge and button hit area. */
-    padding-left: var(--space-2);
-    width: max-content;
+    align-self: flex-start;
+    margin-top: var(--space-2);
+    /* Bridge the flex gap so hover travels from bubble edge to button hit area. */
+    margin-left: calc(-1 * var(--space-3));
+    padding-left: var(--space-3);
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--duration-fast) var(--ease-out);
@@ -233,8 +235,8 @@
       display: block;
     }
 
-    .bubble:hover .bubble-actions,
-    .bubble:focus-within .bubble-actions,
+    .message:hover .bubble-actions,
+    .message:focus-within .bubble-actions,
     .bubble-actions:hover,
     .bubble-actions:focus-within {
       opacity: 1;
@@ -253,7 +255,15 @@
     border-radius: var(--radius-md);
     color: var(--color-text-tertiary);
     cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out),
+      transform var(--duration-fast) var(--ease-out);
+  }
+
+  .action-btn:active {
+    transform: scale(0.96);
   }
 
   .action-btn:hover {
