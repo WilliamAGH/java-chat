@@ -1,10 +1,12 @@
 import "@testing-library/jest-dom/vitest";
 
-// Mock window.matchMedia for components that use media queries
+// Mock window.matchMedia for components that use media queries.
+// jsdom tests model a desktop environment, so a fine pointer is the default;
+// touch-specific suites override matchMedia locally.
 Object.defineProperty(window, "matchMedia", {
   writable: true,
   value: (query: string) => ({
-    matches: false,
+    matches: query === "(pointer: fine)",
     media: query,
     onchange: null,
     addListener: () => {},

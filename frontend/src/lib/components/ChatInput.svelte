@@ -4,6 +4,12 @@
   /** Default placeholder text for the chat input field. */
   const DEFAULT_PLACEHOLDER = 'Ask about Java...'
 
+  /**
+   * Devices with a precise pointer have a hardware keyboard, so Enter sends.
+   * Coarse-pointer devices use the software keyboard's Return key for newlines.
+   */
+  const FINE_POINTER_QUERY = '(pointer: fine)'
+
   interface Props {
     /** Callback invoked when user submits a message. */
     onSend: (message: string) => void
@@ -16,11 +22,16 @@
   let { onSend, disabled = false, placeholder = DEFAULT_PLACEHOLDER }: Props = $props()
 
   let inputValue = $state('')
+  let hasFinePointer = $state(window.matchMedia(FINE_POINTER_QUERY).matches)
   let messageInput: HTMLTextAreaElement | null = $state(null)
   let chatInputForm: HTMLFormElement | null = $state(null)
   let previouslyDisabled = false
   let submissionAwaitsDisabledTransition = false
   let submissionOwnsDisabledTransition = false
+  let previousInputLength = 0
+  // Owned by the `.input-field` CSS max-height; read once on mount so the
+  // resizer never hard-codes the cap.
+  let maxInputHeightPx = Number.POSITIVE_INFINITY
 
   $effect(() => {
     const hasDisabledStateTransition = disabled !== previouslyDisabled
@@ -30,7 +41,9 @@
     }
 
     if (submissionOwnsDisabledTransition && hasDisabledStateTransition && !disabled) {
-      if (canRestoreMessageInputFocus()) {
+      // Refocusing would reopen the software keyboard on touch devices, so only
+      // restore focus where a hardware keyboard is present.
+      if (hasFinePointer && canRestoreMessageInputFocus()) {
         messageInput?.focus()
       }
       submissionAwaitsDisabledTransition = false
@@ -56,6 +69,7 @@
     submissionAwaitsDisabledTransition = true
     onSend(submittedMessage)
     inputValue = ''
+    previousInputLength = 0
     if (messageInput) {
       messageInput.style.height = 'auto'
     }
@@ -69,19 +83,47 @@
   function handleKeyDown(keyboardEvent: KeyboardEvent): void {
     if (keyboardEvent.isComposing) return
 
-    if (keyboardEvent.key === 'Enter' && !keyboardEvent.shiftKey) {
+    if (keyboardEvent.key === 'Enter' && !keyboardEvent.shiftKey && hasFinePointer) {
       keyboardEvent.preventDefault()
       submitMessage()
     }
   }
 
-  function autoResize() {
+  function autoResize(inputEvent: Event): void {
+    if (inputEvent instanceof InputEvent && inputEvent.isComposing) return
     if (!messageInput) return
-    messageInput.style.height = 'auto'
-    messageInput.style.height = `${Math.min(messageInput.scrollHeight, 200)}px`
+
+    const inputShrank = messageInput.value.length < previousInputLength
+    previousInputLength = messageInput.value.length
+
+    // Collapse to `auto` only when text was deleted. Growth measures cleanly
+    // from the current height, and skipping the collapse avoids the transient
+    // shrink that makes iOS Safari re-center the caret (the visible "jump").
+    if (inputShrank) {
+      messageInput.style.height = 'auto'
+    }
+
+    const targetHeightPx = Math.min(messageInput.scrollHeight, maxInputHeightPx)
+    if (messageInput.offsetHeight !== targetHeightPx) {
+      messageInput.style.height = `${targetHeightPx}px`
+    }
   }
 
   onMount(() => {
+    const finePointerQuery = window.matchMedia(FINE_POINTER_QUERY)
+    hasFinePointer = finePointerQuery.matches
+    function synchronizePointerCapability() {
+      hasFinePointer = finePointerQuery.matches
+    }
+    finePointerQuery.addEventListener('change', synchronizePointerCapability)
+
+    if (messageInput) {
+      const cssMaxHeightPx = Number.parseFloat(getComputedStyle(messageInput).maxHeight)
+      if (Number.isFinite(cssMaxHeightPx)) {
+        maxInputHeightPx = cssMaxHeightPx
+      }
+    }
+
     function handleGlobalKeyDown(keyboardEvent: KeyboardEvent) {
       if ((keyboardEvent.metaKey || keyboardEvent.ctrlKey) && keyboardEvent.key === 'k') {
         keyboardEvent.preventDefault()
@@ -90,14 +132,19 @@
       }
       if (keyboardEvent.key === 'Escape' && document.activeElement === messageInput) {
         inputValue = ''
+        previousInputLength = 0
         if (messageInput) messageInput.style.height = 'auto'
       }
     }
 
     document.addEventListener('keydown', handleGlobalKeyDown)
-    messageInput?.focus()
+    // Autofocus would pop the software keyboard on page load for touch users.
+    if (hasFinePointer) {
+      messageInput?.focus()
+    }
 
     return () => {
+      finePointerQuery.removeEventListener('change', synchronizePointerCapability)
       document.removeEventListener('keydown', handleGlobalKeyDown)
     }
   })
@@ -114,6 +161,7 @@
         {placeholder}
         rows="1"
         {disabled}
+        enterkeyhint={hasFinePointer ? 'send' : 'enter'}
         class="input-field"
         aria-label="Message input"
       ></textarea>
@@ -137,7 +185,11 @@
     </form>
 
     <p class="input-hint">
-      <span class="hint-text">Press <kbd>Enter</kbd> to send, <kbd>Shift + Enter</kbd> for new line</span>
+      {#if hasFinePointer}
+        <span class="hint-text">Press <kbd>Enter</kbd> to send, <kbd>Shift + Enter</kbd> for new line</span>
+      {:else}
+        <span class="hint-text">Press <kbd>Return</kbd> for a new line</span>
+      {/if}
     </p>
   </div>
 </div>
@@ -265,6 +317,15 @@
     box-shadow: 0 1px 0 var(--color-border-subtle);
   }
 
+  /* Touch devices (phones and tablets): 44px minimum touch target */
+  @media (max-width: 1024px) {
+    .send-btn {
+      width: 44px;
+      height: 44px;
+      min-width: 44px;
+    }
+  }
+
   /* Tablet */
   @media (max-width: 768px) {
     .input-area {
@@ -292,12 +353,6 @@
       display: none;
     }
 
-    .send-btn {
-      width: 44px;
-      height: 44px;
-      min-width: 44px; /* Touch target */
-    }
-
     .send-btn svg {
       width: 20px;
       height: 20px;
@@ -313,13 +368,6 @@
 
     .input-wrapper {
       border-radius: var(--radius-lg);
-    }
-
-    .send-btn {
-      width: 40px;
-      height: 40px;
-      min-width: 40px;
-      border-radius: var(--radius-md);
     }
   }
 </style>
