@@ -67,7 +67,7 @@ class OpenAICompletionStatusTest {
     void completionRejectsCompletedResponseWithoutVisibleText() {
         assertCompletionFailure(new CompletionFailureScenario(
                 completionWithStatus(ResponseStatus.COMPLETED),
-                OpenAiResponseStreamException.TerminalReason.NO_VISIBLE_TEXT,
+                OpenAiResponseException.TerminalReason.NO_VISIBLE_TEXT,
                 false,
                 false));
     }
@@ -76,7 +76,7 @@ class OpenAICompletionStatusTest {
     void completionRejectsFailedResponseWithoutRecordingSuccess() {
         assertCompletionFailure(new CompletionFailureScenario(
                 completionWithStatus(ResponseStatus.FAILED),
-                OpenAiResponseStreamException.TerminalReason.FAILED,
+                OpenAiResponseException.TerminalReason.FAILED,
                 false,
                 false));
     }
@@ -85,7 +85,7 @@ class OpenAICompletionStatusTest {
     void completionRejectsIncompleteResponseWithoutRecordingSuccess() {
         assertCompletionFailure(new CompletionFailureScenario(
                 completionWithStatus(ResponseStatus.INCOMPLETE),
-                OpenAiResponseStreamException.TerminalReason.INCOMPLETE,
+                OpenAiResponseException.TerminalReason.INCOMPLETE,
                 false,
                 false));
     }
@@ -94,7 +94,7 @@ class OpenAICompletionStatusTest {
     void completionRejectsInProgressResponseWithoutRecordingSuccess() {
         assertCompletionFailure(new CompletionFailureScenario(
                 completionWithStatus(ResponseStatus.IN_PROGRESS),
-                OpenAiResponseStreamException.TerminalReason.MISSING_COMPLETION,
+                OpenAiResponseException.TerminalReason.MISSING_COMPLETION,
                 true,
                 true));
     }
@@ -103,7 +103,7 @@ class OpenAICompletionStatusTest {
     void completionRejectsQueuedResponseAsMissingCompletion() {
         assertCompletionFailure(new CompletionFailureScenario(
                 completionWithStatus(ResponseStatus.QUEUED),
-                OpenAiResponseStreamException.TerminalReason.MISSING_COMPLETION,
+                OpenAiResponseException.TerminalReason.MISSING_COMPLETION,
                 true,
                 true));
     }
@@ -112,7 +112,7 @@ class OpenAICompletionStatusTest {
     void completionRejectsCancelledResponseWithoutProviderBackoff() {
         assertCompletionFailure(new CompletionFailureScenario(
                 completionWithStatus(ResponseStatus.CANCELLED),
-                OpenAiResponseStreamException.TerminalReason.CANCELLED,
+                OpenAiResponseException.TerminalReason.CANCELLED,
                 false,
                 false));
     }
@@ -122,12 +122,12 @@ class OpenAICompletionStatusTest {
         List.of(
                         new CompletionFailureScenario(
                                 failedCompletion(ResponseError.Code.SERVER_ERROR),
-                                OpenAiResponseStreamException.TerminalReason.SERVER_ERROR,
+                                OpenAiResponseException.TerminalReason.SERVER_ERROR,
                                 true,
                                 true),
                         new CompletionFailureScenario(
                                 failedCompletion(ResponseError.Code.RATE_LIMIT_EXCEEDED),
-                                OpenAiResponseStreamException.TerminalReason.RATE_LIMIT_EXCEEDED,
+                                OpenAiResponseException.TerminalReason.RATE_LIMIT_EXCEEDED,
                                 false,
                                 true))
                 .forEach(OpenAICompletionStatusTest::assertCompletionFailure);
@@ -138,12 +138,12 @@ class OpenAICompletionStatusTest {
         List.of(
                         new CompletionFailureScenario(
                                 incompleteCompletion(Response.IncompleteDetails.Reason.MAX_OUTPUT_TOKENS),
-                                OpenAiResponseStreamException.TerminalReason.MAX_OUTPUT_TOKENS,
+                                OpenAiResponseException.TerminalReason.MAX_OUTPUT_TOKENS,
                                 false,
                                 false),
                         new CompletionFailureScenario(
                                 incompleteCompletion(Response.IncompleteDetails.Reason.CONTENT_FILTER),
-                                OpenAiResponseStreamException.TerminalReason.CONTENT_FILTER,
+                                OpenAiResponseException.TerminalReason.CONTENT_FILTER,
                                 false,
                                 false))
                 .forEach(OpenAICompletionStatusTest::assertCompletionFailure);
@@ -187,8 +187,8 @@ class OpenAICompletionStatusTest {
 
         StepVerifier.create(streamingService.complete("prompt", 0.7))
                 .expectErrorSatisfies(completionFailure -> {
-                    OpenAiResponseStreamException terminalFailure =
-                            assertInstanceOf(OpenAiResponseStreamException.class, completionFailure);
+                    OpenAiResponseException terminalFailure =
+                            assertInstanceOf(OpenAiResponseException.class, completionFailure);
                     assertEquals(completionFailureScenario.expectedTerminalReason(), terminalFailure.terminalReason());
                     assertEquals(
                             completionFailureScenario.expectedRetryable(),
@@ -197,7 +197,7 @@ class OpenAICompletionStatusTest {
                 .verify();
 
         if (completionFailureScenario.expectedTerminalReason()
-                != OpenAiResponseStreamException.TerminalReason.NO_VISIBLE_TEXT) {
+                != OpenAiResponseException.TerminalReason.NO_VISIBLE_TEXT) {
             verify(completionFailureScenario.providerCompletion(), never()).output();
         }
         if (completionFailureScenario.expectsConfiguredProviderBackoff()) {
@@ -299,7 +299,7 @@ class OpenAICompletionStatusTest {
 
     private record CompletionFailureScenario(
             Response providerCompletion,
-            OpenAiResponseStreamException.TerminalReason expectedTerminalReason,
+            OpenAiResponseException.TerminalReason expectedTerminalReason,
             boolean expectedRetryable,
             boolean expectsConfiguredProviderBackoff) {}
 }

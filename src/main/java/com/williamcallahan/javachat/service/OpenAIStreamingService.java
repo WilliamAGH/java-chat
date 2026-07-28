@@ -322,10 +322,10 @@ public class OpenAIStreamingService {
                     })
                     .concatWith(Mono.defer(() -> {
                         if (!observedCompletedEvent.get()) {
-                            return Mono.error(OpenAiResponseStreamException.missingCompletion());
+                            return Mono.error(OpenAiResponseException.missingCompletion());
                         }
                         if (!emittedVisibleText.get()) {
-                            return Mono.error(OpenAiResponseStreamException.withoutVisibleText());
+                            return Mono.error(OpenAiResponseException.withoutVisibleText());
                         }
                         return Mono.empty();
                     }))
@@ -457,13 +457,13 @@ public class OpenAIStreamingService {
         if (errorEvent.isPresent()) {
             Optional<ResponseError.Code> providerCode =
                     errorEvent.orElseThrow().code().map(ResponseError.Code::of);
-            return Mono.error(OpenAiResponseStreamException.error(providerCode));
+            return Mono.error(OpenAiResponseException.error(providerCode));
         }
         var failedEvent = responseStreamEvent.failed();
         if (failedEvent.isPresent()) {
             Optional<ResponseError.Code> providerCode =
                     failedEvent.orElseThrow().response().error().map(ResponseError::code);
-            return Mono.error(OpenAiResponseStreamException.failed(providerCode));
+            return Mono.error(OpenAiResponseException.failed(providerCode));
         }
         var incompleteEvent = responseStreamEvent.incomplete();
         if (incompleteEvent.isPresent()) {
@@ -472,7 +472,7 @@ public class OpenAIStreamingService {
                     .response()
                     .incompleteDetails()
                     .flatMap(Response.IncompleteDetails::reason);
-            return Mono.error(OpenAiResponseStreamException.incomplete(incompleteReason));
+            return Mono.error(OpenAiResponseException.incomplete(incompleteReason));
         }
         return Mono.justOrEmpty(responseStreamEvent
                 .outputTextDelta()
@@ -482,24 +482,24 @@ public class OpenAIStreamingService {
 
     private String extractTextFromCompletedResponse(Response providerResponse) {
         if (providerResponse == null) {
-            throw OpenAiResponseStreamException.missingCompletion();
+            throw OpenAiResponseException.missingCompletion();
         }
         ResponseStatus responseStatus =
-                providerResponse.status().orElseThrow(OpenAiResponseStreamException::missingCompletion);
+                providerResponse.status().orElseThrow(OpenAiResponseException::missingCompletion);
         if (ResponseStatus.FAILED.equals(responseStatus)) {
             Optional<ResponseError.Code> providerCode = providerResponse.error().map(ResponseError::code);
-            throw OpenAiResponseStreamException.failed(providerCode);
+            throw OpenAiResponseException.failed(providerCode);
         }
         if (ResponseStatus.INCOMPLETE.equals(responseStatus)) {
             Optional<Response.IncompleteDetails.Reason> incompleteReason =
                     providerResponse.incompleteDetails().flatMap(Response.IncompleteDetails::reason);
-            throw OpenAiResponseStreamException.incomplete(incompleteReason);
+            throw OpenAiResponseException.incomplete(incompleteReason);
         }
         if (ResponseStatus.CANCELLED.equals(responseStatus)) {
-            throw OpenAiResponseStreamException.cancelled();
+            throw OpenAiResponseException.cancelled();
         }
         if (!ResponseStatus.COMPLETED.equals(responseStatus)) {
-            throw OpenAiResponseStreamException.missingCompletion();
+            throw OpenAiResponseException.missingCompletion();
         }
         StringBuilder outputBuilder = new StringBuilder();
         for (ResponseOutputItem providerOutput : providerResponse.output()) {
@@ -518,7 +518,7 @@ public class OpenAIStreamingService {
         }
         String visibleCompletion = outputBuilder.toString();
         if (!UnicodeVisibleContent.hasVisibleContent(visibleCompletion)) {
-            throw OpenAiResponseStreamException.withoutVisibleText();
+            throw OpenAiResponseException.withoutVisibleText();
         }
         return visibleCompletion;
     }

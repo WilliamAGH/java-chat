@@ -181,7 +181,7 @@ class OpenAIStreamingServiceTest {
                             .flatMapMany(StreamingResult::textChunks))
                     .expectNext(invisibleText)
                     .expectErrorSatisfies(failure ->
-                            assertOpenAiUpstreamFailure(failure, "Provider stream completed without visible text"))
+                            assertOpenAiUpstreamFailure(failure, "Provider response completed without visible text"))
                     .verify();
 
             verify(rateLimitService, never()).recordSuccess(RateLimitService.ApiProvider.OPENAI);
@@ -265,12 +265,12 @@ class OpenAIStreamingServiceTest {
                         .flatMapMany(StreamingResult::textChunks))
                 .expectNext("truncated response")
                 .expectErrorSatisfies(failure -> {
-                    OpenAiResponseStreamException upstreamFailure = assertInstanceOf(
-                            OpenAiResponseStreamException.class,
+                    OpenAiResponseException upstreamFailure = assertInstanceOf(
+                            OpenAiResponseException.class,
                             assertInstanceOf(OpenAiStreamingFailureException.class, failure)
                                     .upstreamFailure());
                     assertEquals(
-                            OpenAiResponseStreamException.TerminalReason.MISSING_COMPLETION,
+                            OpenAiResponseException.TerminalReason.MISSING_COMPLETION,
                             upstreamFailure.terminalReason());
                     assertTrue(streamingService.isRecoverableStreamingFailure(failure));
                 })
@@ -337,13 +337,11 @@ class OpenAIStreamingServiceTest {
                         .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                         .flatMapMany(StreamingResult::textChunks))
                 .expectErrorSatisfies(failure -> {
-                    OpenAiResponseStreamException upstreamFailure = assertInstanceOf(
-                            OpenAiResponseStreamException.class,
+                    OpenAiResponseException upstreamFailure = assertInstanceOf(
+                            OpenAiResponseException.class,
                             assertInstanceOf(OpenAiStreamingFailureException.class, failure)
                                     .upstreamFailure());
-                    assertEquals(
-                            OpenAiResponseStreamException.TerminalReason.SERVER_ERROR,
-                            upstreamFailure.terminalReason());
+                    assertEquals(OpenAiResponseException.TerminalReason.SERVER_ERROR, upstreamFailure.terminalReason());
                     assertTrue(streamingService.isRecoverableStreamingFailure(failure));
                 })
                 .verify();
@@ -375,12 +373,12 @@ class OpenAIStreamingServiceTest {
                         .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                         .flatMapMany(StreamingResult::textChunks))
                 .expectErrorSatisfies(failure -> {
-                    OpenAiResponseStreamException upstreamFailure = assertInstanceOf(
-                            OpenAiResponseStreamException.class,
+                    OpenAiResponseException upstreamFailure = assertInstanceOf(
+                            OpenAiResponseException.class,
                             assertInstanceOf(OpenAiStreamingFailureException.class, failure)
                                     .upstreamFailure());
                     assertEquals(
-                            OpenAiResponseStreamException.TerminalReason.RATE_LIMIT_EXCEEDED,
+                            OpenAiResponseException.TerminalReason.RATE_LIMIT_EXCEEDED,
                             upstreamFailure.terminalReason());
                     assertFalse(streamingService.isRecoverableStreamingFailure(failure));
                 })
@@ -417,14 +415,14 @@ class OpenAIStreamingServiceTest {
                             .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                             .flatMapMany(StreamingResult::textChunks))
                     .expectErrorSatisfies(failure -> {
-                        OpenAiResponseStreamException upstreamFailure = assertInstanceOf(
-                                OpenAiResponseStreamException.class,
+                        OpenAiResponseException upstreamFailure = assertInstanceOf(
+                                OpenAiResponseException.class,
                                 assertInstanceOf(OpenAiStreamingFailureException.class, failure)
                                         .upstreamFailure());
-                        OpenAiResponseStreamException.TerminalReason expectedTerminalReason =
+                        OpenAiResponseException.TerminalReason expectedTerminalReason =
                                 incompleteReason == Response.IncompleteDetails.Reason.MAX_OUTPUT_TOKENS
-                                        ? OpenAiResponseStreamException.TerminalReason.MAX_OUTPUT_TOKENS
-                                        : OpenAiResponseStreamException.TerminalReason.CONTENT_FILTER;
+                                        ? OpenAiResponseException.TerminalReason.MAX_OUTPUT_TOKENS
+                                        : OpenAiResponseException.TerminalReason.CONTENT_FILTER;
                         assertEquals(expectedTerminalReason, upstreamFailure.terminalReason());
                         assertFalse(streamingService.isRecoverableStreamingFailure(failure));
                     })

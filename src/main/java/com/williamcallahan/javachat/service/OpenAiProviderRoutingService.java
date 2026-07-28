@@ -207,8 +207,8 @@ public final class OpenAiProviderRoutingService {
             if (failureCandidate instanceof RateLimitException) {
                 return false;
             }
-            if (failureCandidate instanceof OpenAiResponseStreamException responseStreamFailure) {
-                return responseStreamFailure.isRetryable();
+            if (failureCandidate instanceof OpenAiResponseException responseFailure) {
+                return responseFailure.isRetryable();
             }
             if (failureCandidate instanceof OpenAIServiceException serviceException) {
                 int statusCode = serviceException.statusCode();
@@ -228,8 +228,8 @@ public final class OpenAiProviderRoutingService {
             return false;
         }
         return throwable instanceof OpenAIIoException
-                || throwable instanceof OpenAiResponseStreamException responseStreamFailure
-                        && responseStreamFailure.startsConfiguredProviderBackoff()
+                || throwable instanceof OpenAiResponseException responseFailure
+                        && responseFailure.startsConfiguredProviderBackoff()
                 || isServerError(throwable);
     }
 

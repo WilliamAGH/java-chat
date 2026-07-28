@@ -13,7 +13,7 @@ import java.util.Optional;
  * request-specific or sensitive text. Only protocol-defined codes and reasons that affect
  * application behavior are retained.</p>
  */
-final class OpenAiResponseStreamException extends OpenAIException {
+final class OpenAiResponseException extends OpenAIException {
     @Serial
     private static final long serialVersionUID = 1L;
 
@@ -33,40 +33,40 @@ final class OpenAiResponseStreamException extends OpenAIException {
 
     private final TerminalReason terminalReason;
 
-    private OpenAiResponseStreamException(String message, TerminalReason terminalReason) {
+    private OpenAiResponseException(String message, TerminalReason terminalReason) {
         super(message);
         this.terminalReason = terminalReason;
     }
 
-    static OpenAiResponseStreamException error(Optional<ResponseError.Code> providerCode) {
+    static OpenAiResponseException error(Optional<ResponseError.Code> providerCode) {
         TerminalReason terminalReason = terminalReasonForErrorCode(providerCode).orElse(TerminalReason.ERROR);
-        return new OpenAiResponseStreamException(messageForError(terminalReason), terminalReason);
+        return new OpenAiResponseException(messageForError(terminalReason), terminalReason);
     }
 
-    static OpenAiResponseStreamException failed(Optional<ResponseError.Code> providerCode) {
+    static OpenAiResponseException failed(Optional<ResponseError.Code> providerCode) {
         TerminalReason terminalReason = terminalReasonForErrorCode(providerCode).orElse(TerminalReason.FAILED);
-        return new OpenAiResponseStreamException(messageForFailure(terminalReason), terminalReason);
+        return new OpenAiResponseException(messageForFailure(terminalReason), terminalReason);
     }
 
-    static OpenAiResponseStreamException incomplete(Optional<Response.IncompleteDetails.Reason> incompleteReason) {
+    static OpenAiResponseException incomplete(Optional<Response.IncompleteDetails.Reason> incompleteReason) {
         TerminalReason terminalReason = incompleteReason
-                .flatMap(OpenAiResponseStreamException::terminalReasonForIncompleteReason)
+                .flatMap(OpenAiResponseException::terminalReasonForIncompleteReason)
                 .orElse(TerminalReason.INCOMPLETE);
-        return new OpenAiResponseStreamException(messageForIncompleteResponse(terminalReason), terminalReason);
+        return new OpenAiResponseException(messageForIncompleteResponse(terminalReason), terminalReason);
     }
 
-    static OpenAiResponseStreamException cancelled() {
-        return new OpenAiResponseStreamException("Provider response was cancelled", TerminalReason.CANCELLED);
+    static OpenAiResponseException cancelled() {
+        return new OpenAiResponseException("Provider response was cancelled", TerminalReason.CANCELLED);
     }
 
-    static OpenAiResponseStreamException missingCompletion() {
-        return new OpenAiResponseStreamException(
-                "Provider stream ended before response.completed", TerminalReason.MISSING_COMPLETION);
+    static OpenAiResponseException missingCompletion() {
+        return new OpenAiResponseException(
+                "Provider response ended before response.completed", TerminalReason.MISSING_COMPLETION);
     }
 
-    static OpenAiResponseStreamException withoutVisibleText() {
-        return new OpenAiResponseStreamException(
-                "Provider stream completed without visible text", TerminalReason.NO_VISIBLE_TEXT);
+    static OpenAiResponseException withoutVisibleText() {
+        return new OpenAiResponseException(
+                "Provider response completed without visible text", TerminalReason.NO_VISIBLE_TEXT);
     }
 
     TerminalReason terminalReason() {
@@ -109,25 +109,25 @@ final class OpenAiResponseStreamException extends OpenAIException {
 
     private static String messageForError(TerminalReason terminalReason) {
         return switch (terminalReason) {
-            case SERVER_ERROR -> "Provider stream reported a terminal server error";
-            case RATE_LIMIT_EXCEEDED -> "Provider stream reported a terminal rate-limit error";
-            default -> "Provider stream reported a terminal error";
+            case SERVER_ERROR -> "Provider response reported a terminal server error";
+            case RATE_LIMIT_EXCEEDED -> "Provider response reported a terminal rate-limit error";
+            default -> "Provider response reported a terminal error";
         };
     }
 
     private static String messageForFailure(TerminalReason terminalReason) {
         return switch (terminalReason) {
-            case SERVER_ERROR -> "Provider stream reported a failed response after a server error";
-            case RATE_LIMIT_EXCEEDED -> "Provider stream reported a failed response after rate limiting";
-            default -> "Provider stream reported a failed response";
+            case SERVER_ERROR -> "Provider reported a failed response after a server error";
+            case RATE_LIMIT_EXCEEDED -> "Provider reported a failed response after rate limiting";
+            default -> "Provider reported a failed response";
         };
     }
 
     private static String messageForIncompleteResponse(TerminalReason terminalReason) {
         return switch (terminalReason) {
-            case MAX_OUTPUT_TOKENS -> "Provider stream stopped after reaching the output-token limit";
-            case CONTENT_FILTER -> "Provider stream stopped because the response was filtered";
-            default -> "Provider stream reported an incomplete response";
+            case MAX_OUTPUT_TOKENS -> "Provider response stopped after reaching the output-token limit";
+            case CONTENT_FILTER -> "Provider response stopped because it was filtered";
+            default -> "Provider reported an incomplete response";
         };
     }
 }
