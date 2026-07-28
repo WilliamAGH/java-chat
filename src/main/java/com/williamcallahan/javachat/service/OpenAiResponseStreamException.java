@@ -1,6 +1,8 @@
 package com.williamcallahan.javachat.service;
 
 import com.openai.errors.OpenAIException;
+import com.openai.models.responses.Response;
+import com.openai.models.responses.ResponseError;
 import java.io.Serial;
 import java.util.Optional;
 
@@ -14,11 +16,6 @@ import java.util.Optional;
 final class OpenAiResponseStreamException extends OpenAIException {
     @Serial
     private static final long serialVersionUID = 1L;
-
-    private static final String SERVER_ERROR_CODE = "server_error";
-    private static final String RATE_LIMIT_EXCEEDED_CODE = "rate_limit_exceeded";
-    private static final String MAX_OUTPUT_TOKENS_REASON = "max_output_tokens";
-    private static final String CONTENT_FILTER_REASON = "content_filter";
 
     /** Identifies only the protocol terminal reasons that change application behavior. */
     enum TerminalReason {
@@ -41,17 +38,17 @@ final class OpenAiResponseStreamException extends OpenAIException {
         this.terminalReason = terminalReason;
     }
 
-    static OpenAiResponseStreamException error(Optional<String> providerCode) {
+    static OpenAiResponseStreamException error(Optional<ResponseError.Code> providerCode) {
         TerminalReason terminalReason = terminalReasonForErrorCode(providerCode).orElse(TerminalReason.ERROR);
         return new OpenAiResponseStreamException(messageForError(terminalReason), terminalReason);
     }
 
-    static OpenAiResponseStreamException failed(Optional<String> providerCode) {
+    static OpenAiResponseStreamException failed(Optional<ResponseError.Code> providerCode) {
         TerminalReason terminalReason = terminalReasonForErrorCode(providerCode).orElse(TerminalReason.FAILED);
         return new OpenAiResponseStreamException(messageForFailure(terminalReason), terminalReason);
     }
 
-    static OpenAiResponseStreamException incomplete(Optional<String> incompleteReason) {
+    static OpenAiResponseStreamException incomplete(Optional<Response.IncompleteDetails.Reason> incompleteReason) {
         TerminalReason terminalReason = incompleteReason
                 .flatMap(OpenAiResponseStreamException::terminalReasonForIncompleteReason)
                 .orElse(TerminalReason.INCOMPLETE);
@@ -86,18 +83,26 @@ final class OpenAiResponseStreamException extends OpenAIException {
                 || terminalReason == TerminalReason.MISSING_COMPLETION;
     }
 
-    private static Optional<TerminalReason> terminalReasonForErrorCode(Optional<String> providerCode) {
+    private static Optional<TerminalReason> terminalReasonForErrorCode(Optional<ResponseError.Code> providerCode) {
         return providerCode.flatMap(code -> switch (code) {
-            case SERVER_ERROR_CODE -> Optional.of(TerminalReason.SERVER_ERROR);
-            case RATE_LIMIT_EXCEEDED_CODE -> Optional.of(TerminalReason.RATE_LIMIT_EXCEEDED);
+            case ResponseError.Code providerErrorCode
+            when ResponseError.Code.SERVER_ERROR.equals(providerErrorCode) -> Optional.of(TerminalReason.SERVER_ERROR);
+            case ResponseError.Code providerErrorCode
+            when ResponseError.Code.RATE_LIMIT_EXCEEDED.equals(providerErrorCode) ->
+                Optional.of(TerminalReason.RATE_LIMIT_EXCEEDED);
             default -> Optional.empty();
         });
     }
 
-    private static Optional<TerminalReason> terminalReasonForIncompleteReason(String incompleteReason) {
+    private static Optional<TerminalReason> terminalReasonForIncompleteReason(
+            Response.IncompleteDetails.Reason incompleteReason) {
         return switch (incompleteReason) {
-            case MAX_OUTPUT_TOKENS_REASON -> Optional.of(TerminalReason.MAX_OUTPUT_TOKENS);
-            case CONTENT_FILTER_REASON -> Optional.of(TerminalReason.CONTENT_FILTER);
+            case Response.IncompleteDetails.Reason providerReason
+            when Response.IncompleteDetails.Reason.MAX_OUTPUT_TOKENS.equals(providerReason) ->
+                Optional.of(TerminalReason.MAX_OUTPUT_TOKENS);
+            case Response.IncompleteDetails.Reason providerReason
+            when Response.IncompleteDetails.Reason.CONTENT_FILTER.equals(providerReason) ->
+                Optional.of(TerminalReason.CONTENT_FILTER);
             default -> Optional.empty();
         };
     }

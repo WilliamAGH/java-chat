@@ -455,24 +455,23 @@ public class OpenAIStreamingService {
     private Mono<String> extractTextOrTerminalFailure(ResponseStreamEvent responseStreamEvent) {
         var errorEvent = responseStreamEvent.error();
         if (errorEvent.isPresent()) {
-            return Mono.error(
-                    OpenAiResponseStreamException.error(errorEvent.orElseThrow().code()));
+            Optional<ResponseError.Code> providerCode =
+                    errorEvent.orElseThrow().code().map(ResponseError.Code::of);
+            return Mono.error(OpenAiResponseStreamException.error(providerCode));
         }
         var failedEvent = responseStreamEvent.failed();
         if (failedEvent.isPresent()) {
-            var providerCode = failedEvent.orElseThrow().response().error().map(providerError -> providerError
-                    .code()
-                    .asString());
+            Optional<ResponseError.Code> providerCode =
+                    failedEvent.orElseThrow().response().error().map(ResponseError::code);
             return Mono.error(OpenAiResponseStreamException.failed(providerCode));
         }
         var incompleteEvent = responseStreamEvent.incomplete();
         if (incompleteEvent.isPresent()) {
-            var incompleteReason = incompleteEvent
+            Optional<Response.IncompleteDetails.Reason> incompleteReason = incompleteEvent
                     .orElseThrow()
                     .response()
                     .incompleteDetails()
-                    .flatMap(Response.IncompleteDetails::reason)
-                    .map(Response.IncompleteDetails.Reason::asString);
+                    .flatMap(Response.IncompleteDetails::reason);
             return Mono.error(OpenAiResponseStreamException.incomplete(incompleteReason));
         }
         return Mono.justOrEmpty(responseStreamEvent
@@ -488,15 +487,12 @@ public class OpenAIStreamingService {
         ResponseStatus responseStatus =
                 providerResponse.status().orElseThrow(OpenAiResponseStreamException::missingCompletion);
         if (ResponseStatus.FAILED.equals(responseStatus)) {
-            Optional<String> providerCode =
-                    providerResponse.error().map(ResponseError::code).map(ResponseError.Code::asString);
+            Optional<ResponseError.Code> providerCode = providerResponse.error().map(ResponseError::code);
             throw OpenAiResponseStreamException.failed(providerCode);
         }
         if (ResponseStatus.INCOMPLETE.equals(responseStatus)) {
-            Optional<String> incompleteReason = providerResponse
-                    .incompleteDetails()
-                    .flatMap(Response.IncompleteDetails::reason)
-                    .map(Response.IncompleteDetails.Reason::asString);
+            Optional<Response.IncompleteDetails.Reason> incompleteReason =
+                    providerResponse.incompleteDetails().flatMap(Response.IncompleteDetails::reason);
             throw OpenAiResponseStreamException.incomplete(incompleteReason);
         }
         if (ResponseStatus.CANCELLED.equals(responseStatus)) {
@@ -515,10 +511,16 @@ public class OpenAIStreamingService {
                 if (messageContent.isOutputText()) {
                     ResponseOutputText outputText = messageContent.asOutputText();
                     outputBuilder.append(outputText.text());
+                } else if (messageContent.isRefusal()) {
+                    outputBuilder.append(messageContent.asRefusal().refusal());
                 }
             }
         }
-        return outputBuilder.toString();
+        String visibleCompletion = outputBuilder.toString();
+        if (!UnicodeVisibleContent.hasVisibleContent(visibleCompletion)) {
+            throw OpenAiResponseStreamException.withoutVisibleText();
+        }
+        return visibleCompletion;
     }
 
     /**

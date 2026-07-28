@@ -16,6 +16,10 @@ import com.openai.core.RequestOptions;
 import com.openai.models.responses.Response;
 import com.openai.models.responses.ResponseCreateParams;
 import com.openai.models.responses.ResponseError;
+import com.openai.models.responses.ResponseOutputItem;
+import com.openai.models.responses.ResponseOutputMessage;
+import com.openai.models.responses.ResponseOutputRefusal;
+import com.openai.models.responses.ResponseOutputText;
 import com.openai.models.responses.ResponseStatus;
 import com.openai.services.async.ResponseServiceAsync;
 import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureReporter;
@@ -33,6 +37,8 @@ class OpenAICompletionStatusTest {
     private static final long CONFIGURED_PROVIDER_BACKOFF_SECONDS = 600L;
     private static final int TEST_COMPLETION_OUTPUT_TOKEN_BUDGET = 768;
     private static final int EXPECTED_PROVIDER_REQUEST_COUNT_AFTER_READMISSION = 2;
+    private static final String VISIBLE_COMPLETION = "Visible completion";
+    private static final String PROVIDER_REFUSAL = "I cannot help with that request.";
 
     @Test
     void completionRecordsSuccessOnlyAfterCompletedStatus() {
@@ -43,20 +49,27 @@ class OpenAICompletionStatusTest {
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         ResponseServiceAsync responseService = mockAsyncResponseService(openAiClient);
         CompletableFuture<Response> providerCompletionFuture = new CompletableFuture<>();
-        Response providerCompletion = mock(Response.class);
-        when(providerCompletion.status()).thenReturn(Optional.of(ResponseStatus.COMPLETED));
-        when(providerCompletion.output()).thenReturn(List.of());
+        Response providerCompletion = completedCompletionWithRefusal(PROVIDER_REFUSAL);
         when(responseService.create(any(ResponseCreateParams.class), any(RequestOptions.class)))
                 .thenReturn(providerCompletionFuture);
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
         StepVerifier.create(streamingService.complete("prompt", 0.7))
                 .then(() -> providerCompletionFuture.complete(providerCompletion))
-                .expectNext("")
+                .expectNext(PROVIDER_REFUSAL)
                 .verifyComplete();
 
         verify(rateLimitService).recordSuccess(RateLimitService.ApiProvider.OPENAI);
         verify(openAiClient, never()).responses();
+    }
+
+    @Test
+    void completionRejectsCompletedResponseWithoutVisibleText() {
+        assertCompletionFailure(new CompletionFailureScenario(
+                completionWithStatus(ResponseStatus.COMPLETED),
+                OpenAiResponseStreamException.TerminalReason.NO_VISIBLE_TEXT,
+                false,
+                false));
     }
 
     @Test
@@ -145,9 +158,7 @@ class OpenAICompletionStatusTest {
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         ResponseServiceAsync responseService = mockAsyncResponseService(openAiClient);
         CompletableFuture<Response> providerCompletionFuture = new CompletableFuture<>();
-        Response providerCompletion = mock(Response.class);
-        when(providerCompletion.status()).thenReturn(Optional.of(ResponseStatus.COMPLETED));
-        when(providerCompletion.output()).thenReturn(List.of());
+        Response providerCompletion = completedCompletionWithOutputText(VISIBLE_COMPLETION);
         when(responseService.create(any(ResponseCreateParams.class), any(RequestOptions.class)))
                 .thenReturn(providerCompletionFuture);
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
@@ -168,8 +179,7 @@ class OpenAICompletionStatusTest {
         OpenAIStreamingService streamingService = configuredStreamingService(rateLimitService);
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         ResponseServiceAsync responseService = mockAsyncResponseService(openAiClient);
-        Response completedCompletion = completionWithStatus(ResponseStatus.COMPLETED);
-        when(completedCompletion.output()).thenReturn(List.of());
+        Response completedCompletion = completedCompletionWithOutputText(VISIBLE_COMPLETION);
         when(responseService.create(any(ResponseCreateParams.class), any(RequestOptions.class)))
                 .thenReturn(CompletableFuture.completedFuture(completionFailureScenario.providerCompletion()))
                 .thenReturn(CompletableFuture.completedFuture(completedCompletion));
@@ -186,7 +196,10 @@ class OpenAICompletionStatusTest {
                 })
                 .verify();
 
-        verify(completionFailureScenario.providerCompletion(), never()).output();
+        if (completionFailureScenario.expectedTerminalReason()
+                != OpenAiResponseStreamException.TerminalReason.NO_VISIBLE_TEXT) {
+            verify(completionFailureScenario.providerCompletion(), never()).output();
+        }
         if (completionFailureScenario.expectsConfiguredProviderBackoff()) {
             StepVerifier.create(streamingService.complete("prompt", 0.7))
                     .expectError(ConfiguredProviderTemporarilyUnavailableException.class)
@@ -197,7 +210,7 @@ class OpenAICompletionStatusTest {
         }
 
         StepVerifier.create(streamingService.complete("prompt", 0.7))
-                .expectNext("")
+                .expectNext(VISIBLE_COMPLETION)
                 .verifyComplete();
         verify(responseService, times(EXPECTED_PROVIDER_REQUEST_COUNT_AFTER_READMISSION))
                 .create(any(ResponseCreateParams.class), any(RequestOptions.class));
@@ -209,6 +222,35 @@ class OpenAICompletionStatusTest {
         when(providerCompletion.status()).thenReturn(Optional.of(responseStatus));
         when(providerCompletion.error()).thenReturn(Optional.empty());
         when(providerCompletion.incompleteDetails()).thenReturn(Optional.empty());
+        return providerCompletion;
+    }
+
+    private static Response completedCompletionWithOutputText(String completionText) {
+        ResponseOutputText outputText = mock(ResponseOutputText.class);
+        when(outputText.text()).thenReturn(completionText);
+        ResponseOutputMessage.Content messageContent = mock(ResponseOutputMessage.Content.class);
+        when(messageContent.isOutputText()).thenReturn(true);
+        when(messageContent.asOutputText()).thenReturn(outputText);
+        return completedCompletionWithContent(messageContent);
+    }
+
+    private static Response completedCompletionWithRefusal(String refusalText) {
+        ResponseOutputRefusal refusal = mock(ResponseOutputRefusal.class);
+        when(refusal.refusal()).thenReturn(refusalText);
+        ResponseOutputMessage.Content messageContent = mock(ResponseOutputMessage.Content.class);
+        when(messageContent.isRefusal()).thenReturn(true);
+        when(messageContent.asRefusal()).thenReturn(refusal);
+        return completedCompletionWithContent(messageContent);
+    }
+
+    private static Response completedCompletionWithContent(ResponseOutputMessage.Content messageContent) {
+        ResponseOutputMessage outputMessage = mock(ResponseOutputMessage.class);
+        when(outputMessage.content()).thenReturn(List.of(messageContent));
+        ResponseOutputItem providerOutput = mock(ResponseOutputItem.class);
+        when(providerOutput.isMessage()).thenReturn(true);
+        when(providerOutput.asMessage()).thenReturn(outputMessage);
+        Response providerCompletion = completionWithStatus(ResponseStatus.COMPLETED);
+        when(providerCompletion.output()).thenReturn(List.of(providerOutput));
         return providerCompletion;
     }
 
