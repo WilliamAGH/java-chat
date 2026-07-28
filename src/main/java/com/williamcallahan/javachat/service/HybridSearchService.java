@@ -41,6 +41,7 @@ public class HybridSearchService {
     private static final Logger log = LoggerFactory.getLogger(HybridSearchService.class);
 
     private static final int MAX_FAILURE_DETAIL_LENGTH = 240;
+    private static final String QDRANT_QUERY_TIMEOUT_DETAILS_TEMPLATE = "Qdrant query exceeded timeout %dms";
     private final QdrantQueryExecutor qdrantQueryExecutor;
     private final QueryEncodingServices queryEncoding;
     private final QdrantCollectionScopeResolver collectionScopeResolver;
@@ -167,8 +168,8 @@ public class HybridSearchService {
                                             queryRequestEntry.getValue(), queryDeadlineNanos);
                             futuresByCollection.put(queryRequestEntry.getKey(), collectionQueryFuture);
                         }
-                        queryDispatches.add(
-                                new CollectionQueryDispatch(futuresByCollection, queryTimeout, queryDeadlineNanos));
+                        queryDispatches.add(new CollectionQueryDispatch(
+                                futuresByCollection, remainingQueryTimeout(queryDeadlineNanos), queryDeadlineNanos));
                     }
                     return collectSearchOutcomes(queryDispatches, topK);
                 });
@@ -234,7 +235,7 @@ public class HybridSearchService {
                         qdrantQueryExecutor.scrollBeforeDeadline(documentationScrollRequest, queryDeadlineNanos);
                 queryDispatches.add(new CollectionQueryDispatch(
                         Map.of(documentationCollectionName, documentationScrollFuture),
-                        queryTimeout,
+                        remainingQueryTimeout(queryDeadlineNanos),
                         queryDeadlineNanos));
             }
             return collectSearchOutcomes(queryDispatches, topK);
@@ -275,7 +276,8 @@ public class HybridSearchService {
                         qdrantQueryExecutor.queryBeforeDeadline(queryRequestEntry.getValue(), queryDeadlineNanos);
                 futuresByCollection.put(queryRequestEntry.getKey(), documentationQueryFuture);
             }
-            queryDispatches.add(new CollectionQueryDispatch(futuresByCollection, queryTimeout, queryDeadlineNanos));
+            queryDispatches.add(new CollectionQueryDispatch(
+                    futuresByCollection, remainingQueryTimeout(queryDeadlineNanos), queryDeadlineNanos));
         }
         return collectSearchOutcomes(queryDispatches, topK);
     }
@@ -289,6 +291,10 @@ public class HybridSearchService {
      */
     private static long effectiveQueryDeadlineNanos(Duration queryTimeout, long stageDeadlineNanos) {
         return Math.min(stageDeadlineNanos, System.nanoTime() + queryTimeout.toNanos());
+    }
+
+    private static Duration remainingQueryTimeout(long queryDeadlineNanos) {
+        return Duration.ofNanos(Math.max(0L, queryDeadlineNanos - System.nanoTime()));
     }
 
     private static Duration remainingStageBudget(long stageDeadlineNanos) {
@@ -374,11 +380,11 @@ public class HybridSearchService {
     /** Keeps every collection wait on the timeout deadline established before fan-out dispatch. */
     private record CollectionQueryDispatch(
             Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection,
-            Duration queryTimeout,
+            Duration effectiveQueryTimeout,
             long queryDeadlineNanos) {
         CollectionQueryDispatch {
             Objects.requireNonNull(futuresByCollection, "futuresByCollection");
-            Objects.requireNonNull(queryTimeout, "queryTimeout");
+            Objects.requireNonNull(effectiveQueryTimeout, "effectiveQueryTimeout");
         }
     }
 
@@ -437,8 +443,8 @@ public class HybridSearchService {
                     collectionFailures.add(new HybridSearchPartialFailureException.CollectionSearchFailure(
                             collectionName,
                             "Timeout",
-                            "Qdrant query exceeded timeout "
-                                    + queryDispatch.queryTimeout().toMillis() + "ms",
+                            QDRANT_QUERY_TIMEOUT_DETAILS_TEMPLATE.formatted(
+                                    queryDispatch.effectiveQueryTimeout().toMillis()),
                             HybridSearchPartialFailureException.FailureDisposition.TRANSIENT));
                     dependencyFailures.add(dependencyFailure);
                     continue;

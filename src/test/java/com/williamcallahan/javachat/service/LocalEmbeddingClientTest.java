@@ -10,9 +10,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import io.netty.channel.ConnectTimeoutException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -23,6 +25,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.web.client.ResourceAccessException;
 
 /**
  * Verifies local embedding batching and dimension validation behavior.
@@ -141,6 +144,9 @@ class LocalEmbeddingClientTest {
                                     List.of("first", "second"), LlmGatewayTier.LIVE, MULTI_BATCH_OPERATION_BUDGET)));
 
             assertTrue(deadlineFailure.getMessage().contains("Local embedding"));
+            TimeoutException socketDeadlineFailure =
+                    assertInstanceOf(TimeoutException.class, deadlineFailure.getCause());
+            assertInstanceOf(ResourceAccessException.class, socketDeadlineFailure.getCause());
             assertEquals(2, requestCounter.get());
         } finally {
             httpServer.stop(0);
@@ -176,6 +182,43 @@ class LocalEmbeddingClientTest {
             httpServer.stop(0);
             serverExecutor.shutdownNow();
         }
+    }
+
+    @Test
+    void preservesNonTimeoutLocalTransportFailuresWithoutDeadlineCause() {
+        RestTemplateBuilder failingRestTemplateBuilder = new RestTemplateBuilder()
+                .additionalCustomizers(restTemplate -> restTemplate.setRequestFactory((requestUri, requestMethod) -> {
+                    throw new SocketException();
+                }));
+        LocalEmbeddingClient localEmbeddingClient = new LocalEmbeddingClient(
+                "http://local-embedding.test", "local-model", 3, 1, failingRestTemplateBuilder);
+
+        EmbeddingServiceTemporarilyUnavailableException transportFailure = assertThrows(
+                EmbeddingServiceTemporarilyUnavailableException.class,
+                () -> localEmbeddingClient.embed(List.of("transport failure"), LlmGatewayTier.LIVE));
+
+        ResourceAccessException typedTransportFailure =
+                assertInstanceOf(ResourceAccessException.class, transportFailure.getCause());
+        assertInstanceOf(SocketException.class, typedTransportFailure.getCause());
+    }
+
+    @Test
+    void reactorConnectTimeoutPreservesRetrievalTimeoutCause() {
+        RestTemplateBuilder timeoutRestTemplateBuilder = new RestTemplateBuilder()
+                .additionalCustomizers(restTemplate -> restTemplate.setRequestFactory((requestUri, requestMethod) -> {
+                    throw new ConnectTimeoutException("connection timed out");
+                }));
+        LocalEmbeddingClient localEmbeddingClient = new LocalEmbeddingClient(
+                "http://local-embedding.test", "local-model", 3, 1, timeoutRestTemplateBuilder);
+
+        EmbeddingServiceTemporarilyUnavailableException transportTimeout = assertThrows(
+                EmbeddingServiceTemporarilyUnavailableException.class,
+                () -> localEmbeddingClient.embed(List.of("transport timeout"), LlmGatewayTier.LIVE));
+
+        TimeoutException timeoutFailure = assertInstanceOf(TimeoutException.class, transportTimeout.getCause());
+        ResourceAccessException typedTransportFailure =
+                assertInstanceOf(ResourceAccessException.class, timeoutFailure.getCause());
+        assertInstanceOf(ConnectTimeoutException.class, typedTransportFailure.getCause());
     }
 
     private static void respondJson(HttpExchange exchange, int statusCode, String responseJson) throws IOException {

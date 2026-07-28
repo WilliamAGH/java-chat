@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import com.google.common.util.concurrent.ListenableFuture;
+import io.grpc.Status;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -43,7 +44,7 @@ final class QdrantFutureAwaiter {
         } catch (ExecutionException executionFailure) {
             Throwable dependencyFailure = executionFailure.getCause();
             throw QdrantFutureAwaitException.dependency(
-                    dependencyFailure == null ? executionFailure : dependencyFailure);
+                    normalizeDependencyFailure(dependencyFailure == null ? executionFailure : dependencyFailure));
         } catch (TimeoutException timeoutFailure) {
             throw QdrantFutureAwaitException.timedOut(timeoutFailure);
         }
@@ -52,6 +53,15 @@ final class QdrantFutureAwaiter {
     static <T> CompletableFuture<T> exhaustedQueryBudgetFuture() {
         return CompletableFuture.failedFuture(
                 new TimeoutException("Query budget was exhausted before this collection was dispatched"));
+    }
+
+    private static Throwable normalizeDependencyFailure(Throwable dependencyFailure) {
+        if (Status.fromThrowable(dependencyFailure).getCode() != Status.Code.DEADLINE_EXCEEDED) {
+            return dependencyFailure;
+        }
+        TimeoutException timeoutFailure = new TimeoutException("Qdrant gRPC deadline exceeded");
+        timeoutFailure.initCause(dependencyFailure);
+        return timeoutFailure;
     }
 
     /** Preserves the typed disposition of a failed CompletableFuture wait. */

@@ -9,10 +9,16 @@ import com.openai.errors.OpenAIRetryableException;
 import com.openai.errors.OpenAIServiceException;
 import com.openai.models.embeddings.CreateEmbeddingResponse;
 import com.openai.models.embeddings.EmbeddingCreateParams;
+import java.io.InterruptedIOException;
+import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
@@ -39,6 +45,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     private static final int BATCH_EMBEDDING_REQUEST_TIMEOUT_SECONDS = 600;
     private static final int MAX_ERROR_SNIPPET = 512;
     private static final String OPENAI_API_VERSION_SUFFIX = "/v1";
+    private static final String OK_HTTP_CALL_TIMEOUT_MESSAGE = "timeout";
     private static final long NANOSECONDS_PER_SECOND = TimeUnit.SECONDS.toNanos(1);
 
     private final OpenAIClient liveEmbeddingClient;
@@ -128,8 +135,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
                 throws InterruptedException {
             rejectActiveProviderCooldown();
             if (!pacingPermit.tryAcquire(remainingRequestNanos(requestDeadlineNanos), TimeUnit.NANOSECONDS)) {
-                throw new EmbeddingServiceTemporarilyUnavailableException(
-                        "Gateway embedding request pacing exceeded the request deadline");
+                throw gatewayDeadlineFailure("Gateway embedding request pacing exceeded the request deadline");
             }
             try {
                 rejectActiveProviderCooldown();
@@ -315,7 +321,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         boolean requestPermitAcquired = false;
         try {
             if (!requestPermits.tryAcquire(remainingRequestNanos(requestDeadlineNanos), TimeUnit.NANOSECONDS)) {
-                throw new EmbeddingServiceTemporarilyUnavailableException(
+                throw gatewayDeadlineFailure(
                         "Gateway embedding request concurrency limit exceeded the request deadline");
             }
             requestPermitAcquired = true;
@@ -453,6 +459,11 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     }
 
     private EmbeddingServiceUnavailableException wrapFatalError(RuntimeException exception) {
+        Optional<TimeoutException> providerTimeout = providerTimeout(exception);
+        if (providerTimeout.isPresent()) {
+            return new EmbeddingServiceTemporarilyUnavailableException(
+                    "Remote embedding request exceeded its transport timeout", providerTimeout.get());
+        }
         String details = sanitizeMessage(exception.getMessage());
         log.warn(
                 "[EMBEDDING] Remote embedding call failed (exception type: {}, details: {})",
@@ -462,6 +473,22 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         String failureMessage =
                 details.isBlank() ? "Remote embedding call failed" : "Remote embedding call failed: " + details;
         return new EmbeddingServiceUnavailableException(failureMessage, exception);
+    }
+
+    private static Optional<TimeoutException> providerTimeout(RuntimeException providerFailure) {
+        Set<Throwable> inspectedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable failureInChain = providerFailure;
+        while (failureInChain != null && inspectedFailures.add(failureInChain)) {
+            if (failureInChain instanceof SocketTimeoutException
+                    || (failureInChain.getClass().equals(InterruptedIOException.class)
+                            && OK_HTTP_CALL_TIMEOUT_MESSAGE.equals(failureInChain.getMessage()))) {
+                TimeoutException timeoutFailure = new TimeoutException("Remote embedding transport deadline exceeded");
+                timeoutFailure.initCause(providerFailure);
+                return Optional.of(timeoutFailure);
+            }
+            failureInChain = failureInChain.getCause();
+        }
+        return Optional.empty();
     }
 
     private Timeout embeddingTimeout(Duration transportBudget) {
@@ -662,11 +689,14 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     private static long remainingRequestNanos(long requestDeadlineNanos) {
         long remainingNanos = requestDeadlineNanos - System.nanoTime();
         if (remainingNanos <= 0) {
-            String failureMessage = "Gateway embedding request deadline elapsed locally";
-            throw new EmbeddingServiceTemporarilyUnavailableException(
-                    failureMessage, new TimeoutException(failureMessage));
+            throw gatewayDeadlineFailure("Gateway embedding request deadline elapsed locally");
         }
         return remainingNanos;
+    }
+
+    private static EmbeddingServiceTemporarilyUnavailableException gatewayDeadlineFailure(String failureMessage) {
+        return new EmbeddingServiceTemporarilyUnavailableException(
+                failureMessage, new TimeoutException(failureMessage));
     }
 
     private static long saturatedAdd(long leftOperand, long rightOperand) {

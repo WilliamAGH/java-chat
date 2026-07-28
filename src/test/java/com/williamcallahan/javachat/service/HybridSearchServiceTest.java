@@ -446,6 +446,37 @@ class HybridSearchServiceTest {
     }
 
     @Test
+    void collectionTimeoutReportsEffectiveStageBudgetInsteadOfConfiguredFullTimeout() {
+        appProperties.getQdrant().setQueryTimeout(ADMITTED_QUERY_TIMEOUT);
+        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+                .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
+        when(sparseEncoder.encode(HYBRID_QUERY))
+                .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
+        doAnswer(invocation -> SettableFuture.<List<ScoredPoint>>create())
+                .when(qdrantClient)
+                .queryAsync(notNull(), notNull());
+
+        long nearlyExhaustedStageDeadlineNanos = System.nanoTime() + NEARLY_EXHAUSTED_STAGE_BUDGET.toNanos();
+        HybridSearchPartialFailureException timedOutSearchFailure;
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(HYBRID_SEARCH_LOGGER)) {
+            timedOutSearchFailure = assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
+                    .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none(), nearlyExhaustedStageDeadlineNanos));
+
+            assertEquals(
+                    appProperties.getQdrant().getCollections().all().size(),
+                    expectedLogEvents.events().size());
+        }
+
+        assertInstanceOf(TimeoutException.class, timedOutSearchFailure.getCause());
+        assertTrue(timedOutSearchFailure.collectionFailures().stream()
+                .map(HybridSearchPartialFailureException.CollectionSearchFailure::failureDetails)
+                .allMatch(failureDetails -> failureDetails.contains("Qdrant query exceeded timeout")));
+        assertTrue(timedOutSearchFailure.collectionFailures().stream()
+                .map(HybridSearchPartialFailureException.CollectionSearchFailure::failureDetails)
+                .noneMatch(failureDetails -> failureDetails.contains(ADMITTED_QUERY_TIMEOUT.toMillis() + "ms")));
+    }
+
+    @Test
     void citationSearchUsesOnlyTheSparseOfficialDocumentationRequestAndDurationOverload() {
         appProperties.getQdrant().setSparseVectorName("bm25");
         when(sparseEncoder.encode(CITATION_QUERY))
@@ -841,6 +872,32 @@ class HybridSearchServiceTest {
         assertSame(permissionDeniedFailure, searchFailure.getCause());
         assertEquals(
                 HybridSearchPartialFailureException.FailureDisposition.PERMANENT,
+                searchFailure.collectionFailures().getFirst().failureDisposition());
+    }
+
+    @Test
+    void deadlineExceededGrpcFailureBecomesTimeoutCauseAndRetainsGrpcFailure() {
+        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+                .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
+        when(sparseEncoder.encode(HYBRID_QUERY))
+                .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
+        RuntimeException deadlineExceededFailure = Status.DEADLINE_EXCEEDED.asRuntimeException();
+        AtomicInteger queryInvocationCount = new AtomicInteger();
+        doAnswer(invocation -> queryInvocationCount.getAndIncrement() == 0
+                        ? Futures.immediateFailedFuture(deadlineExceededFailure)
+                        : Futures.immediateFuture(List.of(scoredPoint())))
+                .when(qdrantClient)
+                .queryAsync(notNull(), notNull());
+
+        HybridSearchPartialFailureException searchFailure =
+                assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
+                        .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()));
+
+        TimeoutException timeoutFailure = assertInstanceOf(TimeoutException.class, searchFailure.getCause());
+        assertSame(deadlineExceededFailure, timeoutFailure.getCause());
+        assertTrue(searchFailure.isRetryable());
+        assertEquals(
+                HybridSearchPartialFailureException.FailureDisposition.TRANSIENT,
                 searchFailure.collectionFailures().getFirst().failureDisposition());
     }
 

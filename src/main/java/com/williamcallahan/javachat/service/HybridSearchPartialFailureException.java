@@ -7,6 +7,7 @@ import java.io.Serial;
 import java.io.Serializable;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Signals that one or more collection searches failed during hybrid retrieval fan-out.
@@ -78,6 +79,9 @@ public class HybridSearchPartialFailureException extends RuntimeException {
      * @return retry disposition derived from the gRPC status
      */
     public static FailureDisposition classifyDependencyFailure(Throwable dependencyFailure) {
+        if (dependencyFailure instanceof TimeoutException) {
+            return FailureDisposition.TRANSIENT;
+        }
         if (!(dependencyFailure instanceof StatusException) && !(dependencyFailure instanceof StatusRuntimeException)) {
             return FailureDisposition.PERMANENT;
         }

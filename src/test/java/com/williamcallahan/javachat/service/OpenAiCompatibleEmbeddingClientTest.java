@@ -18,10 +18,12 @@ import com.openai.client.OpenAIClient;
 import com.openai.client.OpenAIClientAsync;
 import com.openai.core.RequestOptions;
 import com.openai.core.http.Headers;
+import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.openai.models.embeddings.CreateEmbeddingResponse;
 import com.openai.models.embeddings.EmbeddingCreateParams;
 import com.openai.services.async.EmbeddingServiceAsync;
+import java.io.InterruptedIOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -198,6 +200,26 @@ class OpenAiCompatibleEmbeddingClientTest {
             assertThrows(
                     EmbeddingServiceUnavailableException.class,
                     () -> clientAdapter.embed(List.of("single"), LlmGatewayTier.LIVE));
+            verify(embeddingService).create(any(), any(RequestOptions.class));
+        }
+    }
+
+    @Test
+    void sdkTransportTimeoutPreservesRetrievalTimeoutCause() {
+        OpenAIClient client = mock(OpenAIClient.class);
+        EmbeddingServiceAsync embeddingService = mockAsyncEmbeddingService(client);
+        OpenAIIoException sdkTimeout = new OpenAIIoException("Request failed", new InterruptedIOException("timeout"));
+        when(embeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.failedFuture(sdkTimeout));
+
+        try (OpenAiCompatibleEmbeddingClient clientAdapter =
+                OpenAiCompatibleEmbeddingClient.create(client, gatewaySettings())) {
+            EmbeddingServiceTemporarilyUnavailableException embeddingTimeout = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
+                    () -> clientAdapter.embed(List.of("single"), LlmGatewayTier.LIVE));
+
+            TimeoutException timeoutFailure = assertInstanceOf(TimeoutException.class, embeddingTimeout.getCause());
+            assertSame(sdkTimeout, timeoutFailure.getCause());
             verify(embeddingService).create(any(), any(RequestOptions.class));
         }
     }
@@ -586,11 +608,12 @@ class OpenAiCompatibleEmbeddingClientTest {
             embeddingClient.embed(List.of("admitted batch"), LlmGatewayTier.BATCH);
 
             long rejectedRequestStartNanos = System.nanoTime();
-            assertThrows(
-                    EmbeddingServiceUnavailableException.class,
+            EmbeddingServiceTemporarilyUnavailableException pacingDeadlineFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
                     () -> embeddingClient.embed(List.of("expired batch"), LlmGatewayTier.BATCH));
             Duration rejectionDelay = Duration.ofNanos(System.nanoTime() - rejectedRequestStartNanos);
 
+            assertInstanceOf(TimeoutException.class, pacingDeadlineFailure.getCause());
             assertTrue(rejectionDelay.compareTo(TEST_SATURATED_LIVE_REQUEST_BUDGET) >= 0);
             assertTrue(rejectionDelay.compareTo(MAXIMUM_EXPECTED_SATURATION_DELAY) < 0);
             verify(batchEmbeddingService, times(1)).create(any(), any(RequestOptions.class));
@@ -672,11 +695,12 @@ class OpenAiCompatibleEmbeddingClientTest {
             assertTrue(firstLiveRequestStarted.await(5, TimeUnit.SECONDS));
 
             long saturatedRequestStartNanos = System.nanoTime();
-            assertThrows(
-                    EmbeddingServiceUnavailableException.class,
+            EmbeddingServiceTemporarilyUnavailableException concurrencyDeadlineFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
                     () -> embeddingClient.embed(List.of("saturated query"), LlmGatewayTier.LIVE));
             Duration saturationDelay = Duration.ofNanos(System.nanoTime() - saturatedRequestStartNanos);
 
+            assertInstanceOf(TimeoutException.class, concurrencyDeadlineFailure.getCause());
             assertTrue(saturationDelay.compareTo(TEST_SATURATED_LIVE_REQUEST_BUDGET) >= 0);
             assertTrue(saturationDelay.compareTo(MAXIMUM_EXPECTED_SATURATION_DELAY) < 0);
             verify(liveEmbeddingService, times(1)).create(any(), any(RequestOptions.class));

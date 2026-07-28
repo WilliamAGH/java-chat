@@ -1,9 +1,14 @@
 package com.williamcallahan.javachat.service;
 
+import io.netty.channel.ConnectTimeoutException;
+import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -117,7 +122,13 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
             String failureMessage = details.isBlank()
                     ? "Local embedding transport failed against " + baseUrl
                     : "Local embedding transport failed against " + baseUrl + ": " + details;
-            throw new EmbeddingServiceTemporarilyUnavailableException(failureMessage, transportException);
+            Throwable failureCause = transportException;
+            if (containsTransportTimeoutException(transportException)) {
+                TimeoutException timeoutException = new TimeoutException(failureMessage);
+                timeoutException.initCause(transportException);
+                failureCause = timeoutException;
+            }
+            throw new EmbeddingServiceTemporarilyUnavailableException(failureMessage, failureCause);
         } catch (RestClientException | IllegalStateException apiException) {
             String details = sanitizeMessage(apiException.getMessage());
             String failureMessage = details.isBlank()
@@ -179,6 +190,20 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
         String failureMessage = "Local embedding request deadline elapsed locally";
         return new EmbeddingServiceTemporarilyUnavailableException(
                 failureMessage, new TimeoutException(failureMessage));
+    }
+
+    private static boolean containsTransportTimeoutException(Throwable transportException) {
+        Set<Throwable> visitedCauses = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable causeCandidate = transportException;
+        while (causeCandidate != null && visitedCauses.add(causeCandidate)) {
+            if (causeCandidate instanceof SocketTimeoutException
+                    || causeCandidate instanceof ConnectTimeoutException
+                    || causeCandidate instanceof io.netty.handler.timeout.TimeoutException) {
+                return true;
+            }
+            causeCandidate = causeCandidate.getCause();
+        }
+        return false;
     }
 
     /**
