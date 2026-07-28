@@ -343,6 +343,7 @@ public class OpenAIStreamingService {
         return responseTextChunks.publish(sharedTextChunks -> {
             Flux<String> visibleOutputWatchdog = sharedTextChunks
                     .filter(UnicodeVisibleContent::hasVisibleContent)
+                    .next()
                     .timeout(STREAM_OUTPUT_TIMEOUT)
                     .thenMany(Flux.empty());
             return Flux.merge(sharedTextChunks, visibleOutputWatchdog);

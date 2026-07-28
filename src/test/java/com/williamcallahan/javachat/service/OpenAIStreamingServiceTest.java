@@ -71,6 +71,7 @@ class OpenAIStreamingServiceTest {
     private static final String INVISIBLE_PROVIDER_DELTA = " \t\u200B";
     private static final Duration INVISIBLE_PROVIDER_DELTA_INTERVAL = Duration.ofSeconds(3);
     private static final Duration VISIBLE_OUTPUT_DEADLINE_REMAINDER = Duration.ofSeconds(2);
+    private static final Duration MID_RESPONSE_VISIBLE_OUTPUT_PAUSE = Duration.ofSeconds(21);
 
     private OpenAIStreamingService createStreamingService() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
@@ -216,6 +217,19 @@ class OpenAIStreamingServiceTest {
                 .verify();
 
         assertTrue(upstreamCancelled.get());
+    }
+
+    @Test
+    void visibleOutputDeadlineStopsAfterFirstVisibleChunk() {
+        OpenAIStreamingService streamingService = createStreamingService();
+
+        StepVerifier.withVirtualTime(() -> streamingService.enforceVisibleOutputDeadline(Flux.concat(
+                        Mono.just("first visible chunk"),
+                        Mono.delay(MID_RESPONSE_VISIBLE_OUTPUT_PAUSE).thenReturn("visible chunk after pause"))))
+                .expectNext("first visible chunk")
+                .thenAwait(MID_RESPONSE_VISIBLE_OUTPUT_PAUSE)
+                .expectNext("visible chunk after pause")
+                .verifyComplete();
     }
 
     @Test
