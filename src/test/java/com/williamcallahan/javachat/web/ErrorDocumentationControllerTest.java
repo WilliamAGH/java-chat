@@ -16,6 +16,7 @@ import jakarta.servlet.RequestDispatcher;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,7 +30,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** Verifies error documentation pages preserve direct and forwarded HTTP status semantics. */
+/** Verifies browser error pages are available only to servlet error dispatches. */
 @WebMvcTest(controllers = ErrorDocumentationController.class)
 @Import(com.williamcallahan.javachat.config.AppProperties.class)
 @WithMockUser
@@ -55,11 +56,18 @@ class ErrorDocumentationControllerTest {
     }
 
     @Test
-    void serves_existing_error_documentation_directly() throws Exception {
-        mockMvc.perform(get("/errors/not-found").accept(MediaType.TEXT_HTML))
-                .andExpect(status().isOk())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_HTML))
-                .andExpect(content().string(containsString("Not Found")));
+    void does_not_publish_error_catalog_directly() throws Exception {
+        List<String> directCatalogPaths = List.of(
+                "/errors",
+                "/errors/",
+                "/errors/not-found",
+                "/errors/access-denied",
+                "/errors/not-found.html",
+                "/errors/access-denied.html");
+
+        for (String directCatalogPath : directCatalogPaths) {
+            mockMvc.perform(get(directCatalogPath).accept(MediaType.TEXT_HTML)).andExpect(status().isNotFound());
+        }
     }
 
     @Test
@@ -79,7 +87,9 @@ class ErrorDocumentationControllerTest {
 
     @Test
     void returns_not_found_for_missing_error_documentation() throws Exception {
-        mockMvc.perform(get("/errors/missing-documentation").accept(MediaType.TEXT_HTML))
+        mockMvc.perform(get("/errors/missing-documentation")
+                        .accept(MediaType.TEXT_HTML)
+                        .requestAttr(RequestDispatcher.ERROR_STATUS_CODE, HttpStatus.NOT_FOUND.value()))
                 .andExpect(status().isNotFound());
     }
 
@@ -88,11 +98,14 @@ class ErrorDocumentationControllerTest {
         ClassLoader originalContextClassLoader = Thread.currentThread().getContextClassLoader();
         try {
             Thread.currentThread().setContextClassLoader(new UnreadableResourceClassLoader(originalContextClassLoader));
+            MockHttpServletRequest errorDispatchRequest = new MockHttpServletRequest();
+            errorDispatchRequest.setAttribute(
+                    RequestDispatcher.ERROR_STATUS_CODE, HttpStatus.INTERNAL_SERVER_ERROR.value());
 
             assertEquals(
                     HttpStatus.INTERNAL_SERVER_ERROR,
                     errorDocumentationController
-                            .index(new MockHttpServletRequest())
+                            .errorType("not-found", errorDispatchRequest)
                             .getStatusCode());
         } finally {
             Thread.currentThread().setContextClassLoader(originalContextClassLoader);
