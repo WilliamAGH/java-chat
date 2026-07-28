@@ -86,38 +86,50 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
     void crawlAndIngest(PageLimit pageLimit, CrawlPageFetcher crawlPageFetcher) throws IOException {
         PageLimit requiredPageLimit = Objects.requireNonNull(pageLimit, "pageLimit");
         CrawlPageFetcher requiredPageFetcher = Objects.requireNonNull(crawlPageFetcher, "crawlPageFetcher");
-        Set<String> visitedSourceUrls = new LinkedHashSet<>();
+        Set<String> seenRequestedUrls = new LinkedHashSet<>();
+        Set<String> processedFinalUrls = new LinkedHashSet<>();
         Deque<String> pendingSourceUrls = new ArrayDeque<>();
         pendingSourceUrls.add(crawlBoundary.rootUrl());
-        while (!pendingSourceUrls.isEmpty() && visitedSourceUrls.size() < requiredPageLimit.maximumPages()) {
+        int fetchedPageCount = 0;
+        while (!pendingSourceUrls.isEmpty() && fetchedPageCount < requiredPageLimit.maximumPages()) {
             String sourceUrl = pendingSourceUrls.poll();
-            if (!crawlBoundary.contains(sourceUrl) || !visitedSourceUrls.add(sourceUrl)) {
+            if (!crawlBoundary.contains(sourceUrl) || !seenRequestedUrls.add(sourceUrl)) {
                 continue;
             }
 
             CrawlPageSnapshot pageSnapshot = requiredPageFetcher.fetch(sourceUrl);
-            crawlBoundary.requireContainsRedirectTarget(pageSnapshot.finalUrl());
+            fetchedPageCount++;
+            String finalSourceUrl = pageSnapshot.finalUrl();
+            crawlBoundary.requireContainsRedirectTarget(finalSourceUrl);
+            seenRequestedUrls.add(finalSourceUrl);
+            if (!sourceUrl.equals(finalSourceUrl)) {
+                hybridVectorService.deleteByUrl(QdrantCollectionKind.DOCS, sourceUrl);
+            }
+            if (!processedFinalUrls.add(finalSourceUrl)) {
+                continue;
+            }
             Document sourceDocument = pageSnapshot.document();
             String title = Optional.ofNullable(sourceDocument.title()).orElse("");
 
-            localStore.saveHtml(sourceUrl, pageSnapshot.rawHtml());
+            localStore.saveHtml(finalSourceUrl, pageSnapshot.rawHtml());
 
             for (String candidateSourceUrl : pageSnapshot.discoveredLinks()) {
-                if (crawlBoundary.contains(candidateSourceUrl) && !visitedSourceUrls.contains(candidateSourceUrl)) {
+                if (crawlBoundary.contains(candidateSourceUrl) && !seenRequestedUrls.contains(candidateSourceUrl)) {
                     pendingSourceUrls.add(candidateSourceUrl);
                 }
             }
 
-            if (JavaPackageExtractor.isJavaApiUrl(sourceUrl)) {
+            if (JavaPackageExtractor.isJavaApiUrl(finalSourceUrl)) {
                 JavaApiPageExtraction javaApiExtraction = htmlExtractor.extractJavaApiPage(sourceDocument);
                 if (javaApiExtraction.excluded()) {
-                    hybridVectorService.deleteByUrl(QdrantCollectionKind.DOCS, sourceUrl);
+                    hybridVectorService.deleteByUrl(QdrantCollectionKind.DOCS, finalSourceUrl);
                     INDEXING_LOG.debug("[INDEXING] Skipping class-use Java API page content");
                     continue;
                 }
-                String packageName = JavaPackageExtractor.extractPackage(sourceUrl, javaApiExtraction.combinedText());
+                String packageName =
+                        JavaPackageExtractor.extractPackage(finalSourceUrl, javaApiExtraction.combinedText());
                 ChunkProcessingService.JavaApiPage javaApiPage = javaApiPageFor(
-                                sourceUrl, title, packageName, javaApiExtraction)
+                                finalSourceUrl, title, packageName, javaApiExtraction)
                         .orElseThrow();
                 ChunkProcessingService.ChunkProcessingOutcome initialChunkingOutcome =
                         chunkProcessingService.processAndStoreJavaApiPage(javaApiPage);
@@ -128,7 +140,7 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
                 if (initialChunkingOutcome.skippedAllChunks()
                         && hybridVectorService.hasExactPointIdsForUrl(
                                 QdrantCollectionKind.DOCS,
-                                sourceUrl,
+                                finalSourceUrl,
                                 expectedPointUuids(initialChunkingOutcome.allChunkHashes()))) {
                     INDEXING_LOG.debug("[INDEXING] Skipping unchanged Java API page with complete vector coverage");
                     continue;
@@ -143,14 +155,14 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
                     replacementDocuments = requireCompleteReplacement(replacementChunkingOutcome);
                 }
                 applyJavaApiDocumentType(replacementDocuments);
-                replaceAndMarkDocuments(sourceUrl, replacementDocuments);
+                replaceAndMarkDocuments(finalSourceUrl, replacementDocuments);
                 continue;
             }
 
             String extractedText = htmlExtractor.extractCleanContent(sourceDocument);
-            String packageName = JavaPackageExtractor.extractPackage(sourceUrl, extractedText);
+            String packageName = JavaPackageExtractor.extractPackage(finalSourceUrl, extractedText);
             ChunkProcessingService.ChunkProcessingOutcome chunkingOutcome =
-                    chunkProcessingService.processAndStoreChunks(extractedText, sourceUrl, title, packageName);
+                    chunkProcessingService.processAndStoreChunks(extractedText, finalSourceUrl, title, packageName);
             if (chunkingOutcome.generatedNoChunks()) {
                 INDEXING_LOG.debug("[INDEXING] No chunks generated for URL");
                 continue;
@@ -158,7 +170,7 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
             if (chunkingOutcome.skippedAllChunks()
                     && hybridVectorService.hasExactPointIdsForUrl(
                             QdrantCollectionKind.DOCS,
-                            sourceUrl,
+                            finalSourceUrl,
                             expectedPointUuids(chunkingOutcome.allChunkHashes()))) {
                 INDEXING_LOG.debug("[INDEXING] Skipping URL with exact vector identity coverage");
                 continue;
@@ -172,10 +184,11 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
                 replacementDocuments = requireCompleteReplacement(chunkingOutcome);
             } else {
                 ChunkProcessingService.ChunkProcessingOutcome replacementChunkingOutcome =
-                        chunkProcessingService.processAndStoreChunksForce(extractedText, sourceUrl, title, packageName);
+                        chunkProcessingService.processAndStoreChunksForce(
+                                extractedText, finalSourceUrl, title, packageName);
                 replacementDocuments = requireCompleteReplacement(replacementChunkingOutcome);
             }
-            replaceAndMarkDocuments(sourceUrl, replacementDocuments);
+            replaceAndMarkDocuments(finalSourceUrl, replacementDocuments);
         }
     }
 

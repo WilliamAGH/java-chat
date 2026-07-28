@@ -144,6 +144,105 @@ class DocsIngestionServiceTest {
     }
 
     @Test
+    void redirectTargetIsNotFetchedAgainWhenDiscoveredDirectly() throws IOException {
+        String rootUrl = "https://docs.example.com/root/";
+        String redirectSourceUrl = rootUrl + "old-page";
+        String redirectTargetUrl = rootUrl + "new-page";
+        String rootHtml = """
+            <html><body>
+              <a href="/root/old-page">Old page</a>
+              <a href="/root/new-page">New page</a>
+            </body></html>
+            """;
+        DocsIngestionService.CrawlPageFetcher crawlPageFetcher = mock(DocsIngestionService.CrawlPageFetcher.class);
+        when(crawlPageFetcher.fetch(rootUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(rootUrl, rootHtml));
+        when(crawlPageFetcher.fetch(redirectSourceUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(
+                        redirectTargetUrl, "<html><body>Canonical page</body></html>"));
+        when(htmlContentExtractor.extractCleanContent(any())).thenReturn("");
+        when(chunkProcessingService.processAndStoreChunks(any(), any(), any(), any()))
+                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
+        DocsIngestionService ingestionService = ingestionServiceFor(rootUrl);
+
+        ingestionService.crawlAndIngest(new PageLimit(3), crawlPageFetcher);
+
+        ArgumentCaptor<String> fetchedUrlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(crawlPageFetcher, times(2)).fetch(fetchedUrlCaptor.capture());
+        assertEquals(List.of(rootUrl, redirectSourceUrl), fetchedUrlCaptor.getAllValues());
+        verify(crawlPageFetcher, never()).fetch(redirectTargetUrl);
+        verify(localStoreService).saveHtml(redirectTargetUrl, "<html><body>Canonical page</body></html>");
+        verify(chunkProcessingService).processAndStoreChunks("", redirectTargetUrl, "", "");
+        verify(hybridVectorService).deleteByUrl(QdrantCollectionKind.DOCS, redirectSourceUrl);
+    }
+
+    @Test
+    void redirectAliasDoesNotReindexFinalUrlAlreadyProcessedDirectly() throws IOException {
+        String rootUrl = "https://docs.example.com/root/";
+        String redirectSourceUrl = rootUrl + "old-page";
+        String redirectTargetUrl = rootUrl + "new-page";
+        String rootHtml = """
+            <html><body>
+              <a href="/root/new-page">New page</a>
+              <a href="/root/old-page">Old page</a>
+            </body></html>
+            """;
+        DocsIngestionService.CrawlPageFetcher crawlPageFetcher = mock(DocsIngestionService.CrawlPageFetcher.class);
+        when(crawlPageFetcher.fetch(rootUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(rootUrl, rootHtml));
+        when(crawlPageFetcher.fetch(redirectTargetUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(
+                        redirectTargetUrl, "<html><body>Canonical page</body></html>"));
+        when(crawlPageFetcher.fetch(redirectSourceUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(
+                        redirectTargetUrl, "<html><body>Canonical page</body></html>"));
+        when(htmlContentExtractor.extractCleanContent(any())).thenReturn("");
+        when(chunkProcessingService.processAndStoreChunks(any(), any(), any(), any()))
+                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
+        DocsIngestionService ingestionService = ingestionServiceFor(rootUrl);
+
+        ingestionService.crawlAndIngest(new PageLimit(3), crawlPageFetcher);
+
+        verify(crawlPageFetcher).fetch(redirectSourceUrl);
+        verify(localStoreService, times(2)).saveHtml(any(), any());
+        verify(chunkProcessingService, times(2)).processAndStoreChunks(any(), any(), any(), any());
+        verify(hybridVectorService).deleteByUrl(QdrantCollectionKind.DOCS, redirectSourceUrl);
+    }
+
+    @Test
+    void redirectAliasesCannotExceedFetchLimit() throws IOException {
+        String rootUrl = "https://docs.example.com/root/";
+        String firstAliasUrl = rootUrl + "first-alias";
+        String secondAliasUrl = rootUrl + "second-alias";
+        String thirdAliasUrl = rootUrl + "third-alias";
+        String rootHtml = """
+            <html><body>
+              <a href="/root/first-alias">First alias</a>
+              <a href="/root/second-alias">Second alias</a>
+              <a href="/root/third-alias">Third alias</a>
+            </body></html>
+            """;
+        DocsIngestionService.CrawlPageFetcher crawlPageFetcher = mock(DocsIngestionService.CrawlPageFetcher.class);
+        when(crawlPageFetcher.fetch(rootUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(rootUrl, rootHtml));
+        when(crawlPageFetcher.fetch(firstAliasUrl))
+                .thenReturn(
+                        DocsIngestionService.prepareCrawlPageSnapshot(rootUrl, "<html><body>Root alias</body></html>"));
+        when(htmlContentExtractor.extractCleanContent(any())).thenReturn("");
+        when(chunkProcessingService.processAndStoreChunks(any(), any(), any(), any()))
+                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
+        DocsIngestionService ingestionService = ingestionServiceFor(rootUrl);
+
+        ingestionService.crawlAndIngest(new PageLimit(2), crawlPageFetcher);
+
+        ArgumentCaptor<String> fetchedUrlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(crawlPageFetcher, times(2)).fetch(fetchedUrlCaptor.capture());
+        assertEquals(List.of(rootUrl, firstAliasUrl), fetchedUrlCaptor.getAllValues());
+        verify(crawlPageFetcher, never()).fetch(secondAliasUrl);
+        verify(crawlPageFetcher, never()).fetch(thirdAliasUrl);
+    }
+
+    @Test
     void rejectsRedirectFinalUrlOutsideConfiguredBoundaryBeforePersistence() throws IOException {
         String rootUrl = "https://docs.example.com/root/";
         String offBoundaryFinalUrl = "https://docs.example.com/private/redirected";
