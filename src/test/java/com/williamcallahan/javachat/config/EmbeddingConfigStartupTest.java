@@ -21,9 +21,9 @@ class EmbeddingConfigStartupTest {
     private static final String TEST_SHARED_GATEWAY_BASE_URL = "https://api.llm-gateway.iocloudhost.net/v1";
     private static final String TEST_EMBEDDING_MODEL = "qwen/qwen3-embedding-4b";
     private static final int TEST_EMBEDDING_DIMENSIONS = 2_560;
-    private static final int TEST_LIVE_MAX_CONCURRENT_REQUESTS = 4;
+    private static final int TEST_LIVE_MAX_CONCURRENT_REQUESTS = 8;
     private static final int TEST_BATCH_MAX_CONCURRENT_REQUESTS = 1;
-    private static final double TEST_LIVE_REQUESTS_PER_SECOND = 3.0;
+    private static final double TEST_LIVE_REQUESTS_PER_SECOND = 8.0;
     private static final double TEST_BATCH_REQUESTS_PER_SECOND = 1.0;
 
     @Test
