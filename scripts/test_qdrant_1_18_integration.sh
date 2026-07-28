@@ -58,7 +58,7 @@ collection_state="$(qdrant_integration_request GET "/collections/$QDRANT_INTEGRA
 if ! jq -e '
     .result.config.params.vectors.dense.size == 2560
     and .result.config.params.vectors.dense.distance == "Cosine"
-    and (.result.config.params.sparse_vectors.bm25.modifier | ascii_downcase) == "idf"
+    and .result.config.params.sparse_vectors.bm25.modifier == "idf"
     and .result.config.params.on_disk_payload == true
     and .result.payload_schema.url.data_type == "keyword"
     and .result.payload_schema.anchor.data_type == "keyword"

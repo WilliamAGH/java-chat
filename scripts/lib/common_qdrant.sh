@@ -399,10 +399,10 @@ validate_qwen_generation_collection_state() {
     if ! echo "$collection_state" | jq -e '
         .result.config.params.vectors.dense.size == 2560
         and .result.config.params.vectors.dense.distance == "Cosine"
-        and .result.config.params.sparse_vectors.bm25.modifier == "Idf"
+        and .result.config.params.sparse_vectors.bm25.modifier == "idf"
         and .result.config.params.on_disk_payload == true
     ' >/dev/null 2>&1; then
-        echo -e "${RED}Collection '$collection_name' must use dense=2560/Cosine, bm25=Idf, and on-disk payloads${NC}" >&2
+        echo -e "${RED}Collection '$collection_name' must use dense=2560/Cosine, bm25=idf, and on-disk payloads${NC}" >&2
         return 1
     fi
 }
