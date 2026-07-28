@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -53,7 +52,6 @@ class OpenAIStreamingProviderFailureTest {
     private static final double TEST_TEMPERATURE = 0.7;
     private static final String RATE_LIMIT_HEADERS_MISSING_MESSAGE = "OpenAI rate-limit headers are missing";
     private static final String RATE_LIMIT_HEADERS_INVALID_MESSAGE = "OpenAI rate-limit headers are invalid";
-
     private ExpectedLogEvents serviceLogEvents;
     private ExpectedLogEvents providerRoutingLogEvents;
     private ExpectedLogEvents streamingFailureLogEvents;
@@ -106,17 +104,14 @@ class OpenAIStreamingProviderFailureTest {
         OpenAIStreamingService streamingService = configuredStreamingService(rateLimitService);
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         ResponseServiceAsync responseService = mockAsyncResponseService(openAiClient);
-        RateLimitException firstHeaderlessRateLimitFailure = headerlessRateLimitFailure();
-        RateLimitException secondHeaderlessRateLimitFailure = headerlessRateLimitFailure();
+        RateLimitException headerlessRateLimitFailure = headerlessRateLimitFailure();
         when(responseService.create(any(ResponseCreateParams.class), any(RequestOptions.class)))
-                .thenReturn(CompletableFuture.failedFuture(firstHeaderlessRateLimitFailure))
-                .thenReturn(CompletableFuture.failedFuture(secondHeaderlessRateLimitFailure));
+                .thenReturn(CompletableFuture.failedFuture(headerlessRateLimitFailure));
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
-        assertCompletionPreservesUpstreamFailure(streamingService, firstHeaderlessRateLimitFailure);
-        assertCompletionPreservesUpstreamFailure(streamingService, secondHeaderlessRateLimitFailure);
+        assertCompletionPreservesUpstreamFailure(streamingService, headerlessRateLimitFailure);
 
-        verify(responseService, times(2)).create(any(ResponseCreateParams.class), any(RequestOptions.class));
+        verify(responseService).create(any(ResponseCreateParams.class), any(RequestOptions.class));
     }
 
     @Test
@@ -158,19 +153,15 @@ class OpenAIStreamingProviderFailureTest {
         ResponseServiceAsync responseService = mockAsyncResponseService(openAiClient);
         Headers unusableRateLimitHeaders =
                 Headers.builder().put("Retry-After", "not-a-duration").build();
-        RateLimitException firstUnusableRateLimitFailure =
-                RateLimitException.builder().headers(unusableRateLimitHeaders).build();
-        RateLimitException secondUnusableRateLimitFailure =
+        RateLimitException unusableRateLimitFailure =
                 RateLimitException.builder().headers(unusableRateLimitHeaders).build();
         when(responseService.createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class)))
-                .thenReturn(failedAsyncStream(firstUnusableRateLimitFailure))
-                .thenReturn(failedAsyncStream(secondUnusableRateLimitFailure));
+                .thenReturn(failedAsyncStream(unusableRateLimitFailure));
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
-        assertStreamingPreservesUpstreamFailure(streamingService, firstUnusableRateLimitFailure);
-        assertStreamingPreservesUpstreamFailure(streamingService, secondUnusableRateLimitFailure);
+        assertStreamingPreservesUpstreamFailure(streamingService, unusableRateLimitFailure);
 
-        verify(responseService, times(2)).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
+        verify(responseService).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
     }
 
     @Test

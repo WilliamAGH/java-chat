@@ -1,10 +1,10 @@
 package com.williamcallahan.javachat.service;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.openai.client.OpenAIClient;
@@ -13,12 +13,12 @@ import com.openai.errors.RateLimitException;
 import com.williamcallahan.javachat.config.AppProperties;
 import org.junit.jupiter.api.Test;
 
-/** Verifies configured-provider failure recording preserves strict bookkeeping errors. */
+/** Verifies configured-provider failure recording protects admission when strict timing is unavailable. */
 class OpenAiProviderFailureRecordingTest {
     private static final long CONFIGURED_PROVIDER_BACKOFF_SECONDS = 600L;
 
     @Test
-    void rateLimitDecisionFailurePropagatesWithoutStartingConfiguredProviderCooldown() {
+    void rateLimitDecisionFailureStartsConfiguredProviderCooldown() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
@@ -38,8 +38,13 @@ class OpenAiProviderFailureRecordingTest {
                 () -> routingService.recordProviderFailure(
                         RateLimitService.ApiProvider.OPENAI, headerlessRateLimitFailure));
 
+        verify(rateLimitService)
+                .recordRateLimitFromOpenAiServiceException(
+                        RateLimitService.ApiProvider.OPENAI, headerlessRateLimitFailure);
         assertSame(rateLimitDecisionFailure, propagatedFailure);
-        assertDoesNotThrow(() -> routingService.admitConfiguredProviderRequest(configuredClient));
+        assertThrows(
+                ConfiguredProviderTemporarilyUnavailableException.class,
+                () -> routingService.admitConfiguredProviderRequest(configuredClient));
     }
 
     private static OpenAiProviderRoutingService configuredProviderRoutingService(RateLimitService rateLimitService) {

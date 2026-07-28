@@ -153,7 +153,14 @@ public final class OpenAiProviderRoutingService {
 
         if (throwable instanceof OpenAIServiceException serviceException
                 && serviceException.statusCode() == HTTP_TOO_MANY_REQUESTS) {
-            rateLimitService.recordRateLimitFromOpenAiServiceException(provider, serviceException);
+            try {
+                rateLimitService.recordRateLimitFromOpenAiServiceException(provider, serviceException);
+            } catch (RateLimitDecisionException rateLimitDecisionFailure) {
+                if (provider == CONFIGURED_PROVIDER) {
+                    markConfiguredProviderBackoff();
+                }
+                throw rateLimitDecisionFailure;
+            }
         }
     }
 
