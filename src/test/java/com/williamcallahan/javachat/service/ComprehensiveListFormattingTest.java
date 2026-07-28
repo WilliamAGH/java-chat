@@ -163,6 +163,30 @@ class ComprehensiveListFormattingTest {
     }
 
     @Test
+    void lastInlineItemKeepsCorporateSuffixContinuationAndSeparatesTrailingSentence() {
+        String markdownInput = "Key roles: 1. Team 2. Visit Example Inc. headquarters";
+        String renderedHtml = markdownService.processStructured(markdownInput).html();
+
+        assertTrue(
+                renderedHtml.contains("<li>Visit Example Inc. headquarters</li>"),
+                "Corporate suffix continuation remains in the list item");
+        assertFalse(
+                renderedHtml.contains("<p>headquarters</p>"),
+                "Corporate suffix continuation does not become trailing prose");
+
+        String trailingSentenceMarkdown = "Key roles: 1. Team 2. Visit Example Inc. Read the guide.";
+        String trailingSentenceHtml =
+                markdownService.processStructured(trailingSentenceMarkdown).html();
+
+        assertTrue(
+                trailingSentenceHtml.contains("<li>Visit Example Inc</li>"),
+                "Corporate suffix remains in the list item");
+        assertTrue(
+                trailingSentenceHtml.contains("<p>Read the guide.</p>"),
+                "Capitalized trailing sentence remains a paragraph");
+    }
+
+    @Test
     void testDirectAttachmentToPunctuation() {
         String input = "See below:1.First item.2.Second item!3.Third item";
         String html = markdownService.processStructured(input).html();

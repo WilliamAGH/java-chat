@@ -179,7 +179,7 @@ class InlineListParserTest {
 
     @Test
     void tryConvert_keepsCommonAbbreviationsInLastListItem() {
-        List<String> lastItemTexts = List.of(
+        List<String> lastListEntryTexts = List.of(
                 "Led by Dr. Smith",
                 "Led by Mr. Smith",
                 "Led by Ms. Smith",
@@ -188,12 +188,13 @@ class InlineListParserTest {
                 "Compare vs. the baseline",
                 "Ask (e.g. the guide)");
 
-        for (String lastItemText : lastItemTexts) {
-            InlineListParser.Conversion conversion = InlineListParser.tryConvert("1. First 2. " + lastItemText);
+        for (String lastListEntryText : lastListEntryTexts) {
+            InlineListParser.Conversion conversion = InlineListParser.tryConvert("1. First 2. " + lastListEntryText);
 
-            assertNotNull(conversion, lastItemText);
-            assertEquals(lastItemText, conversion.primaryListElement().child(1).text(), lastItemText);
-            assertEquals("", conversion.trailingText(), lastItemText);
+            assertNotNull(conversion, lastListEntryText);
+            assertEquals(
+                    lastListEntryText, conversion.primaryListElement().child(1).text(), lastListEntryText);
+            assertEquals("", conversion.trailingText(), lastListEntryText);
         }
     }
 
@@ -209,13 +210,75 @@ class InlineListParserTest {
     }
 
     @Test
-    void tryConvert_treatsCorporateSuffixAsSentenceTerminal() {
+    void tryConvert_treatsCorporateSuffixBeforeCapitalizedSentenceAsTerminal() {
+        List<String> corporateSuffixes = List.of("Corp", "Inc");
+
+        for (String corporateSuffix : corporateSuffixes) {
+            InlineListParser.Conversion conversion =
+                    InlineListParser.tryConvert("1. First 2. Visit Example " + corporateSuffix + ". Read the guide.");
+
+            assertNotNull(conversion, corporateSuffix);
+            assertEquals(
+                    "Visit Example " + corporateSuffix,
+                    conversion.primaryListElement().child(1).text(),
+                    corporateSuffix);
+            assertEquals("Read the guide.", conversion.trailingText(), corporateSuffix);
+        }
+    }
+
+    @Test
+    void tryConvert_keepsUnambiguousCorporateSuffixContinuationInsideListEntry() {
+        List<String> lastListEntryTexts = List.of(
+                "Visit Example Inc. headquarters",
+                "Visit Example Corp. headquarters",
+                "Visit Example Inc. 2025 results",
+                "Visit Example Inc. (headquarters)");
+
+        for (String lastListEntryText : lastListEntryTexts) {
+            InlineListParser.Conversion conversion = InlineListParser.tryConvert("1. First 2. " + lastListEntryText);
+
+            assertNotNull(conversion, lastListEntryText);
+            assertEquals(
+                    lastListEntryText, conversion.primaryListElement().child(1).text(), lastListEntryText);
+            assertEquals("", conversion.trailingText(), lastListEntryText);
+        }
+    }
+
+    @Test
+    void tryConvert_keepsCorporateContinuationBeforeLaterTrailingSentence() {
+        List<String> corporateSuffixes = List.of("Inc", "Corp");
+
+        for (String corporateSuffix : corporateSuffixes) {
+            InlineListParser.Conversion conversion = InlineListParser.tryConvert(
+                    "1. First 2. Visit Example " + corporateSuffix + ". headquarters. Read the guide.");
+
+            assertNotNull(conversion, corporateSuffix);
+            assertEquals(
+                    "Visit Example " + corporateSuffix + ". headquarters",
+                    conversion.primaryListElement().child(1).text(),
+                    corporateSuffix);
+            assertEquals("Read the guide.", conversion.trailingText(), corporateSuffix);
+        }
+    }
+
+    @Test
+    void tryConvert_treatsFullCorporateWordAsSentenceTerminal() {
         InlineListParser.Conversion conversion =
-                InlineListParser.tryConvert("1. First 2. Visit Example Inc. Read the guide.");
+                InlineListParser.tryConvert("1. First 2. Visit Example Incorporated. Read the guide.");
 
         assertNotNull(conversion);
         assertEquals(
-                "Visit Example Inc", conversion.primaryListElement().child(1).text());
+                "Visit Example Incorporated",
+                conversion.primaryListElement().child(1).text());
         assertEquals("Read the guide.", conversion.trailingText());
+    }
+
+    private static void assertCorporateSuffixRemainsInList(String rawListEntryText, String expectedListEntryText) {
+        InlineListParser.Conversion conversion = InlineListParser.tryConvert("1. First 2. " + rawListEntryText);
+
+        assertNotNull(conversion, rawListEntryText);
+        assertEquals(
+                expectedListEntryText, conversion.primaryListElement().child(1).text(), rawListEntryText);
+        assertEquals("", conversion.trailingText(), rawListEntryText);
     }
 }
