@@ -32,7 +32,7 @@ public class RetrievalAugmentationConfig {
     private static final String POSITIVE_FMT = "%s must be greater than 0.";
     private static final String NON_NEG_FMT = "%s must be 0 or greater.";
     private static final String RANGE_FMT = "%s must be between %s and %s.";
-    private static final String RERANK_TIMEOUT_BOUND_FMT =
+    private static final String RERANKER_TIMEOUT_BOUND_MESSAGE_FORMAT =
             "%s must be less than the response preparation timeout of %s.";
 
     private int searchTopK = TOP_K_DEF;
@@ -227,7 +227,10 @@ public class RetrievalAugmentationConfig {
     private void requireRerankerTimeoutWithinResponsePreparationBudget() {
         if (rerankerTimeout.compareTo(RESPONSE_PREPARATION_TIMEOUT) >= 0) {
             throw new IllegalArgumentException(String.format(
-                    Locale.ROOT, RERANK_TIMEOUT_BOUND_FMT, RERANK_TIMEOUT_KEY, RESPONSE_PREPARATION_TIMEOUT));
+                    Locale.ROOT,
+                    RERANKER_TIMEOUT_BOUND_MESSAGE_FORMAT,
+                    RERANK_TIMEOUT_KEY,
+                    RESPONSE_PREPARATION_TIMEOUT));
         }
     }
 }

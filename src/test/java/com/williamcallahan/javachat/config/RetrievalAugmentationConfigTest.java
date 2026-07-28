@@ -14,57 +14,59 @@ class RetrievalAugmentationConfigTest {
 
     @Test
     void validateConfigurationAcceptsDefaultRerankerTimeout() {
-        RetrievalAugmentationConfig config = new RetrievalAugmentationConfig();
+        RetrievalAugmentationConfig retrievalConfiguration = new RetrievalAugmentationConfig();
 
-        assertDoesNotThrow(config::validateConfiguration);
-        assertEquals(Duration.ofSeconds(8), config.getRerankerTimeout());
+        assertDoesNotThrow(retrievalConfiguration::validateConfiguration);
+        assertEquals(Duration.ofSeconds(8), retrievalConfiguration.getRerankerTimeout());
     }
 
     @Test
     void validateConfigurationRejectsNonPositiveRerankerTimeout() {
-        RetrievalAugmentationConfig config = new RetrievalAugmentationConfig();
-        config.setRerankerTimeout(Duration.ZERO);
+        RetrievalAugmentationConfig retrievalConfiguration = new RetrievalAugmentationConfig();
+        retrievalConfiguration.setRerankerTimeout(Duration.ZERO);
 
-        assertThrows(IllegalArgumentException.class, config::validateConfiguration);
+        assertThrows(IllegalArgumentException.class, retrievalConfiguration::validateConfiguration);
     }
 
     @Test
     void validateConfigurationAcceptsRerankerTimeoutBelowResponsePreparationDeadline() {
-        RetrievalAugmentationConfig config = new RetrievalAugmentationConfig();
-        config.setRerankerTimeout(RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.minusNanos(1));
+        RetrievalAugmentationConfig retrievalConfiguration = new RetrievalAugmentationConfig();
+        retrievalConfiguration.setRerankerTimeout(
+                RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.minusNanos(1));
 
-        assertDoesNotThrow(config::validateConfiguration);
+        assertDoesNotThrow(retrievalConfiguration::validateConfiguration);
     }
 
     @Test
     void validateConfigurationRejectsRerankerTimeoutAtResponsePreparationDeadline() {
-        RetrievalAugmentationConfig config = new RetrievalAugmentationConfig();
-        config.setRerankerTimeout(RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT);
+        RetrievalAugmentationConfig retrievalConfiguration = new RetrievalAugmentationConfig();
+        retrievalConfiguration.setRerankerTimeout(RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT);
 
-        assertThrows(IllegalArgumentException.class, config::validateConfiguration);
+        assertThrows(IllegalArgumentException.class, retrievalConfiguration::validateConfiguration);
     }
 
     @Test
     void validateConfigurationRejectsRerankerTimeoutAboveResponsePreparationDeadline() {
-        RetrievalAugmentationConfig config = new RetrievalAugmentationConfig();
-        config.setRerankerTimeout(RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.plusNanos(1));
+        RetrievalAugmentationConfig retrievalConfiguration = new RetrievalAugmentationConfig();
+        retrievalConfiguration.setRerankerTimeout(
+                RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.plusNanos(1));
 
-        assertThrows(IllegalArgumentException.class, config::validateConfiguration);
+        assertThrows(IllegalArgumentException.class, retrievalConfiguration::validateConfiguration);
     }
 
     @Test
     void validateConfigurationRejectsNegativeRerankerTimeout() {
-        RetrievalAugmentationConfig config = new RetrievalAugmentationConfig();
-        config.setRerankerTimeout(Duration.ofNanos(-1));
+        RetrievalAugmentationConfig retrievalConfiguration = new RetrievalAugmentationConfig();
+        retrievalConfiguration.setRerankerTimeout(Duration.ofNanos(-1));
 
-        assertThrows(IllegalArgumentException.class, config::validateConfiguration);
+        assertThrows(IllegalArgumentException.class, retrievalConfiguration::validateConfiguration);
     }
 
     @Test
     void validateConfigurationRejectsMissingRerankerTimeout() {
-        RetrievalAugmentationConfig config = new RetrievalAugmentationConfig();
-        config.setRerankerTimeout(null);
+        RetrievalAugmentationConfig retrievalConfiguration = new RetrievalAugmentationConfig();
+        retrievalConfiguration.setRerankerTimeout(null);
 
-        assertThrows(IllegalArgumentException.class, config::validateConfiguration);
+        assertThrows(IllegalArgumentException.class, retrievalConfiguration::validateConfiguration);
     }
 }
