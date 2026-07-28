@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { Marked } from "marked";
+import { describe, expect, it, vi } from "vitest";
+import { nestNumericListFences } from "./numericListFenceNesting";
 import { parseMarkdown } from "./markdown";
 
 function renderMarkdown(markdown: string, isStreaming: boolean): HTMLDivElement {
@@ -42,7 +44,7 @@ describe("numeric list fence nesting", () => {
       "```",
     ];
 
-    for (const lineSeparator of ["\n", "\r\n"]) {
+    for (const lineSeparator of ["\n", "\r\n", "\r"]) {
       const markdown = markdownLines.join(lineSeparator);
       for (const isStreaming of [false, true]) {
         const renderedContainer = renderMarkdown(markdown, isStreaming);
@@ -143,5 +145,20 @@ describe("numeric list fence nesting", () => {
       expect(renderedContainer.querySelectorAll("ul > li > ol > li pre > code")).toHaveLength(1);
       expect(renderedContainer.querySelectorAll("ul > li > pre")).toHaveLength(0);
     }
+  });
+
+  it("uses one structural lex pass for many ordered list markers", () => {
+    const markdown = Array.from(
+      { length: 200 },
+      (_, listNumber) => `${listNumber + 1}. Template ${listNumber}\n\`\`\`text\n{{name}}\n\`\`\``,
+    ).join("\n");
+    const structuralMarkdownParser = new Marked({ gfm: true, breaks: true });
+    const structuralLexSpy = vi.spyOn(structuralMarkdownParser, "lexer");
+
+    const nestedMarkdown = nestNumericListFences(markdown, structuralMarkdownParser);
+
+    expect(nestedMarkdown).toContain("1. Template 0\n   ```text\n   {{name}}\n   ```");
+    expect(nestedMarkdown).toContain("200. Template 199\n     ```text\n     {{name}}\n     ```");
+    expect(structuralLexSpy).toHaveBeenCalledOnce();
   });
 });

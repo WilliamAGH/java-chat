@@ -147,35 +147,49 @@ function scanFenceWithinListContinuation(
   return marker ? { marker, markerIndex } : null;
 }
 
-function containsParsedOrderedMarker(
-  structuralTokens: readonly Token[],
-  candidateMarkerLine: string,
-): boolean {
-  const finalToken = structuralTokens.at(-1);
-  if (finalToken?.type !== "list") {
-    return false;
+function countLineBreaks(markdownText: string): number {
+  let lineBreakCount = 0;
+  for (let characterIndex = 0; characterIndex < markdownText.length; characterIndex++) {
+    if (markdownText[characterIndex] === NEWLINE) {
+      lineBreakCount++;
+    }
   }
-  const finalListMember = finalToken.items.at(-1);
-  if (!finalListMember) {
-    return false;
-  }
-  if (containsParsedOrderedMarker(finalListMember.tokens, candidateMarkerLine)) {
-    return true;
-  }
-  const parsedMarkerLine = finalListMember.raw.split(NEWLINE, 1)[0].trimStart();
-  return finalToken.ordered && parsedMarkerLine === candidateMarkerLine.trimStart();
+  return lineBreakCount;
 }
 
-function isParsedOrderedMarker(
-  markdownLines: readonly string[],
-  lineIndex: number,
+function collectParsedOrderedMarkerLines(
+  structuralTokens: readonly Token[],
+  firstSourceLine: number,
+  parsedMarkerLines: Set<number>,
+): void {
+  let tokenSourceLine = firstSourceLine;
+
+  for (const structuralToken of structuralTokens) {
+    if (structuralToken.type === "list") {
+      let listItemSourceLine = tokenSourceLine;
+      for (const listItem of structuralToken.items) {
+        if (structuralToken.ordered) {
+          parsedMarkerLines.add(listItemSourceLine);
+        }
+        collectParsedOrderedMarkerLines(listItem.tokens, listItemSourceLine, parsedMarkerLines);
+        listItemSourceLine += countLineBreaks(listItem.raw);
+      }
+    }
+    tokenSourceLine += countLineBreaks(structuralToken.raw);
+  }
+}
+
+function parsedNumericListMarkerLines(
+  markdownText: string,
   structuralMarkdownParser: Marked,
-): boolean {
-  const candidatePrefix = markdownLines.slice(0, lineIndex + 1).join(NEWLINE);
-  return containsParsedOrderedMarker(
-    structuralMarkdownParser.lexer(candidatePrefix),
-    markdownLines[lineIndex],
+): ReadonlySet<number> {
+  const parsedMarkerLines = new Set<number>();
+  collectParsedOrderedMarkerLines(
+    structuralMarkdownParser.lexer(markdownText),
+    0,
+    parsedMarkerLines,
   );
+  return parsedMarkerLines;
 }
 
 /**
@@ -187,6 +201,10 @@ export function nestNumericListFences(
 ): string {
   const lineFeedMarkdown = markdownText.replaceAll("\r\n", NEWLINE).replaceAll("\r", NEWLINE);
   const markdownLines = lineFeedMarkdown.split(NEWLINE);
+  const parsedListMarkerLines = parsedNumericListMarkerLines(
+    lineFeedMarkdown,
+    structuralMarkdownParser,
+  );
   const nestedLines: string[] = [];
   const fenceState = new ListFenceState();
   let awaitedContinuationIndentation: number | null = null;
@@ -228,8 +246,7 @@ export function nestNumericListFences(
           continuationIndentation + COMMONMARK_MAX_FENCE_INDENTATION,
         ) !== null;
       awaitedContinuationIndentation =
-        nextLineStartsFence &&
-        isParsedOrderedMarker(markdownLines, lineIndex, structuralMarkdownParser)
+        nextLineStartsFence && parsedListMarkerLines.has(lineIndex)
           ? continuationIndentation
           : null;
       nestedLines.push(markdownLine);
