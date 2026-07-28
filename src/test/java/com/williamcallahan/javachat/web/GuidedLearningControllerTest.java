@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.web;
 
 import static org.hamcrest.Matchers.contains;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -143,7 +144,7 @@ class GuidedLearningControllerTest {
         verify(guidedLearningService, never()).enrichmentForLesson(anyString());
         verify(guidedLearningService, never()).streamLessonContent(anyString());
         verify(guidedLearningService, never())
-                .buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString());
+                .buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString(), any());
         verifyNoInteractions(chatMemoryService, openAIStreamingService);
     }
 

@@ -245,7 +245,7 @@ class ChatControllerStreamingFailureTest {
         when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any()))
                 .thenThrow(embeddingDeadlineFailure);
 
         List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
@@ -368,7 +368,7 @@ class ChatControllerStreamingFailureTest {
                 retrievalFinished.countDown();
             }
         });
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any()))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
@@ -551,7 +551,7 @@ class ChatControllerStreamingFailureTest {
                 StructuredPrompt.fromRawPrompt("test", 1),
                 List.of(),
                 List.of(officialPromptDocument, truncatedPromptDocument));
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any()))
                 .thenReturn(promptOutcome);
         when(chatService.citationOutcomeForRetainedContext(
                         USER_QUERY, promptOutcome, List.of(officialPromptDocument.getId())))
@@ -609,7 +609,7 @@ class ChatControllerStreamingFailureTest {
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         ChatService.StructuredPromptOutcome promptOutcome = new ChatService.StructuredPromptOutcome(
                 StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of(broadPromptDocument));
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(exactOverloadQuery)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(exactOverloadQuery), any()))
                 .thenReturn(promptOutcome);
         when(chatService.citationOutcomeForRetainedContext(
                         exactOverloadQuery, promptOutcome, List.of(broadPromptDocument.getId())))
@@ -674,7 +674,7 @@ class ChatControllerStreamingFailureTest {
                 new ExceptionResponseBuilder(),
                 new AppProperties());
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any()))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(streamingService.canAttemptRequest()).thenReturn(true);
@@ -737,7 +737,7 @@ class ChatControllerStreamingFailureTest {
                 .concatWith(Flux.error(streamBufferOverflowFailure));
 
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any()))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(streamingService.canAttemptRequest()).thenReturn(true);
@@ -784,7 +784,7 @@ class ChatControllerStreamingFailureTest {
                 new AppProperties());
 
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any()))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(streamingService.canAttemptRequest()).thenReturn(true);

@@ -117,7 +117,7 @@ class GuidedSseCitationEventTest {
                         Flux.just("Hello"),
                         RateLimitService.ApiProvider.OPENAI,
                         List.of(lessonContextDocument.getId()))));
-        given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
+        given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString(), any()))
                 .willReturn(promptOutcome);
         given(guidedLearningService.citationOutcomeForRetainedContext(
                         eq(promptOutcome), eq(List.of(lessonContextDocument.getId()))))
@@ -165,7 +165,7 @@ class GuidedSseCitationEventTest {
                         Flux.just("Hello"),
                         RateLimitService.ApiProvider.OPENAI,
                         List.of(lessonContextDocument.getId()))));
-        given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
+        given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString(), any()))
                 .willReturn(promptOutcome);
         given(guidedLearningService.citationOutcomeForRetainedContext(
                         eq(promptOutcome), eq(List.of(lessonContextDocument.getId()))))

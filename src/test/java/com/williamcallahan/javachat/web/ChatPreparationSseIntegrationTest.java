@@ -123,7 +123,7 @@ class ChatPreparationSseIntegrationTest {
                 retrievalFinished.countDown();
             }
         });
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any()))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(chatService.citationOutcomeForRetainedContext(

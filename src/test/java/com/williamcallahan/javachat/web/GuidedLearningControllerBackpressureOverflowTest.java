@@ -98,7 +98,8 @@ class GuidedLearningControllerBackpressureOverflowTest {
         when(streamingService.canAttemptRequest()).thenReturn(true);
         when(guidedLearningService.getLesson(LESSON_SLUG)).thenReturn(Optional.of(listedLesson()));
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
+        when(guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any()))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         when(guidedLearningService.citationOutcomeForRetainedContext(

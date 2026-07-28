@@ -79,7 +79,8 @@ class ChatServiceTest {
                         eq(VERSIONED_CONTEXT_QUERY),
                         eq(ModelConfiguration.RAG_LIMIT_CONSTRAINED),
                         eq(ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED),
-                        any(RetrievalConstraint.class)))
+                        any(RetrievalConstraint.class),
+                        any()))
                 .thenReturn(new RetrievalService.RetrievalOutcome(List.of(), List.of()));
         ChatService chatService =
                 new ChatService(streamingService, retrievalService, systemPromptConfig, new AppProperties());
@@ -92,7 +93,8 @@ class ChatServiceTest {
                         eq(VERSIONED_CONTEXT_QUERY),
                         eq(ModelConfiguration.RAG_LIMIT_CONSTRAINED),
                         eq(ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED),
-                        constraintCaptor.capture());
+                        constraintCaptor.capture(),
+                        any());
         RetrievalConstraint answerContextConstraint = constraintCaptor.getValue();
         assertEquals("official", answerContextConstraint.sourceKind());
         assertEquals(DocsSourceRegistry.officialDocumentationSourceIdentities(), answerContextConstraint.docSet());
