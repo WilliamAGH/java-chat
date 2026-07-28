@@ -102,16 +102,10 @@ public class CitationProcessor {
 
             // Fall back to link text content
             StringBuilder titleBuilder = new StringBuilder();
-            Node child = link.getFirstChild();
-            while (child != null) {
-                if (child instanceof Text textNode) {
-                    titleBuilder.append(textNode.getChars());
-                } else if (child instanceof Code codeNode) {
-                    titleBuilder.append(codeNode.getText());
-                }
-                child = child.getNext();
-            }
-
+            NodeVisitor titleVisitor = new NodeVisitor(
+                    new VisitHandler<>(Text.class, textNode -> titleBuilder.append(textNode.getChars())),
+                    new VisitHandler<>(Code.class, codeNode -> titleBuilder.append(codeNode.getText())));
+            titleVisitor.visitChildren(link);
             String title = titleBuilder.toString().trim();
             return title.isEmpty() ? "Source" : title;
         }

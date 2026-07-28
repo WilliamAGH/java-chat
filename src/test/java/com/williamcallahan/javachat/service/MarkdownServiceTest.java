@@ -159,6 +159,17 @@ class MarkdownServiceTest {
     }
 
     @Test
+    void citationTitlePreservesNestedEmphasis() {
+        String sourceUrl = "https://example.com/reference";
+        String markdown = "[*Italic and **bold** source*](" + sourceUrl + ")";
+
+        var markdownCitations = markdownService.processStructured(markdown).citations();
+
+        assertEquals(1, markdownCitations.size());
+        assertEquals("Italic and bold source", markdownCitations.getFirst().title());
+    }
+
+    @Test
     @DisplayName("Should preserve enrichment markers")
     void testEnrichmentMarkers() {
         String markdown = "Text with {{hint:This is a hint}} and {{warning:This is a warning}}";

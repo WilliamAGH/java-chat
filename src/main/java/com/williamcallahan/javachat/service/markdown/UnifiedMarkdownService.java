@@ -129,14 +129,12 @@ public class UnifiedMarkdownService {
             markdown = markdown.substring(0, MAX_INPUT_LENGTH);
         }
 
-        // Pre-normalize code fences and heading markers before parsing (no regex)
-        markdown = MarkdownNormalizer.preNormalizeForListsAndFences(markdown);
-
         // Replace enrichment markers with placeholders to prevent cross-node splits (e.g., example code fences)
         java.util.Map<String, String> placeholders = new java.util.HashMap<>();
         java.util.List<MarkdownEnrichment> placeholderEnrichments = new java.util.ArrayList<>();
         String placeholderMarkdown = enrichmentPlaceholderizer.extractAndPlaceholderizeEnrichments(
                 markdown, placeholderEnrichments, placeholders);
+        placeholderMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(placeholderMarkdown);
 
         try {
             // Parse markdown to AST - this is the foundation of AGENTS.md compliance

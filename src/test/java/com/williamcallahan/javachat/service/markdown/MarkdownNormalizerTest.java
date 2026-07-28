@@ -105,6 +105,26 @@ class MarkdownNormalizerTest {
     }
 
     @Test
+    void preNormalizeForListsAndFences_preservesFenceMarkerWithTrailingCodeContent() {
+        String fenceLikeCodeContent =
+                String.join("\n", "```text", "literal content", "```ruby", "still literal content", "```");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(fenceLikeCodeContent);
+
+        assertEquals(fenceLikeCodeContent, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_preservesClosingBracesAfterFenceMarkerAsCode() {
+        String fenceLikeCodeContent = String.join("\n", "```text", "literal content", "```}}", "still code");
+        String expectedMarkdown = fenceLikeCodeContent + "\n```";
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(fenceLikeCodeContent);
+
+        assertEquals(expectedMarkdown, normalizedMarkdown);
+    }
+
+    @Test
     void preNormalizeForListsAndFences_treatsUnmatchedBacktickAsLiteralBeforeUnclosedFence() {
         String unmatchedInlineCodeAndFence = String.join("\n", "`code", "```java", "more");
         String expectedNormalizedMarkdown = unmatchedInlineCodeAndFence + "\n```";
@@ -132,6 +152,23 @@ class MarkdownNormalizerTest {
         String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(markdownWithFollowingEnrichment);
 
         assertEquals(markdownWithFollowingEnrichment, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_preservesBraceMarkerInsideNumericListFence() {
+        String fencedTemplate = String.join(
+                "\n", "1. Render the template:", "```handlebars", "<p>{{name}}</p>", "return renderedTemplate;", "```");
+        String expectedMarkdown = String.join(
+                "\n",
+                "1. Render the template:",
+                "    ```handlebars",
+                "    <p>{{name}}</p>",
+                "    return renderedTemplate;",
+                "    ```");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(fencedTemplate);
+
+        assertEquals(expectedMarkdown, normalizedMarkdown);
     }
 
     @ParameterizedTest(name = "{0} fence with {1} spaces remains code context")

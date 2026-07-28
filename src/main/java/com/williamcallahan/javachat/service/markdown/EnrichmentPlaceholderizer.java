@@ -7,6 +7,7 @@ import com.williamcallahan.javachat.domain.markdown.MarkdownEnrichment;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -186,6 +187,23 @@ class EnrichmentPlaceholderizer {
         while (scanIndex < markdown.length()) {
             int lineEndIndex = MarkdownBlockContext.lineEndIndex(markdown, lineStartIndex);
             if (scanIndex == lineStartIndex) {
+                if (blockContext.isInsideFencedCodeBlock()) {
+                    Optional<MarkdownBlockContext.FenceMarker> fenceMarker =
+                            MarkdownBlockContext.scanFenceAtBlockIndentation(markdown, lineStartIndex, lineEndIndex);
+                    if (fenceMarker.isPresent() && blockContext.matchesCurrentFence(fenceMarker.get())) {
+                        int enrichmentEndIndex = fenceMarker.get().endIndex();
+                        int markerEndIndex = enrichmentEndIndex + MARKER_END.length();
+                        boolean hasOnlyFenceTrivia =
+                                markerEndIndex <= lineEndIndex && markdown.startsWith(MARKER_END, enrichmentEndIndex);
+                        for (int cursor = markerEndIndex; hasOnlyFenceTrivia && cursor < lineEndIndex; cursor++) {
+                            char trailingCharacter = markdown.charAt(cursor);
+                            hasOnlyFenceTrivia = trailingCharacter == ' ' || trailingCharacter == '\t';
+                        }
+                        if (hasOnlyFenceTrivia) {
+                            return enrichmentEndIndex;
+                        }
+                    }
+                }
                 MarkdownBlockContext.LineContext lineContext =
                         blockContext.classifyLine(markdown, lineStartIndex, lineEndIndex);
                 if (lineContext.isCodeBlock()) {

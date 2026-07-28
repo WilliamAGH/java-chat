@@ -30,15 +30,12 @@ final class MarkdownNormalizer {
 
         while (lineStartIndex < markdownText.length()) {
             int lineEndIndex = MarkdownBlockContext.lineEndIndex(markdownText, lineStartIndex);
-            if (!appendDetachedClosingFenceIfPresent(
-                    normalizedBuilder, markdownText, lineStartIndex, lineEndIndex, blockContext)) {
-                MarkdownBlockContext.LineContext lineContext =
-                        blockContext.classifyLine(markdownText, lineStartIndex, lineEndIndex);
-                if (lineContext.isCodeBlock()) {
-                    normalizedBuilder.append(markdownText, lineStartIndex, lineEndIndex);
-                } else {
-                    appendTextLine(normalizedBuilder, markdownText, lineStartIndex, lineEndIndex, blockContext);
-                }
+            MarkdownBlockContext.LineContext lineContext =
+                    blockContext.classifyLine(markdownText, lineStartIndex, lineEndIndex);
+            if (lineContext.isCodeBlock()) {
+                normalizedBuilder.append(markdownText, lineStartIndex, lineEndIndex);
+            } else {
+                appendTextLine(normalizedBuilder, markdownText, lineStartIndex, lineEndIndex, blockContext);
             }
 
             if (lineEndIndex < markdownText.length()) {
@@ -52,34 +49,6 @@ final class MarkdownNormalizer {
             normalizedBuilder.append(blockContext.closingFence());
         }
         return normalizedBuilder.toString();
-    }
-
-    private static boolean appendDetachedClosingFenceIfPresent(
-            StringBuilder normalizedBuilder,
-            String markdownText,
-            int lineStartIndex,
-            int lineEndIndex,
-            MarkdownBlockContext blockContext) {
-        if (!blockContext.isInsideFencedCodeBlock()) {
-            return false;
-        }
-
-        Optional<MarkdownBlockContext.FenceMarker> fenceMarker =
-                MarkdownBlockContext.scanFenceAtBlockIndentation(markdownText, lineStartIndex, lineEndIndex);
-        if (fenceMarker.isEmpty() || !blockContext.matchesCurrentFence(fenceMarker.get())) {
-            return false;
-        }
-
-        int markerEndIndex = fenceMarker.get().endIndex();
-        if (hasOnlySpaceOrTab(markdownText, markerEndIndex, lineEndIndex)) {
-            return false;
-        }
-
-        normalizedBuilder.append(markdownText, lineStartIndex, markerEndIndex);
-        blockContext.classifyLine(markdownText, lineStartIndex, markerEndIndex);
-        appendLineBreakIfNeeded(normalizedBuilder);
-        appendTextLine(normalizedBuilder, markdownText, markerEndIndex, lineEndIndex, blockContext);
-        return true;
     }
 
     private static void appendTextLine(
@@ -137,7 +106,10 @@ final class MarkdownNormalizer {
             if (isNumericHeader) {
                 inNumericHeader = true;
                 normalizedBuilder.append(line);
-            } else if (inNumericHeader && startsEnrichmentMarker(trimmedLine)) {
+            } else if (inNumericHeader
+                    && lineContext == MarkdownBlockContext.LineContext.TEXT
+                    && !startedInsideInlineCode
+                    && startsEnrichmentMarker(trimmedLine)) {
                 inNumericHeader = false;
                 normalizedBuilder.append(line);
             } else if (inNumericHeader && (lineContext.isCodeBlock() || shouldIndentContinuationLine(trimmedLine))) {
@@ -190,15 +162,5 @@ final class MarkdownNormalizer {
         if (builder.length() > 0 && builder.charAt(builder.length() - 1) != '\n') {
             builder.append('\n');
         }
-    }
-
-    private static boolean hasOnlySpaceOrTab(String markdownText, int startIndex, int endIndex) {
-        for (int cursor = startIndex; cursor < endIndex; cursor++) {
-            char currentCharacter = markdownText.charAt(cursor);
-            if (currentCharacter != ' ' && currentCharacter != '\t') {
-                return false;
-            }
-        }
-        return true;
     }
 }
