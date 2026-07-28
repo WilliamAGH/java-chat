@@ -24,10 +24,10 @@ Fetch all configured sources:
 make fetch-all
 ```
 
-This runs `scripts/fetch_all_docs.sh` (requires `wget` and MuPDF's `mutool`; macOS:
-`brew install wget mupdf`; Ubuntu: `apt install wget mupdf-tools`). See the canonical source ownership and edit
-workflow in [pipeline-commands.md](pipeline-commands.md#scrape-fetch-html-mirrors), along with flags
-(`--force`, `--include-quick`, `--no-clean`).
+This runs `scripts/fetch_all_docs.sh` (requires `wget` and MuPDF's `mutool`). See the canonical source
+ownership, prerequisites, and edit workflow in
+[pipeline-commands.md](pipeline-commands.md#scrape-fetch-html-mirrors), along with flags (`--force`,
+`--include-quick`, `--no-clean`).
 
 ## Process + upload to Qdrant
 

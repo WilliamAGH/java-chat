@@ -5,8 +5,8 @@
 - Java 25 (project toolchain)
 - Node.js 24.15.0 (frontend build/dev)
 - Docker (optional, for local Qdrant)
-- `wget` and MuPDF's `mutool` (optional, for `make fetch-all`; macOS: `brew install wget mupdf`;
-  Ubuntu: `apt install wget mupdf-tools`)
+- `wget` and MuPDF's `mutool` (optional, for `make fetch-all`; see
+  [scrape prerequisites](pipeline-commands.md#scrape-fetch-html-mirrors))
 
 ## Quick start (dev)
 
