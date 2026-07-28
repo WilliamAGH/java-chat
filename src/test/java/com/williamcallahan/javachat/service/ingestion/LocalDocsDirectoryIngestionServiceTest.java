@@ -117,7 +117,7 @@ class LocalDocsDirectoryIngestionServiceTest {
                 .thenReturn(List.of(
                         LocalDocsFileOutcome.failedFile(
                                 new com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure(
-                                        "first.html", "chunking", "malformed input")),
+                                        "first.html", "html-read", "malformed input")),
                         LocalDocsFileOutcome.processedFile()));
         LocalDocsDirectoryIngestionService directoryIngestionService = new LocalDocsDirectoryIngestionService(
                 fileProcessor, ingestionRunStore, configuredDocumentationRoot.toString());
