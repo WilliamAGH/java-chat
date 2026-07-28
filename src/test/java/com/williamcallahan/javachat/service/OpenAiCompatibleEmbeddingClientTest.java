@@ -649,7 +649,7 @@ class OpenAiCompatibleEmbeddingClientTest {
     }
 
     @Test
-    void batchRetryAfterDoesNotBlockLiveRequestsAndRemainsLocalToBatchCapacity()
+    void batchRetryAfterBlocksLiveRequestsUntilSharedProviderCooldownExpires()
             throws IOException, InterruptedException {
         AtomicInteger requestCount = new AtomicInteger();
         HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
@@ -669,31 +669,24 @@ class OpenAiCompatibleEmbeddingClientTest {
                     () -> clientAdapter.embed(List.of("batch document"), LlmGatewayTier.BATCH));
             assertEquals(1, requestCount.get());
 
-            assertEquals(
-                    1,
-                    clientAdapter
-                            .embed(List.of("live query"), LlmGatewayTier.LIVE)
-                            .size());
-            assertEquals(2, requestCount.get());
-
-            long rejectedBatchStartNanos = System.nanoTime();
+            long rejectedLiveStartNanos = System.nanoTime();
             EmbeddingServiceUnavailableException cooldownFailure = assertThrows(
                     EmbeddingServiceTemporarilyUnavailableException.class,
-                    () -> clientAdapter.embed(List.of("second batch document"), LlmGatewayTier.BATCH));
-            Duration cooldownRejectionDelay = Duration.ofNanos(System.nanoTime() - rejectedBatchStartNanos);
+                    () -> clientAdapter.embed(List.of("live query"), LlmGatewayTier.LIVE));
+            Duration cooldownRejectionDelay = Duration.ofNanos(System.nanoTime() - rejectedLiveStartNanos);
 
             assertTrue(cooldownFailure.getMessage().contains("rate limited"));
             assertTrue(cooldownRejectionDelay.compareTo(Duration.ofMillis(250)) < 0);
-            assertEquals(2, requestCount.get());
+            assertEquals(1, requestCount.get());
 
             TimeUnit.MILLISECONDS.sleep(1_100);
             assertEquals(
                     1,
                     clientAdapter
-                            .embed(List.of("retried batch document"), LlmGatewayTier.BATCH)
+                            .embed(List.of("retried live query"), LlmGatewayTier.LIVE)
                             .size());
 
-            assertEquals(3, requestCount.get());
+            assertEquals(2, requestCount.get());
         } finally {
             server.stop(0);
         }

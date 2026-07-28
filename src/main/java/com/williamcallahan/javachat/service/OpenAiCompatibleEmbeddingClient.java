@@ -241,10 +241,9 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         RequestLimits batchLimits = requiredGatewaySettings.batchRequestLimits();
         this.liveRequestPermits = new Semaphore(liveLimits.maxConcurrentRequests(), true);
         this.batchRequestPermits = new Semaphore(batchLimits.maxConcurrentRequests(), true);
-        this.liveRequestLaunchPacer =
-                new RequestLaunchPacer(liveLimits.requestsPerSecond(), new EmbeddingProviderCooldown());
-        this.batchRequestLaunchPacer =
-                new RequestLaunchPacer(batchLimits.requestsPerSecond(), new EmbeddingProviderCooldown());
+        EmbeddingProviderCooldown providerCooldown = new EmbeddingProviderCooldown();
+        this.liveRequestLaunchPacer = new RequestLaunchPacer(liveLimits.requestsPerSecond(), providerCooldown);
+        this.batchRequestLaunchPacer = new RequestLaunchPacer(batchLimits.requestsPerSecond(), providerCooldown);
         this.liveRequestTimeout = liveLimits.totalTimeout();
         this.batchRequestTimeout = batchLimits.totalTimeout();
         log.info(
