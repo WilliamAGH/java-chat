@@ -147,61 +147,46 @@ function scanFenceWithinListContinuation(
   return marker ? { marker, markerIndex } : null;
 }
 
-function countLineBreaks(markdownText: string, startIndex: number, endIndex: number): number {
-  let lineBreakCount = 0;
-  for (let cursor = startIndex; cursor < endIndex; cursor++) {
-    if (markdownText[cursor] === NEWLINE) {
-      lineBreakCount++;
-    }
+function containsParsedOrderedMarker(
+  structuralTokens: readonly Token[],
+  candidateMarkerLine: string,
+): boolean {
+  const finalToken = structuralTokens.at(-1);
+  if (finalToken?.type !== "list") {
+    return false;
   }
-  return lineBreakCount;
+  const finalListMember = finalToken.items.at(-1);
+  if (!finalListMember) {
+    return false;
+  }
+  if (containsParsedOrderedMarker(finalListMember.tokens, candidateMarkerLine)) {
+    return true;
+  }
+  const parsedMarkerLine = finalListMember.raw.split(NEWLINE, 1)[0].trimStart();
+  return finalToken.ordered && parsedMarkerLine === candidateMarkerLine.trimStart();
 }
 
-function parsedNumericListMarkerLines(markdownText: string): ReadonlySet<number> {
-  const markerLines = new Set<number>();
-  const structuralTokens = STRUCTURAL_MARKDOWN_PARSER.lexer(markdownText);
-  let sourceCursor = 0;
-  let sourceLine = 0;
-
-  for (const structuralToken of structuralTokens) {
-    const tokenStartIndex = markdownText.startsWith(structuralToken.raw, sourceCursor)
-      ? sourceCursor
-      : markdownText.indexOf(structuralToken.raw, sourceCursor);
-    if (tokenStartIndex < 0) {
-      continue;
-    }
-    sourceLine += countLineBreaks(markdownText, sourceCursor, tokenStartIndex);
-
-    if (structuralToken.type === "list" && structuralToken.ordered) {
-      let listCursor = 0;
-      let listLine = sourceLine;
-      for (const orderedListMember of structuralToken.items) {
-        const memberStartIndex = structuralToken.raw.indexOf(orderedListMember.raw, listCursor);
-        if (memberStartIndex < 0) {
-          continue;
-        }
-        listLine += countLineBreaks(structuralToken.raw, listCursor, memberStartIndex);
-        markerLines.add(listLine);
-        const memberEndIndex = memberStartIndex + orderedListMember.raw.length;
-        listLine += countLineBreaks(structuralToken.raw, memberStartIndex, memberEndIndex);
-        listCursor = memberEndIndex;
-      }
-    }
-
-    const tokenEndIndex = tokenStartIndex + structuralToken.raw.length;
-    sourceLine += countLineBreaks(markdownText, tokenStartIndex, tokenEndIndex);
-    sourceCursor = tokenEndIndex;
-  }
-  return markerLines;
+function isParsedOrderedMarker(
+  markdownLines: readonly string[],
+  lineIndex: number,
+  structuralMarkdownParser: Marked,
+): boolean {
+  const candidatePrefix = markdownLines.slice(0, lineIndex + 1).join(NEWLINE);
+  return containsParsedOrderedMarker(
+    structuralMarkdownParser.lexer(candidatePrefix),
+    markdownLines[lineIndex],
+  );
 }
 
 /**
  * Keeps streamed fences attached to numeric list items that Marked has already identified.
  */
-export function nestNumericListFences(markdownText: string): string {
+export function nestNumericListFences(
+  markdownText: string,
+  structuralMarkdownParser: Marked,
+): string {
   const lineFeedMarkdown = markdownText.replaceAll("\r\n", NEWLINE).replaceAll("\r", NEWLINE);
   const markdownLines = lineFeedMarkdown.split(NEWLINE);
-  const parsedListMarkerLines = parsedNumericListMarkerLines(lineFeedMarkdown);
   const nestedLines: string[] = [];
   const fenceState = new ListFenceState();
   let awaitedContinuationIndentation: number | null = null;
@@ -243,7 +228,8 @@ export function nestNumericListFences(markdownText: string): string {
           continuationIndentation + COMMONMARK_MAX_FENCE_INDENTATION,
         ) !== null;
       awaitedContinuationIndentation =
-        nextLineStartsFence && parsedListMarkerLines.has(lineIndex)
+        nextLineStartsFence &&
+        isParsedOrderedMarker(markdownLines, lineIndex, structuralMarkdownParser)
           ? continuationIndentation
           : null;
       nestedLines.push(markdownLine);

@@ -127,4 +127,21 @@ describe("numeric list fence nesting", () => {
       expect(headingContainer.querySelectorAll("ol > li pre > code")).toHaveLength(1);
     }
   });
+
+  it("keeps fenced code inside ordered lists nested under unordered items", () => {
+    const markdown = [
+      "- Outer item",
+      "  1. Nested template",
+      "  ```text",
+      "  {{name}}",
+      "  ```",
+    ].join("\n");
+
+    for (const isStreaming of [false, true]) {
+      const renderedContainer = renderMarkdown(markdown, isStreaming);
+
+      expect(renderedContainer.querySelectorAll("ul > li > ol > li pre > code")).toHaveLength(1);
+      expect(renderedContainer.querySelectorAll("ul > li > pre")).toHaveLength(0);
+    }
+  });
 });

@@ -421,8 +421,26 @@ function normalizeMarkdownForStreaming(content: string): string {
   return normalized;
 }
 
-function prepareMarkdownForParsing(markdownText: string): string {
-  return normalizeMarkdownForStreaming(nestNumericListFences(markdownText));
+function prepareMarkdownForParsing(markdownText: string, markdownParser: Marked): string {
+  const normalizedContent = normalizeMarkdownForStreaming(
+    nestNumericListFences(markdownText, markdownParser),
+  );
+  if (import.meta.env.DEV && normalizedContent !== markdownText) {
+    for (let markerIndex = 0; markerIndex < markdownText.length; markerIndex++) {
+      const opening = readEnrichmentOpening(markdownText, markerIndex);
+      if (!opening) {
+        continue;
+      }
+      const rawLength = markdownText.length - markerIndex;
+      console.warn("[markdown] Repaired enrichment markdown structure", {
+        kind: opening.kind,
+        contentLength: Math.max(0, rawLength - opening.length - ENRICHMENT_CLOSE.length),
+        rawLength,
+      });
+      break;
+    }
+  }
+  return normalizedContent;
 }
 
 /** Enrichment close marker. */
@@ -611,7 +629,7 @@ function createEnrichmentExtension(
 
       if (token.resolved !== true) {
         const unresolvedContent = typeof token.content === "string" ? token.content : "";
-        return markdownParser.parse(prepareMarkdownForParsing(unresolvedContent), {
+        return markdownParser.parse(unresolvedContent, {
           async: false,
           gfm: true,
           breaks: false,
@@ -628,11 +646,9 @@ function createEnrichmentExtension(
         return "";
       }
 
-      const normalizedEnrichmentMarkdown = prepareMarkdownForParsing(enrichmentMarkdown);
-
       // Render inner content as markdown
       // IMPORTANT: Use gfm but disable breaks to prevent fence interference
-      const innerHtml = markdownParser.parse(normalizedEnrichmentMarkdown, {
+      const innerHtml = markdownParser.parse(enrichmentMarkdown, {
         async: false,
         gfm: true,
         breaks: false, // Preserve fence detection accuracy
@@ -648,6 +664,11 @@ function createEnrichmentExtension(
 function createMarkdownParser(isStreaming: boolean): Marked {
   const markdownParser = new Marked({ gfm: true, breaks: true });
   markdownParser.use({
+    hooks: {
+      preprocess(markdownText) {
+        return prepareMarkdownForParsing(markdownText, markdownParser);
+      },
+    },
     renderer: {
       html(token: Tokens.HTML | Tokens.Tag): string {
         return escapeHtml(token.text);
@@ -678,27 +699,9 @@ export function parseMarkdown(
     return "";
   }
 
-  const normalizedContent = prepareMarkdownForParsing(markdownText);
-
-  if (import.meta.env.DEV && normalizedContent !== markdownText) {
-    for (let markerIndex = 0; markerIndex < markdownText.length; markerIndex++) {
-      const opening = readEnrichmentOpening(markdownText, markerIndex);
-      if (!opening) {
-        continue;
-      }
-      const rawLength = markdownText.length - markerIndex;
-      console.warn("[markdown] Repaired enrichment markdown structure", {
-        kind: opening.kind,
-        contentLength: Math.max(0, rawLength - opening.length - ENRICHMENT_CLOSE.length),
-        rawLength,
-      });
-      break;
-    }
-  }
-
   try {
     const markdownParser = isStreaming ? STREAMING_MARKDOWN_PARSER : COMPLETE_MARKDOWN_PARSER;
-    const rawHtml = markdownParser.parse(normalizedContent, { async: false });
+    const rawHtml = markdownParser.parse(markdownText, { async: false });
 
     return DOMPurify.sanitize(rawHtml, {
       USE_PROFILES: { html: true },
