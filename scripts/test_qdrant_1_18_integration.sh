@@ -41,7 +41,7 @@ fi
 
 collection_schema_request='{
   "vectors": {"dense": {"size": 2560, "distance": "Cosine", "on_disk": true}},
-  "sparse_vectors": {"bm25": {"modifier": "idf", "on_disk": true}},
+  "sparse_vectors": {"bm25": {"modifier": "idf"}},
   "on_disk_payload": true
 }'
 qdrant_integration_request PUT "/collections/$QDRANT_INTEGRATION_COLLECTION" "$collection_schema_request" >/dev/null
