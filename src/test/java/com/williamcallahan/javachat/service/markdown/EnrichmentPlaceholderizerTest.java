@@ -136,6 +136,60 @@ class EnrichmentPlaceholderizerTest {
         assertEquals(1, placeholders.size());
     }
 
+    @Test
+    void shouldKeepTemplateMarkersInsideFencedEnrichmentAfterInlinePreamble() {
+        String markdown = "{{example:Intro```handlebars\n<section>\n```ruby\n{{mustache}}\n</section>\n```}}";
+        List<MarkdownEnrichment> enrichments = new ArrayList<>();
+        Map<String, String> placeholders = new HashMap<>();
+
+        String placeholderMarkdown =
+                placeholderizer.extractAndPlaceholderizeEnrichments(markdown, enrichments, placeholders);
+        String renderedHtml = placeholderizer.renderEnrichmentBlocksFromPlaceholders(placeholderMarkdown, placeholders);
+
+        assertAll(
+                () -> assertEquals(1, enrichments.size()),
+                () -> assertEquals(1, placeholders.size()),
+                () -> assertTrue(enrichments.getFirst().content().contains("{{mustache}}")),
+                () -> assertTrue(renderedHtml.contains("Intro")),
+                () -> assertTrue(renderedHtml.contains("language-handlebars")),
+                () -> assertTrue(renderedHtml.contains("{{mustache}}")));
+    }
+
+    @Test
+    void shouldKeepTemplateMarkersInsideFencedEnrichmentBeforeMarkerOnlyLine() {
+        String markdown = "{{example:Intro```handlebars\n<section>\n```ruby\n{{mustache}}\n</section>\n```\n}}";
+        List<MarkdownEnrichment> enrichments = new ArrayList<>();
+        Map<String, String> placeholders = new HashMap<>();
+
+        String placeholderMarkdown =
+                placeholderizer.extractAndPlaceholderizeEnrichments(markdown, enrichments, placeholders);
+        String renderedHtml = placeholderizer.renderEnrichmentBlocksFromPlaceholders(placeholderMarkdown, placeholders);
+
+        assertAll(
+                () -> assertEquals(1, enrichments.size()),
+                () -> assertEquals(1, placeholders.size()),
+                () -> assertTrue(enrichments.getFirst().content().contains("{{mustache}}")),
+                () -> assertTrue(renderedHtml.contains("language-handlebars")),
+                () -> assertTrue(renderedHtml.contains("{{mustache}}")));
+    }
+
+    @Test
+    void shouldPreserveTripleBacktickMultilineInlineCodeAfterEnrichmentPreamble() {
+        String markdown = "{{hint:Intro```code\ncontinued``` end}}";
+        List<MarkdownEnrichment> enrichments = new ArrayList<>();
+        Map<String, String> placeholders = new HashMap<>();
+
+        String placeholderMarkdown =
+                placeholderizer.extractAndPlaceholderizeEnrichments(markdown, enrichments, placeholders);
+
+        assertAll(
+                () -> assertTrue(placeholderMarkdown.contains("ENRICHMENT_")),
+                () -> assertEquals(1, enrichments.size()),
+                () -> assertEquals(
+                        "Intro```code\ncontinued``` end", enrichments.getFirst().content()),
+                () -> assertEquals(1, placeholders.size()));
+    }
+
     @ParameterizedTest(name = "{0} fence with {1} spaces protects enrichment markers")
     @MethodSource("markdownCodeBlocksAtEveryIndentation")
     void shouldLeaveMarkersUntouchedInsideEverySupportedCodeBlockContext(

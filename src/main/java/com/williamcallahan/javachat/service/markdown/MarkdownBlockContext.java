@@ -47,6 +47,10 @@ final class MarkdownBlockContext {
         int endIndex() {
             return startIndex + length;
         }
+
+        boolean usesTilde() {
+            return character == TILDE;
+        }
     }
 
     /**
@@ -216,7 +220,7 @@ final class MarkdownBlockContext {
         return scanFenceMarker(markdown, markerStartIndex, lineEndIndex);
     }
 
-    private boolean closesCurrentFence(FenceMarker marker, String markdown, int lineEndIndex) {
+    boolean closesCurrentFence(FenceMarker marker, String markdown, int lineEndIndex) {
         return matchesCurrentFence(marker) && hasOnlySpaceOrTab(markdown, marker.endIndex(), lineEndIndex);
     }
 

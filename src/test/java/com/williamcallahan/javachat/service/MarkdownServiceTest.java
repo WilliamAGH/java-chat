@@ -384,11 +384,12 @@ class MarkdownServiceTest {
     @Test
     @DisplayName("Example enrichment preserves fence-like and template text inside attached fenced code")
     void testExampleCardPreservesFenceLikeAndTemplateCode() {
-        String markdown = "{{example:```handlebars\n<section>\n```ruby\n{{mustache}}\n</section>\n```}}";
+        String markdown = "{{example:Intro```handlebars\n<section>\n```ruby\n{{mustache}}\n</section>\n```}}";
 
         String html = markdownService.processStructured(markdown).html();
 
         assertTrue(html.contains("inline-enrichment example"), "Example card should render");
+        assertTrue(html.contains("Intro"), "Inline preamble should remain in the enrichment");
         assertTrue(html.contains("<code class=\"language-handlebars\">"), "Attached fence should own the code");
         assertTrue(html.contains("```ruby"), "Fence-like code content should remain literal");
         assertTrue(html.contains("{{mustache}}"), "Template code should not terminate the enrichment");

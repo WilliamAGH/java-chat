@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Verifies normalization rules that precede markdown AST parsing.
@@ -87,6 +88,24 @@ class MarkdownNormalizerTest {
     }
 
     @Test
+    void preNormalizeForListsAndFences_preservesTripleBacktickMultilineInlineCodeAfterPreamble() {
+        String multilineInlineCode = String.join("\n", "Intro```code", "continued``` end");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(multilineInlineCode);
+
+        assertEquals(multilineInlineCode, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_preservesTripleBacktickInlineCloserAtBlockIndentation() {
+        String multilineInlineCode = String.join("\n", "Intro```code", "``` end");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(multilineInlineCode);
+
+        assertEquals(multilineInlineCode, normalizedMarkdown);
+    }
+
+    @Test
     void preNormalizeForListsAndFences_preservesClosedBacktickFence() {
         String backtickFence = String.join("\n", "```java", "int answer = 42;", "```");
 
@@ -151,6 +170,40 @@ class MarkdownNormalizerTest {
                 String.join("\n", "Before", "```java", "int answer = 42;", "```", "The result is 42.");
 
         String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(attachedFences);
+
+        assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_repairsAttachedClosingFenceWithCompactTitleCaseProse() {
+        String attachedFences = String.join("\n", "Before```java", "int answer = 42;", "```Done");
+        String expectedNormalizedMarkdown = String.join("\n", "Before", "```java", "int answer = 42;", "```", "Done");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(attachedFences);
+
+        assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_repairsAttachedClosingFenceWithParentheticalProse() {
+        String attachedFences = String.join("\n", "Before```java", "int answer = 42;", "```(note)  ");
+        String expectedNormalizedMarkdown =
+                String.join("\n", "Before", "```java", "int answer = 42;", "```", "(note)  ");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(attachedFences);
+
+        assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Done", "(note)", "Java"})
+    void preNormalizeForListsAndFences_preservesCompactFenceLikeCodeBeforeRealClosingFence(String fenceSuffix) {
+        String fenceLikeCodeContent =
+                String.join("\n", "Before```text", "literal content", "```" + fenceSuffix, "still literal", "```");
+        String expectedNormalizedMarkdown = "Before\n"
+                + String.join("\n", "```text", "literal content", "```" + fenceSuffix, "still literal", "```");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(fenceLikeCodeContent);
 
         assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
     }

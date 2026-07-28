@@ -78,6 +78,9 @@ final class MarkdownNormalizer {
         if (!hasTrailingProse(markdownText, markerEndIndex, lineEndIndex)) {
             return false;
         }
+        if (hasLaterStandaloneClosingFence(markdownText, lineEndIndex + 1, blockContext)) {
+            return false;
+        }
 
         normalizedBuilder.append(markdownText, lineStartIndex, markerEndIndex);
         blockContext.classifyLine(markdownText, lineStartIndex, markerEndIndex);
@@ -86,12 +89,59 @@ final class MarkdownNormalizer {
         return true;
     }
 
+    private static boolean hasLaterStandaloneClosingFence(
+            String markdownText, int searchStartIndex, MarkdownBlockContext blockContext) {
+        int lineStartIndex = searchStartIndex;
+        while (lineStartIndex < markdownText.length()) {
+            int lineEndIndex = MarkdownBlockContext.lineEndIndex(markdownText, lineStartIndex);
+            Optional<MarkdownBlockContext.FenceMarker> fenceMarker =
+                    MarkdownBlockContext.scanFenceAtBlockIndentation(markdownText, lineStartIndex, lineEndIndex);
+            if (fenceMarker.isPresent()
+                    && blockContext.closesCurrentFence(fenceMarker.get(), markdownText, lineEndIndex)) {
+                return true;
+            }
+            lineStartIndex = lineEndIndex + 1;
+        }
+        return false;
+    }
+
+    private static boolean hasLaterStructuralClosingFence(
+            String markdownText, int searchStartIndex, MarkdownBlockContext.FenceMarker openingFenceMarker) {
+        MarkdownBlockContext candidateContext = new MarkdownBlockContext();
+        int openingLineEndIndex = searchStartIndex - 1;
+        candidateContext.classifyLine(markdownText, openingFenceMarker.startIndex(), openingLineEndIndex);
+        if (!candidateContext.isInsideFencedCodeBlock()) {
+            return false;
+        }
+        int lineStartIndex = searchStartIndex;
+        while (lineStartIndex < markdownText.length()) {
+            int lineEndIndex = MarkdownBlockContext.lineEndIndex(markdownText, lineStartIndex);
+            Optional<MarkdownBlockContext.FenceMarker> fenceMarker =
+                    MarkdownBlockContext.scanFenceAtBlockIndentation(markdownText, lineStartIndex, lineEndIndex);
+            if (fenceMarker.isPresent()
+                    && candidateContext.matchesCurrentFence(fenceMarker.get())
+                    && (candidateContext.closesCurrentFence(fenceMarker.get(), markdownText, lineEndIndex)
+                            || hasTrailingProse(markdownText, fenceMarker.get().endIndex(), lineEndIndex))) {
+                return true;
+            }
+            lineStartIndex = lineEndIndex + 1;
+        }
+        return false;
+    }
+
     private static boolean hasTrailingProse(String markdownText, int suffixStartIndex, int lineEndIndex) {
         int firstVisibleIndex = suffixStartIndex;
         while (firstVisibleIndex < lineEndIndex && Character.isWhitespace(markdownText.charAt(firstVisibleIndex))) {
             firstVisibleIndex++;
         }
-        if (firstVisibleIndex >= lineEndIndex || !Character.isLetterOrDigit(markdownText.charAt(firstVisibleIndex))) {
+        if (firstVisibleIndex >= lineEndIndex) {
+            return false;
+        }
+        if (isBalancedParentheticalProse(markdownText, firstVisibleIndex, lineEndIndex)) {
+            return true;
+        }
+        char firstVisibleCharacter = markdownText.charAt(firstVisibleIndex);
+        if (!Character.isLetterOrDigit(firstVisibleCharacter)) {
             return false;
         }
         for (int cursor = firstVisibleIndex + 1; cursor < lineEndIndex; cursor++) {
@@ -99,7 +149,33 @@ final class MarkdownNormalizer {
                 return true;
             }
         }
-        return false;
+        return Character.isUpperCase(firstVisibleCharacter);
+    }
+
+    private static boolean isBalancedParentheticalProse(String markdownText, int firstVisibleIndex, int lineEndIndex) {
+        int lastVisibleIndex = lineEndIndex - 1;
+        while (lastVisibleIndex > firstVisibleIndex && Character.isWhitespace(markdownText.charAt(lastVisibleIndex))) {
+            lastVisibleIndex--;
+        }
+        if (markdownText.charAt(firstVisibleIndex) != '(' || markdownText.charAt(lastVisibleIndex) != ')') {
+            return false;
+        }
+        int parenthesisDepth = 0;
+        boolean containsVisibleText = false;
+        for (int cursor = firstVisibleIndex; cursor <= lastVisibleIndex; cursor++) {
+            char currentCharacter = markdownText.charAt(cursor);
+            if (currentCharacter == '(') {
+                parenthesisDepth++;
+            } else if (currentCharacter == ')') {
+                parenthesisDepth--;
+                if (parenthesisDepth < 0) {
+                    return false;
+                }
+            } else if (Character.isLetterOrDigit(currentCharacter)) {
+                containsVisibleText = true;
+            }
+        }
+        return parenthesisDepth == 0 && containsVisibleText;
     }
 
     private static boolean appendTextLine(
@@ -116,6 +192,17 @@ final class MarkdownNormalizer {
                     && attachedFenceMarker.isPresent()
                     && cursor > lineStartIndex
                     && !Character.isWhitespace(markdownText.charAt(cursor - 1))) {
+                MarkdownBlockContext.FenceMarker openingFenceMarker = attachedFenceMarker.get();
+                boolean preferFence = openingFenceMarker.usesTilde()
+                        || hasLaterStructuralClosingFence(markdownText, lineEndIndex + 1, openingFenceMarker);
+                if (!preferFence) {
+                    int inlineDelimiterLength = blockContext.consumeInlineCodeDelimiter(markdownText, cursor);
+                    if (inlineDelimiterLength > 0) {
+                        normalizedBuilder.append(markdownText, cursor, cursor + inlineDelimiterLength);
+                        cursor += inlineDelimiterLength;
+                        continue;
+                    }
+                }
                 MarkdownBlockContext.LineContext attachedFenceContext =
                         blockContext.classifyLine(markdownText, cursor, lineEndIndex);
                 if (attachedFenceContext.isCodeBlock()) {

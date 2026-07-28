@@ -183,15 +183,6 @@ class EnrichmentPlaceholderizer {
         MarkdownBlockContext blockContext = new MarkdownBlockContext();
         int scanIndex = startIndex;
         int lineStartIndex = findLineStartIndex(markdown, startIndex);
-        int firstLineEndIndex = MarkdownBlockContext.lineEndIndex(markdown, lineStartIndex);
-        Optional<MarkdownBlockContext.FenceMarker> attachedOpeningFence =
-                MarkdownBlockContext.scanFenceMarker(markdown, startIndex, firstLineEndIndex);
-        if (attachedOpeningFence.isPresent()
-                && blockContext
-                        .classifyLine(markdown, startIndex, firstLineEndIndex)
-                        .isCodeBlock()) {
-            scanIndex = firstLineEndIndex;
-        }
 
         while (scanIndex < markdown.length()) {
             int lineEndIndex = MarkdownBlockContext.lineEndIndex(markdown, lineStartIndex);
@@ -209,6 +200,21 @@ class EnrichmentPlaceholderizer {
             }
 
             while (scanIndex < lineEndIndex) {
+                Optional<MarkdownBlockContext.FenceMarker> attachedFenceMarker =
+                        MarkdownBlockContext.scanFenceMarker(markdown, scanIndex, lineEndIndex);
+                if (!blockContext.isInsideInlineCode()
+                        && attachedFenceMarker.isPresent()
+                        && scanIndex > lineStartIndex
+                        && !Character.isWhitespace(markdown.charAt(scanIndex - 1))
+                        && hasMarkerTerminatedClosingFence(markdown, scanIndex, lineEndIndex)) {
+                    MarkdownBlockContext.LineContext attachedFenceContext =
+                            blockContext.classifyLine(markdown, scanIndex, lineEndIndex);
+                    if (attachedFenceContext.isCodeBlock()) {
+                        scanIndex = lineEndIndex;
+                        continue;
+                    }
+                }
+
                 int inlineDelimiterLength = blockContext.consumeInlineCodeDelimiter(markdown, scanIndex);
                 if (inlineDelimiterLength > 0) {
                     scanIndex += inlineDelimiterLength;
@@ -230,6 +236,65 @@ class EnrichmentPlaceholderizer {
             }
         }
         return -1;
+    }
+
+    private boolean hasMarkerTerminatedClosingFence(
+            String markdown, int openingFenceStartIndex, int openingLineEndIndex) {
+        MarkdownBlockContext candidateContext = new MarkdownBlockContext();
+        MarkdownBlockContext.LineContext openingLineContext =
+                candidateContext.classifyLine(markdown, openingFenceStartIndex, openingLineEndIndex);
+        if (!openingLineContext.isCodeBlock() || !candidateContext.isInsideFencedCodeBlock()) {
+            return false;
+        }
+
+        int candidateLineStartIndex = openingLineEndIndex + 1;
+        while (candidateLineStartIndex < markdown.length()) {
+            int candidateLineEndIndex = MarkdownBlockContext.lineEndIndex(markdown, candidateLineStartIndex);
+            if (enrichmentClosingFenceEndIndex(
+                            markdown, candidateLineStartIndex, candidateLineEndIndex, candidateContext)
+                    >= 0) {
+                return true;
+            }
+            Optional<MarkdownBlockContext.FenceMarker> candidateFenceMarker =
+                    MarkdownBlockContext.scanFenceAtBlockIndentation(
+                            markdown, candidateLineStartIndex, candidateLineEndIndex);
+            if (candidateFenceMarker.isPresent()
+                    && candidateContext.closesCurrentFence(
+                            candidateFenceMarker.get(), markdown, candidateLineEndIndex)) {
+                return isMarkerOnlyLine(markdown, candidateLineEndIndex + 1);
+            }
+            candidateContext.classifyLine(markdown, candidateLineStartIndex, candidateLineEndIndex);
+            if (!candidateContext.isInsideFencedCodeBlock()) {
+                return false;
+            }
+            candidateLineStartIndex = candidateLineEndIndex + 1;
+        }
+        return false;
+    }
+
+    private boolean isMarkerOnlyLine(String markdown, int lineStartIndex) {
+        if (lineStartIndex >= markdown.length()) {
+            return false;
+        }
+        int lineEndIndex = MarkdownBlockContext.lineEndIndex(markdown, lineStartIndex);
+        int markerStartIndex = lineStartIndex;
+        while (markerStartIndex < lineEndIndex) {
+            char leadingCharacter = markdown.charAt(markerStartIndex);
+            if (leadingCharacter != ' ' && leadingCharacter != '\t') {
+                break;
+            }
+            markerStartIndex++;
+        }
+        if (!markdown.startsWith(MARKER_END, markerStartIndex)) {
+            return false;
+        }
+        for (int cursor = markerStartIndex + MARKER_END.length(); cursor < lineEndIndex; cursor++) {
+            char trailingCharacter = markdown.charAt(cursor);
+            if (trailingCharacter != ' ' && trailingCharacter != '\t') {
+                return false;
+            }
+        }
+        return true;
     }
 
     private int enrichmentClosingFenceEndIndex(

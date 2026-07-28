@@ -95,6 +95,19 @@ class MarkdownPreprocessingTest {
     }
 
     @Test
+    void testCompactAttachedClosingFenceSuffixesRemainProse() {
+        for (String trailingText : java.util.List.of("Done", "(note)")) {
+            String input = "Here's an example:```java\nint x = 10 % 3;\n```" + trailingText;
+            String html = markdownService.processStructured(input).html();
+
+            int codeClose = html.indexOf("</code></pre>");
+            int trailingProse = html.indexOf(trailingText, codeClose + 1);
+            assertTrue(codeClose >= 0, "Code block should close before " + trailingText);
+            assertTrue(trailingProse > codeClose, trailingText + " must remain outside the repaired code block");
+        }
+    }
+
+    @Test
     void testTildeFencePreserved() {
         String input = "~~~\n- not a list\n{{warning:still code}}\n~~~\nAfter fence.";
         String html = markdownService.processStructured(input).html();
