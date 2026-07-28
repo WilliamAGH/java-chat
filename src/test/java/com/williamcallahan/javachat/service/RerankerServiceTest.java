@@ -1,14 +1,17 @@
 package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,6 +19,7 @@ import com.williamcallahan.javachat.config.AppProperties;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.document.Document;
@@ -186,7 +190,7 @@ class RerankerServiceTest {
                         anyString(),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
-                        eq(NEARLY_EXHAUSTED_STAGE_BUDGET)))
+                        any(Duration.class)))
                 .thenReturn(Mono.just("{\"order\":[1,0]}"));
 
         RerankerService rerankerService =
@@ -196,13 +200,31 @@ class RerankerServiceTest {
         List<Document> rankedDocuments =
                 rerankerService.rerank("query", sourceDocuments, 2, NEARLY_EXHAUSTED_STAGE_BUDGET);
 
+        ArgumentCaptor<Duration> remainingBudgetCaptor = ArgumentCaptor.forClass(Duration.class);
         verify(streamingService)
                 .completeJsonObject(
                         anyString(),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
-                        eq(NEARLY_EXHAUSTED_STAGE_BUDGET));
+                        remainingBudgetCaptor.capture());
+        assertTrue(remainingBudgetCaptor.getValue().isPositive());
+        assertTrue(remainingBudgetCaptor.getValue().compareTo(NEARLY_EXHAUSTED_STAGE_BUDGET) < 0);
         assertEquals(List.of(sourceDocuments.get(1), sourceDocuments.get(0)), rankedDocuments);
+    }
+
+    @Test
+    void expiredStageBudgetFailsAsTimeoutBeforeRerankerDispatch() {
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        RerankerService rerankerService =
+                new RerankerService(streamingService, new ObjectMapper(), configuredRerankerProperties());
+        List<Document> sourceDocuments = List.of(new Document("first"), new Document("second"));
+
+        RerankingFailureException deadlineFailure = assertThrows(
+                RerankingFailureException.class,
+                () -> rerankerService.rerank("query", sourceDocuments, 2, Duration.ZERO));
+
+        assertInstanceOf(TimeoutException.class, deadlineFailure.getCause());
+        verifyNoInteractions(streamingService);
     }
 
     @Test
