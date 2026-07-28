@@ -662,8 +662,9 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     private static long remainingRequestNanos(long requestDeadlineNanos) {
         long remainingNanos = requestDeadlineNanos - System.nanoTime();
         if (remainingNanos <= 0) {
+            String failureMessage = "Gateway embedding request deadline elapsed locally";
             throw new EmbeddingServiceTemporarilyUnavailableException(
-                    "Gateway embedding request deadline elapsed locally");
+                    failureMessage, new TimeoutException(failureMessage));
         }
         return remainingNanos;
     }

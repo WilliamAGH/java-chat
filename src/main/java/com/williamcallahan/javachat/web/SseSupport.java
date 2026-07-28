@@ -290,7 +290,22 @@ public class SseSupport {
      */
     public Flux<ServerSentEvent<String>> enforceResponsePreparationDeadline(
             Flux<ServerSentEvent<String>> operationEvents) {
-        return operationEvents.timeout(Mono.delay(RESPONSE_PREPARATION_TIMEOUT), ignoredOperationEvent -> Mono.never());
+        return enforceResponsePreparationDeadline(
+                operationEvents, System.nanoTime() + RESPONSE_PREPARATION_TIMEOUT.toNanos());
+    }
+
+    /**
+     * Bounds response preparation by the absolute deadline shared with retrieval dependencies.
+     *
+     * @param operationEvents operation that first emits provider metadata or a terminal error
+     * @param responsePreparationDeadlineNanos absolute {@link System#nanoTime()} deadline
+     * @return operation events with a first-event preparation deadline
+     */
+    public Flux<ServerSentEvent<String>> enforceResponsePreparationDeadline(
+            Flux<ServerSentEvent<String>> operationEvents, long responsePreparationDeadlineNanos) {
+        Duration remainingPreparationBudget =
+                Duration.ofNanos(Math.max(0L, responsePreparationDeadlineNanos - System.nanoTime()));
+        return operationEvents.timeout(Mono.delay(remainingPreparationBudget), ignoredOperationEvent -> Mono.never());
     }
 
     private void recordCoalescedChunkOverflow(String overflowedChunk) {
