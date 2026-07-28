@@ -26,7 +26,11 @@ final class MarkdownNormalizer {
     private static String normalizeFences(String markdownText) {
         StringBuilder normalizedBuilder = new StringBuilder(markdownText.length() + 64);
         MarkdownBlockContext blockContext = new MarkdownBlockContext();
-        MarkdownBlockContext.FenceIndex fenceIndex = new MarkdownBlockContext.FenceIndex(markdownText);
+        MarkdownBlockContext.FenceIndex fenceIndex = new MarkdownBlockContext.FenceIndex(
+                markdownText,
+                (sourceMarkdown, indexedFence) -> indexedFence.standalone()
+                        || hasTrailingProse(
+                                sourceMarkdown, indexedFence.marker().endIndex(), indexedFence.lineEndIndex()));
         boolean attachedFenceOpen = false;
         int lineStartIndex = 0;
 
@@ -160,8 +164,7 @@ final class MarkdownNormalizer {
                     && !Character.isWhitespace(markdownText.charAt(cursor - 1))) {
                 MarkdownBlockContext.FenceMarker openingFenceMarker = attachedFenceMarker.get();
                 boolean preferFence = openingFenceMarker.usesTilde()
-                        || hasLaterStructuralClosingFence(
-                                markdownText, lineEndIndex + 1, openingFenceMarker, fenceIndex);
+                        || hasLaterStructuralClosingFence(lineEndIndex + 1, openingFenceMarker, fenceIndex);
                 if (!preferFence) {
                     int inlineDelimiterLength = blockContext.consumeInlineCodeDelimiter(markdownText, cursor);
                     if (inlineDelimiterLength > 0) {
@@ -193,24 +196,12 @@ final class MarkdownNormalizer {
     }
 
     private static boolean hasLaterStructuralClosingFence(
-            String markdownText,
             int searchStartIndex,
             MarkdownBlockContext.FenceMarker openingFenceMarker,
             MarkdownBlockContext.FenceIndex fenceIndex) {
-        int candidateStartIndex = searchStartIndex;
-        Optional<MarkdownBlockContext.FenceIndex.IndexedFence> indexedFence =
-                fenceIndex.firstMatching(candidateStartIndex, openingFenceMarker, false);
-        while (indexedFence.isPresent()) {
-            MarkdownBlockContext.FenceIndex.IndexedFence candidateFence = indexedFence.get();
-            if (candidateFence.standalone()
-                    || hasTrailingProse(
-                            markdownText, candidateFence.marker().endIndex(), candidateFence.lineEndIndex())) {
-                return true;
-            }
-            candidateStartIndex = candidateFence.lineEndIndex() + 1;
-            indexedFence = fenceIndex.firstMatching(candidateStartIndex, openingFenceMarker, false);
-        }
-        return false;
+        return fenceIndex
+                .firstMatching(searchStartIndex, openingFenceMarker, false)
+                .isPresent();
     }
 
     private static String indentBlocksUnderNumericHeaders(String markdownText) {

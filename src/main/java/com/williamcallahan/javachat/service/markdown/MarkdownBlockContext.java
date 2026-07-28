@@ -72,6 +72,16 @@ final class MarkdownBlockContext {
          * @param markdown source Markdown
          */
         FenceIndex(String markdown) {
+            this(markdown, (sourceMarkdown, indexedFence) -> true);
+        }
+
+        /**
+         * Builds an index containing only fences accepted by a boundary-local qualifier.
+         *
+         * @param markdown source Markdown
+         * @param fenceQualifier boundary rule selecting queryable fences
+         */
+        FenceIndex(String markdown, FenceQualifier fenceQualifier) {
             List<IndexedFence> indexedBacktickFences = new ArrayList<>();
             List<IndexedFence> indexedTildeFences = new ArrayList<>();
             int lineStartIndex = 0;
@@ -84,6 +94,7 @@ final class MarkdownBlockContext {
                                 currentLineStartIndex,
                                 lineEndIndex,
                                 hasOnlySpaceOrTab(markdown, marker.endIndex(), lineEndIndex)))
+                        .filter(indexedFence -> fenceQualifier.includes(markdown, indexedFence))
                         .ifPresent(indexedFence -> sequenceFor(
                                         indexedFence.marker().character(), indexedBacktickFences, indexedTildeFences)
                                 .add(indexedFence));
@@ -91,6 +102,11 @@ final class MarkdownBlockContext {
             }
             backtickFences = new FenceSequence(indexedBacktickFences);
             tildeFences = new FenceSequence(indexedTildeFences);
+        }
+
+        @FunctionalInterface
+        interface FenceQualifier {
+            boolean includes(String markdown, IndexedFence indexedFence);
         }
 
         /**

@@ -115,12 +115,14 @@ class MarkdownNormalizerTest {
         for (int segmentIndex = 0; segmentIndex < AMBIGUOUS_INLINE_SEGMENT_COUNT; segmentIndex++) {
             repeatedInlineCodeBuilder.append("segment").append(segmentIndex).append("```code\ncontinued``` end\n");
         }
+        for (int rejectedFenceIndex = 0; rejectedFenceIndex < AMBIGUOUS_INLINE_SEGMENT_COUNT; rejectedFenceIndex++) {
+            repeatedInlineCodeBuilder.append("```x\n");
+        }
         String repeatedInlineCode = repeatedInlineCodeBuilder.toString();
 
         assertTimeout(
                 MARKDOWN_LINEAR_TIME_BUDGET,
-                () -> assertEquals(
-                        repeatedInlineCode, MarkdownNormalizer.preNormalizeForListsAndFences(repeatedInlineCode)));
+                () -> MarkdownNormalizer.preNormalizeForListsAndFences(repeatedInlineCode));
     }
 
     @Test

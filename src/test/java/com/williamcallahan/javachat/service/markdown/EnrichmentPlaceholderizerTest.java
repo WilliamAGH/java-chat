@@ -218,7 +218,10 @@ class EnrichmentPlaceholderizerTest {
         for (int segmentIndex = 0; segmentIndex < AMBIGUOUS_INLINE_SEGMENT_COUNT; segmentIndex++) {
             repeatedInlineCodeBuilder.append("segment").append(segmentIndex).append("```code\ncontinued``` end\n");
         }
-        repeatedInlineCodeBuilder.append("}}");
+        repeatedInlineCodeBuilder.append("}}\n");
+        for (int rejectedFenceIndex = 0; rejectedFenceIndex < AMBIGUOUS_INLINE_SEGMENT_COUNT; rejectedFenceIndex++) {
+            repeatedInlineCodeBuilder.append("```x\n");
+        }
         String repeatedInlineCodeEnrichment = repeatedInlineCodeBuilder.toString();
         List<MarkdownEnrichment> enrichments = new ArrayList<>();
         Map<String, String> placeholders = new HashMap<>();
