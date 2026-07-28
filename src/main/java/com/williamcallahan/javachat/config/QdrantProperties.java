@@ -207,7 +207,7 @@ public class QdrantProperties {
         if (rrfK <= 0) {
             throw new IllegalArgumentException("app.qdrant.rrf-k must be positive, got: " + rrfK);
         }
-        if (densePrefetchHnswEf <= 0L) {
+        if (densePrefetchHnswEf <= 0) {
             throw new IllegalArgumentException(
                     "app.qdrant.dense-prefetch-hnsw-ef must be positive, got: " + densePrefetchHnswEf);
         }
