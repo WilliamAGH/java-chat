@@ -26,6 +26,7 @@ final class MarkdownNormalizer {
     private static String normalizeFences(String markdownText) {
         StringBuilder normalizedBuilder = new StringBuilder(markdownText.length() + 64);
         MarkdownBlockContext blockContext = new MarkdownBlockContext();
+        MarkdownBlockContext.FenceIndex fenceIndex = new MarkdownBlockContext.FenceIndex(markdownText);
         boolean attachedFenceOpen = false;
         int lineStartIndex = 0;
 
@@ -34,7 +35,7 @@ final class MarkdownNormalizer {
             boolean startedInsideFence = blockContext.isInsideFencedCodeBlock();
             if (attachedFenceOpen
                     && appendAttachedClosingFenceWithProse(
-                            normalizedBuilder, markdownText, lineStartIndex, lineEndIndex, blockContext)) {
+                            normalizedBuilder, markdownText, lineStartIndex, lineEndIndex, blockContext, fenceIndex)) {
                 attachedFenceOpen = false;
             } else {
                 MarkdownBlockContext.LineContext lineContext =
@@ -42,7 +43,7 @@ final class MarkdownNormalizer {
                 if (lineContext.isCodeBlock()) {
                     normalizedBuilder.append(markdownText, lineStartIndex, lineEndIndex);
                 } else if (appendTextLine(
-                        normalizedBuilder, markdownText, lineStartIndex, lineEndIndex, blockContext)) {
+                        normalizedBuilder, markdownText, lineStartIndex, lineEndIndex, blockContext, fenceIndex)) {
                     attachedFenceOpen = true;
                 }
                 if (startedInsideFence && !blockContext.isInsideFencedCodeBlock()) {
@@ -68,7 +69,8 @@ final class MarkdownNormalizer {
             String markdownText,
             int lineStartIndex,
             int lineEndIndex,
-            MarkdownBlockContext blockContext) {
+            MarkdownBlockContext blockContext,
+            MarkdownBlockContext.FenceIndex fenceIndex) {
         Optional<MarkdownBlockContext.FenceMarker> fenceMarker =
                 MarkdownBlockContext.scanFenceAtBlockIndentation(markdownText, lineStartIndex, lineEndIndex);
         if (fenceMarker.isEmpty() || !blockContext.matchesCurrentFence(fenceMarker.get())) {
@@ -78,55 +80,18 @@ final class MarkdownNormalizer {
         if (!hasTrailingProse(markdownText, markerEndIndex, lineEndIndex)) {
             return false;
         }
-        if (hasLaterStandaloneClosingFence(markdownText, lineEndIndex + 1, blockContext)) {
+        if (blockContext
+                .currentFenceMarker()
+                .flatMap(activeFence -> fenceIndex.firstMatching(lineEndIndex + 1, activeFence, true))
+                .isPresent()) {
             return false;
         }
 
         normalizedBuilder.append(markdownText, lineStartIndex, markerEndIndex);
         blockContext.classifyLine(markdownText, lineStartIndex, markerEndIndex);
         appendLineBreakIfNeeded(normalizedBuilder);
-        appendTextLine(normalizedBuilder, markdownText, markerEndIndex, lineEndIndex, blockContext);
+        appendTextLine(normalizedBuilder, markdownText, markerEndIndex, lineEndIndex, blockContext, fenceIndex);
         return true;
-    }
-
-    private static boolean hasLaterStandaloneClosingFence(
-            String markdownText, int searchStartIndex, MarkdownBlockContext blockContext) {
-        int lineStartIndex = searchStartIndex;
-        while (lineStartIndex < markdownText.length()) {
-            int lineEndIndex = MarkdownBlockContext.lineEndIndex(markdownText, lineStartIndex);
-            Optional<MarkdownBlockContext.FenceMarker> fenceMarker =
-                    MarkdownBlockContext.scanFenceAtBlockIndentation(markdownText, lineStartIndex, lineEndIndex);
-            if (fenceMarker.isPresent()
-                    && blockContext.closesCurrentFence(fenceMarker.get(), markdownText, lineEndIndex)) {
-                return true;
-            }
-            lineStartIndex = lineEndIndex + 1;
-        }
-        return false;
-    }
-
-    private static boolean hasLaterStructuralClosingFence(
-            String markdownText, int searchStartIndex, MarkdownBlockContext.FenceMarker openingFenceMarker) {
-        MarkdownBlockContext candidateContext = new MarkdownBlockContext();
-        int openingLineEndIndex = searchStartIndex - 1;
-        candidateContext.classifyLine(markdownText, openingFenceMarker.startIndex(), openingLineEndIndex);
-        if (!candidateContext.isInsideFencedCodeBlock()) {
-            return false;
-        }
-        int lineStartIndex = searchStartIndex;
-        while (lineStartIndex < markdownText.length()) {
-            int lineEndIndex = MarkdownBlockContext.lineEndIndex(markdownText, lineStartIndex);
-            Optional<MarkdownBlockContext.FenceMarker> fenceMarker =
-                    MarkdownBlockContext.scanFenceAtBlockIndentation(markdownText, lineStartIndex, lineEndIndex);
-            if (fenceMarker.isPresent()
-                    && candidateContext.matchesCurrentFence(fenceMarker.get())
-                    && (candidateContext.closesCurrentFence(fenceMarker.get(), markdownText, lineEndIndex)
-                            || hasTrailingProse(markdownText, fenceMarker.get().endIndex(), lineEndIndex))) {
-                return true;
-            }
-            lineStartIndex = lineEndIndex + 1;
-        }
-        return false;
     }
 
     private static boolean hasTrailingProse(String markdownText, int suffixStartIndex, int lineEndIndex) {
@@ -183,7 +148,8 @@ final class MarkdownNormalizer {
             String markdownText,
             int lineStartIndex,
             int lineEndIndex,
-            MarkdownBlockContext blockContext) {
+            MarkdownBlockContext blockContext,
+            MarkdownBlockContext.FenceIndex fenceIndex) {
         int cursor = lineStartIndex;
         while (cursor < lineEndIndex) {
             Optional<MarkdownBlockContext.FenceMarker> attachedFenceMarker =
@@ -194,7 +160,8 @@ final class MarkdownNormalizer {
                     && !Character.isWhitespace(markdownText.charAt(cursor - 1))) {
                 MarkdownBlockContext.FenceMarker openingFenceMarker = attachedFenceMarker.get();
                 boolean preferFence = openingFenceMarker.usesTilde()
-                        || hasLaterStructuralClosingFence(markdownText, lineEndIndex + 1, openingFenceMarker);
+                        || hasLaterStructuralClosingFence(
+                                markdownText, lineEndIndex + 1, openingFenceMarker, fenceIndex);
                 if (!preferFence) {
                     int inlineDelimiterLength = blockContext.consumeInlineCodeDelimiter(markdownText, cursor);
                     if (inlineDelimiterLength > 0) {
@@ -221,6 +188,27 @@ final class MarkdownNormalizer {
 
             normalizedBuilder.append(markdownText.charAt(cursor));
             cursor++;
+        }
+        return false;
+    }
+
+    private static boolean hasLaterStructuralClosingFence(
+            String markdownText,
+            int searchStartIndex,
+            MarkdownBlockContext.FenceMarker openingFenceMarker,
+            MarkdownBlockContext.FenceIndex fenceIndex) {
+        int candidateStartIndex = searchStartIndex;
+        Optional<MarkdownBlockContext.FenceIndex.IndexedFence> indexedFence =
+                fenceIndex.firstMatching(candidateStartIndex, openingFenceMarker, false);
+        while (indexedFence.isPresent()) {
+            MarkdownBlockContext.FenceIndex.IndexedFence candidateFence = indexedFence.get();
+            if (candidateFence.standalone()
+                    || hasTrailingProse(
+                            markdownText, candidateFence.marker().endIndex(), candidateFence.lineEndIndex())) {
+                return true;
+            }
+            candidateStartIndex = candidateFence.lineEndIndex() + 1;
+            indexedFence = fenceIndex.firstMatching(candidateStartIndex, openingFenceMarker, false);
         }
         return false;
     }

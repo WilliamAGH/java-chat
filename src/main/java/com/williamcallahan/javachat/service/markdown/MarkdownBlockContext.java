@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.service.markdown;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -20,8 +22,7 @@ final class MarkdownBlockContext {
     private static final char TILDE = '~';
 
     private boolean insideFencedCodeBlock;
-    private char fenceCharacter;
-    private int fenceLength;
+    private Optional<FenceMarker> currentFenceMarker = Optional.empty();
     private boolean insideInlineCode;
     private int inlineBacktickLength;
 
@@ -50,6 +51,171 @@ final class MarkdownBlockContext {
 
         boolean usesTilde() {
             return character == TILDE;
+        }
+    }
+
+    /**
+     * Indexes block-indented fence markers for logarithmic forward matching.
+     *
+     * <p>Backtick and tilde markers remain in separate source-ordered sequences. Each sequence
+     * stores maximum marker lengths in segment trees, allowing a query to skip every range that
+     * cannot close its opening fence.</p>
+     */
+    static final class FenceIndex {
+
+        private final FenceSequence backtickFences;
+        private final FenceSequence tildeFences;
+
+        /**
+         * Builds an index with one forward scan of the Markdown source.
+         *
+         * @param markdown source Markdown
+         */
+        FenceIndex(String markdown) {
+            List<IndexedFence> indexedBacktickFences = new ArrayList<>();
+            List<IndexedFence> indexedTildeFences = new ArrayList<>();
+            int lineStartIndex = 0;
+            while (lineStartIndex < markdown.length()) {
+                int currentLineStartIndex = lineStartIndex;
+                int lineEndIndex = lineEndIndex(markdown, currentLineStartIndex);
+                scanFenceAtBlockIndentation(markdown, currentLineStartIndex, lineEndIndex)
+                        .map(marker -> new IndexedFence(
+                                marker,
+                                currentLineStartIndex,
+                                lineEndIndex,
+                                hasOnlySpaceOrTab(markdown, marker.endIndex(), lineEndIndex)))
+                        .ifPresent(indexedFence -> sequenceFor(
+                                        indexedFence.marker().character(), indexedBacktickFences, indexedTildeFences)
+                                .add(indexedFence));
+                lineStartIndex = lineEndIndex + 1;
+            }
+            backtickFences = new FenceSequence(indexedBacktickFences);
+            tildeFences = new FenceSequence(indexedTildeFences);
+        }
+
+        /**
+         * Finds the earliest qualifying marker at or after a source position.
+         *
+         * @param searchStartIndex inclusive source position
+         * @param openingFenceMarker opening marker that determines character and minimum length
+         * @param standaloneOnly whether trailing non-whitespace disqualifies a marker
+         * @return earliest matching indexed marker
+         */
+        Optional<IndexedFence> firstMatching(
+                int searchStartIndex, FenceMarker openingFenceMarker, boolean standaloneOnly) {
+            return sequenceFor(openingFenceMarker.character())
+                    .firstMatching(searchStartIndex, openingFenceMarker.length(), standaloneOnly);
+        }
+
+        private FenceSequence sequenceFor(char fenceCharacter) {
+            return fenceCharacter == BACKTICK ? backtickFences : tildeFences;
+        }
+
+        private static List<IndexedFence> sequenceFor(
+                char fenceCharacter, List<IndexedFence> indexedBacktickFences, List<IndexedFence> indexedTildeFences) {
+            return fenceCharacter == BACKTICK ? indexedBacktickFences : indexedTildeFences;
+        }
+
+        /**
+         * Describes an indexed block-indented fence and its source line.
+         *
+         * @param marker fence delimiter
+         * @param lineStartIndex inclusive source line start
+         * @param lineEndIndex exclusive source line end
+         * @param standalone whether only spaces or tabs follow the marker
+         */
+        record IndexedFence(FenceMarker marker, int lineStartIndex, int lineEndIndex, boolean standalone) {}
+
+        private static final class FenceSequence {
+
+            private final IndexedFence[] indexedFences;
+            private final int segmentTreeLeafCount;
+            private final int[] maximumLengths;
+            private final int[] standaloneMaximumLengths;
+
+            private FenceSequence(List<IndexedFence> indexedFences) {
+                this.indexedFences = indexedFences.toArray(IndexedFence[]::new);
+                int requiredLeafCount = Math.max(1, indexedFences.size());
+                int leafCount = 1;
+                while (leafCount < requiredLeafCount) {
+                    leafCount *= 2;
+                }
+                segmentTreeLeafCount = leafCount;
+                maximumLengths = new int[segmentTreeLeafCount * 2];
+                standaloneMaximumLengths = new int[segmentTreeLeafCount * 2];
+                for (int index = 0; index < this.indexedFences.length; index++) {
+                    IndexedFence indexedFence = this.indexedFences[index];
+                    int leafIndex = segmentTreeLeafCount + index;
+                    maximumLengths[leafIndex] = indexedFence.marker().length();
+                    if (indexedFence.standalone()) {
+                        standaloneMaximumLengths[leafIndex] =
+                                indexedFence.marker().length();
+                    }
+                }
+                for (int index = segmentTreeLeafCount - 1; index > 0; index--) {
+                    maximumLengths[index] = Math.max(maximumLengths[index * 2], maximumLengths[index * 2 + 1]);
+                    standaloneMaximumLengths[index] =
+                            Math.max(standaloneMaximumLengths[index * 2], standaloneMaximumLengths[index * 2 + 1]);
+                }
+            }
+
+            private Optional<IndexedFence> firstMatching(
+                    int searchStartIndex, int minimumLength, boolean standaloneOnly) {
+                int firstCandidateIndex = lowerBound(searchStartIndex);
+                int[] searchableMaximumLengths = standaloneOnly ? standaloneMaximumLengths : maximumLengths;
+                int matchingIndex = findFirst(
+                        searchableMaximumLengths, 1, 0, segmentTreeLeafCount, firstCandidateIndex, minimumLength);
+                return matchingIndex < indexedFences.length
+                        ? Optional.of(indexedFences[matchingIndex])
+                        : Optional.empty();
+            }
+
+            private int lowerBound(int searchStartIndex) {
+                int lowerIndex = 0;
+                int upperIndex = indexedFences.length;
+                while (lowerIndex < upperIndex) {
+                    int middleIndex = lowerIndex + (upperIndex - lowerIndex) / 2;
+                    if (indexedFences[middleIndex].marker().startIndex() < searchStartIndex) {
+                        lowerIndex = middleIndex + 1;
+                    } else {
+                        upperIndex = middleIndex;
+                    }
+                }
+                return lowerIndex;
+            }
+
+            private int findFirst(
+                    int[] searchableMaximumLengths,
+                    int treeIndex,
+                    int rangeStartIndex,
+                    int rangeEndIndex,
+                    int firstCandidateIndex,
+                    int minimumLength) {
+                if (rangeEndIndex <= firstCandidateIndex || searchableMaximumLengths[treeIndex] < minimumLength) {
+                    return indexedFences.length;
+                }
+                if (rangeEndIndex - rangeStartIndex == 1) {
+                    return rangeStartIndex;
+                }
+                int rangeMiddleIndex = rangeStartIndex + (rangeEndIndex - rangeStartIndex) / 2;
+                int leftMatchingIndex = findFirst(
+                        searchableMaximumLengths,
+                        treeIndex * 2,
+                        rangeStartIndex,
+                        rangeMiddleIndex,
+                        firstCandidateIndex,
+                        minimumLength);
+                if (leftMatchingIndex < indexedFences.length) {
+                    return leftMatchingIndex;
+                }
+                return findFirst(
+                        searchableMaximumLengths,
+                        treeIndex * 2 + 1,
+                        rangeMiddleIndex,
+                        rangeEndIndex,
+                        firstCandidateIndex,
+                        minimumLength);
+            }
         }
     }
 
@@ -157,18 +323,28 @@ final class MarkdownBlockContext {
     }
 
     /**
+     * Returns the marker that established the active fenced-code block.
+     */
+    Optional<FenceMarker> currentFenceMarker() {
+        return currentFenceMarker;
+    }
+
+    /**
      * Returns whether a marker matches the active fence without requiring closing-line trivia.
      */
     boolean matchesCurrentFence(FenceMarker marker) {
-        return insideFencedCodeBlock && marker.character() == fenceCharacter && marker.length() >= fenceLength;
+        return currentFenceMarker
+                .filter(activeFenceMarker -> marker.character() == activeFenceMarker.character()
+                        && marker.length() >= activeFenceMarker.length())
+                .isPresent();
     }
 
     /**
      * Builds a closing fence for a currently open code block.
      */
     String closingFence() {
-        char closingCharacter = fenceCharacter == 0 ? DEFAULT_FENCE_CHARACTER : fenceCharacter;
-        int closingLength = Math.max(FENCE_MINIMUM_LENGTH, fenceLength);
+        char closingCharacter = currentFenceMarker.map(FenceMarker::character).orElse(DEFAULT_FENCE_CHARACTER);
+        int closingLength = currentFenceMarker.map(FenceMarker::length).orElse(FENCE_MINIMUM_LENGTH);
         return String.valueOf(closingCharacter).repeat(closingLength);
     }
 
@@ -238,14 +414,12 @@ final class MarkdownBlockContext {
 
     private void enterFencedCodeBlock(FenceMarker marker) {
         insideFencedCodeBlock = true;
-        fenceCharacter = marker.character();
-        fenceLength = marker.length();
+        currentFenceMarker = Optional.of(marker);
     }
 
     private void exitFencedCodeBlock() {
         insideFencedCodeBlock = false;
-        fenceCharacter = 0;
-        fenceLength = 0;
+        currentFenceMarker = Optional.empty();
     }
 
     private int indentationColumns(String markdown, int lineStartIndex, int lineEndIndex) {
@@ -291,7 +465,7 @@ final class MarkdownBlockContext {
         return false;
     }
 
-    private boolean hasOnlySpaceOrTab(String markdown, int startIndex, int endIndex) {
+    private static boolean hasOnlySpaceOrTab(String markdown, int startIndex, int endIndex) {
         for (int cursor = startIndex; cursor < endIndex; cursor++) {
             char currentCharacter = markdown.charAt(cursor);
             if (currentCharacter != ' ' && currentCharacter != '\t') {

@@ -3,12 +3,14 @@ package com.williamcallahan.javachat.service.markdown;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.data.MutableDataSet;
 import com.williamcallahan.javachat.domain.markdown.MarkdownEnrichment;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -28,6 +30,8 @@ import org.junit.jupiter.params.provider.MethodSource;
  * Verifies enrichment markers are handled safely around code fences.
  */
 class EnrichmentPlaceholderizerTest {
+    private static final int AMBIGUOUS_INLINE_SEGMENT_COUNT = 3_000;
+    private static final Duration ENRICHMENT_LINEAR_TIME_BUDGET = Duration.ofSeconds(5);
 
     private EnrichmentPlaceholderizer placeholderizer;
 
@@ -174,6 +178,24 @@ class EnrichmentPlaceholderizerTest {
     }
 
     @Test
+    void shouldKeepTemplateMarkersInsideFencedEnrichmentBeforeSeparatedMarkerLine() {
+        String markdown = "{{example:Intro```handlebars\n<section>\n```ruby\n{{mustache}}\n</section>\n```\n \t\n}}";
+        List<MarkdownEnrichment> enrichments = new ArrayList<>();
+        Map<String, String> placeholders = new HashMap<>();
+
+        String placeholderMarkdown =
+                placeholderizer.extractAndPlaceholderizeEnrichments(markdown, enrichments, placeholders);
+        String renderedHtml = placeholderizer.renderEnrichmentBlocksFromPlaceholders(placeholderMarkdown, placeholders);
+
+        assertAll(
+                () -> assertEquals(1, enrichments.size()),
+                () -> assertEquals(1, placeholders.size()),
+                () -> assertTrue(enrichments.getFirst().content().contains("{{mustache}}")),
+                () -> assertTrue(renderedHtml.contains("language-handlebars")),
+                () -> assertTrue(renderedHtml.contains("{{mustache}}")));
+    }
+
+    @Test
     void shouldPreserveTripleBacktickMultilineInlineCodeAfterEnrichmentPreamble() {
         String markdown = "{{hint:Intro```code\ncontinued``` end}}";
         List<MarkdownEnrichment> enrichments = new ArrayList<>();
@@ -188,6 +210,25 @@ class EnrichmentPlaceholderizerTest {
                 () -> assertEquals(
                         "Intro```code\ncontinued``` end", enrichments.getFirst().content()),
                 () -> assertEquals(1, placeholders.size()));
+    }
+
+    @Test
+    void shouldExtractRepeatedAmbiguousInlineFencesWithoutTailRescans() {
+        StringBuilder repeatedInlineCodeBuilder = new StringBuilder("{{hint:");
+        for (int segmentIndex = 0; segmentIndex < AMBIGUOUS_INLINE_SEGMENT_COUNT; segmentIndex++) {
+            repeatedInlineCodeBuilder.append("segment").append(segmentIndex).append("```code\ncontinued``` end\n");
+        }
+        repeatedInlineCodeBuilder.append("}}");
+        String repeatedInlineCodeEnrichment = repeatedInlineCodeBuilder.toString();
+        List<MarkdownEnrichment> enrichments = new ArrayList<>();
+        Map<String, String> placeholders = new HashMap<>();
+
+        assertTimeout(
+                ENRICHMENT_LINEAR_TIME_BUDGET,
+                () -> placeholderizer.extractAndPlaceholderizeEnrichments(
+                        repeatedInlineCodeEnrichment, enrichments, placeholders));
+
+        assertAll(() -> assertEquals(1, enrichments.size()), () -> assertEquals(1, placeholders.size()));
     }
 
     @ParameterizedTest(name = "{0} fence with {1} spaces protects enrichment markers")

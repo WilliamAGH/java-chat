@@ -1,7 +1,9 @@
 package com.williamcallahan.javachat.service.markdown;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 
+import java.time.Duration;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -14,6 +16,8 @@ import org.junit.jupiter.params.provider.ValueSource;
  * Verifies normalization rules that precede markdown AST parsing.
  */
 class MarkdownNormalizerTest {
+    private static final int AMBIGUOUS_INLINE_SEGMENT_COUNT = 3_000;
+    private static final Duration MARKDOWN_LINEAR_TIME_BUDGET = Duration.ofSeconds(5);
 
     @Test
     void preNormalizeForListsAndFences_indentsContinuationForThreeDigitNumericHeaderOnly() {
@@ -103,6 +107,20 @@ class MarkdownNormalizerTest {
         String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(multilineInlineCode);
 
         assertEquals(multilineInlineCode, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_handlesRepeatedAmbiguousInlineFencesWithoutTailRescans() {
+        StringBuilder repeatedInlineCodeBuilder = new StringBuilder();
+        for (int segmentIndex = 0; segmentIndex < AMBIGUOUS_INLINE_SEGMENT_COUNT; segmentIndex++) {
+            repeatedInlineCodeBuilder.append("segment").append(segmentIndex).append("```code\ncontinued``` end\n");
+        }
+        String repeatedInlineCode = repeatedInlineCodeBuilder.toString();
+
+        assertTimeout(
+                MARKDOWN_LINEAR_TIME_BUDGET,
+                () -> assertEquals(
+                        repeatedInlineCode, MarkdownNormalizer.preNormalizeForListsAndFences(repeatedInlineCode)));
     }
 
     @Test
