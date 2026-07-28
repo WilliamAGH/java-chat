@@ -80,15 +80,9 @@ public class RerankerService {
      * {@code returnK}; the result is empty when no candidate is relevant. The cache key includes
      * document identities to prevent returning results for wrong document sets.</p>
      *
-     * <p>The rerank LLM call runs inside the caller's retrieval stage deadline: its effective
-     * timeout is the tighter of {@code remainingStageBudget} and the configured reranker timeout,
-     * so this hop can never outlive the stage while the configured timeout stays the ceiling for
-     * unhurried stages.</p>
-     *
      * @param query retrieval query
      * @param documents candidate documents to order
      * @param returnK maximum number of documents to return
-     * @param remainingStageBudget time remaining in the caller's retrieval stage deadline
      * @return relevant documents ordered most relevant first
      */
     @Cacheable(
@@ -121,8 +115,11 @@ public class RerankerService {
 
         log.debug("Reranking {} documents", documents.size());
 
-        Duration rerankRequestTimeout = tighterRerankTimeout(remainingStageBudget);
-        Optional<String> llmOutputOptional = callLlmForReranking(query, documents, rerankRequestTimeout);
+        long promptConstructionStartedNanos = System.nanoTime();
+        String prompt = buildRerankPrompt(query, documents);
+        Duration promptConstructionDuration = Duration.ofNanos(System.nanoTime() - promptConstructionStartedNanos);
+        Duration rerankRequestTimeout = tighterRerankTimeout(remainingStageBudget.minus(promptConstructionDuration));
+        Optional<String> llmOutputOptional = callLlmForReranking(prompt, rerankRequestTimeout);
         if (llmOutputOptional.isEmpty() || llmOutputOptional.get().isBlank()) {
             throw new RerankingFailureException("Reranking response was empty");
         }
@@ -154,10 +151,7 @@ public class RerankerService {
      *
      * @return reranking response when the configured provider completes within its timeout
      */
-    private Optional<String> callLlmForReranking(
-            String query, List<Document> documents, Duration rerankRequestTimeout) {
-        String prompt = buildRerankPrompt(query, documents);
-
+    private Optional<String> callLlmForReranking(String prompt, Duration rerankRequestTimeout) {
         try {
             return openAIStreamingService
                     .completeJsonObject(prompt, rerankerTemperature, rerankerOutputTokenBudget, rerankRequestTimeout)
