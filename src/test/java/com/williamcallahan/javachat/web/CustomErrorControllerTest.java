@@ -32,7 +32,6 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.ui.ExtendedModelMap;
 
 /** Verifies error diagnostics retain request attribution without exposing query data. */
 @WebMvcTest(controllers = CustomErrorController.class)
@@ -198,7 +197,7 @@ class CustomErrorControllerTest {
         servletRequest.setAttribute(RequestDispatcher.ERROR_SERVLET_NAME, "dispatcherServlet");
         MockHttpServletResponse servletResponse = new MockHttpServletResponse();
 
-        errorController.handleError(servletRequest, servletResponse, new ExtendedModelMap());
+        errorController.handleError(servletRequest, servletResponse);
 
         assertEquals(expectedRequestId, servletResponse.getHeader("X-Request-ID"));
         String diagnostic = onlyLogEvent().getFormattedMessage();

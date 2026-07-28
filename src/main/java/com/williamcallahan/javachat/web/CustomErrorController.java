@@ -7,19 +7,22 @@ import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
 import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.boot.web.servlet.error.ErrorController;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
-import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.servlet.ModelAndView;
 
 /**
  * Custom error controller that provides beautiful error pages for the Java Chat application.
@@ -34,17 +37,19 @@ public class CustomErrorController implements ErrorController {
     private static final int MAX_LOG_FIELD_LENGTH = 512;
     private static final String REQUEST_ID_HEADER = "X-Request-ID";
     private static final String ERROR_PATH = "/error";
-    private static final String ERROR_VIEW_ACCESS_DENIED = "forward:/errors/access-denied";
-    private static final String ERROR_VIEW_AUTH_REQUIRED = "forward:/errors/authentication-required";
-    private static final String ERROR_VIEW_INTERNAL = "forward:/errors/internal-error";
-    private static final String ERROR_VIEW_INVALID_ARGUMENT = "forward:/errors/invalid-argument";
-    private static final String ERROR_VIEW_METHOD_NOT_ALLOWED = "forward:/errors/method-not-allowed";
-    private static final String ERROR_VIEW_NOT_ACCEPTABLE = "forward:/errors/not-acceptable";
-    private static final String ERROR_VIEW_NOT_FOUND = "forward:/errors/not-found";
-    private static final String ERROR_VIEW_NOT_IMPLEMENTED = "forward:/errors/not-implemented";
-    private static final String ERROR_VIEW_RATE_LIMITED = "forward:/errors/rate-limited";
-    private static final String ERROR_VIEW_SERVICE_UNAVAILABLE = "forward:/errors/service-unavailable";
-    private static final String ERROR_VIEW_UNSUPPORTED_MEDIA = "forward:/errors/unsupported-media-type";
+    private static final String ERROR_PAGE_ROOT = "errors/";
+    private static final String HTML_EXTENSION = ".html";
+    private static final String ERROR_PAGE_ACCESS_DENIED = "access-denied";
+    private static final String ERROR_PAGE_AUTH_REQUIRED = "authentication-required";
+    private static final String ERROR_PAGE_INTERNAL = "internal-error";
+    private static final String ERROR_PAGE_INVALID_ARGUMENT = "invalid-argument";
+    private static final String ERROR_PAGE_METHOD_NOT_ALLOWED = "method-not-allowed";
+    private static final String ERROR_PAGE_NOT_ACCEPTABLE = "not-acceptable";
+    private static final String ERROR_PAGE_NOT_FOUND = "not-found";
+    private static final String ERROR_PAGE_NOT_IMPLEMENTED = "not-implemented";
+    private static final String ERROR_PAGE_RATE_LIMITED = "rate-limited";
+    private static final String ERROR_PAGE_SERVICE_UNAVAILABLE = "service-unavailable";
+    private static final String ERROR_PAGE_UNSUPPORTED_MEDIA = "unsupported-media-type";
 
     private final ExceptionResponseBuilder exceptionBuilder;
 
@@ -61,8 +66,7 @@ public class CustomErrorController implements ErrorController {
      * Handles error requests and returns appropriate error pages or JSON responses.
      *
      * @param request The HTTP request
-     * @param model Spring MVC model for template rendering
-     * @return ModelAndView for HTML requests or ResponseEntity for API requests
+     * @return an HTML or JSON response that preserves the original status
      */
     // Explicitly specify all HTTP methods - error handlers must respond to any request type
     // that might generate an error. This is intentional, not a CSRF risk.
@@ -77,7 +81,7 @@ public class CustomErrorController implements ErrorController {
                 RequestMethod.HEAD,
                 RequestMethod.OPTIONS
             })
-    public Object handleError(HttpServletRequest request, HttpServletResponse servletResponse, Model model) {
+    public Object handleError(HttpServletRequest request, HttpServletResponse servletResponse) {
         // Get error details from request attributes
         Object errorStatusCodeAttribute = request.getAttribute(RequestDispatcher.ERROR_STATUS_CODE);
         Object errorExceptionAttribute = request.getAttribute(RequestDispatcher.ERROR_EXCEPTION);
@@ -102,7 +106,7 @@ public class CustomErrorController implements ErrorController {
             return handleApiError(statusCode, requestException);
         } else {
             // Return HTML error page for browser requests
-            return handlePageError(statusCode, resolveUserFacingMessage(statusCode), requestUri, model);
+            return handlePageError(statusCode);
         }
     }
 
@@ -170,35 +174,23 @@ public class CustomErrorController implements ErrorController {
     /**
      * Handles page error responses with HTML error pages.
      */
-    private ModelAndView handlePageError(int statusCode, String userFacingMessage, String requestUri, Model model) {
-        ModelAndView modelAndView = new ModelAndView();
-
-        // Add error details to model for potential template use
-        model.addAttribute("status", statusCode);
-        model.addAttribute("error", HttpStatus.resolve(statusCode));
-        model.addAttribute("message", userFacingMessage);
-        model.addAttribute("path", requestUri);
-        model.addAttribute("timestamp", System.currentTimeMillis());
-
-        HttpStatus resolvedStatus = HttpStatus.resolve(statusCode);
-        if (resolvedStatus == null) {
-            resolvedStatus = HttpStatus.INTERNAL_SERVER_ERROR;
+    private ResponseEntity<String> handlePageError(int statusCode) {
+        HttpStatus errorStatus = resolveHttpStatus(statusCode);
+        String errorPageName = resolveErrorPageName(errorStatus);
+        ClassPathResource errorPageResource = new ClassPathResource(ERROR_PAGE_ROOT + errorPageName + HTML_EXTENSION);
+        if (!errorPageResource.exists()) {
+            log.error("Browser error page is missing");
+            return ResponseEntity.internalServerError().build();
         }
-        modelAndView.setViewName(resolveErrorViewName(resolvedStatus));
-        // Carry the real status onto the forwarded error view: without this the
-        // forward renders with 200, so a missing hashed asset returns 200 text/html
-        // and browsers raise a strict-MIME module error instead of a clean 404.
-        modelAndView.setStatus(resolvedStatus);
-
-        return modelAndView;
-    }
-
-    private String resolveUserFacingMessage(int statusCode) {
-        HttpStatus resolvedStatus = HttpStatus.resolve(statusCode);
-        if (resolvedStatus != null) {
-            return resolvedStatus.getReasonPhrase();
+        try (InputStream inputStream = errorPageResource.getInputStream()) {
+            String errorPageHtml = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+            return ResponseEntity.status(errorStatus)
+                    .contentType(MediaType.TEXT_HTML)
+                    .body(errorPageHtml);
+        } catch (IOException exception) {
+            log.error("Failed to read browser error page", exception);
+            return ResponseEntity.internalServerError().build();
         }
-        return "Unexpected error";
     }
 
     private HttpStatus resolveHttpStatus(int statusCode) {
@@ -209,19 +201,19 @@ public class CustomErrorController implements ErrorController {
         return HttpStatus.INTERNAL_SERVER_ERROR;
     }
 
-    private String resolveErrorViewName(HttpStatus status) {
+    private String resolveErrorPageName(HttpStatus status) {
         return switch (status) {
-            case NOT_FOUND -> ERROR_VIEW_NOT_FOUND;
-            case BAD_REQUEST -> ERROR_VIEW_INVALID_ARGUMENT;
-            case UNAUTHORIZED -> ERROR_VIEW_AUTH_REQUIRED;
-            case FORBIDDEN -> ERROR_VIEW_ACCESS_DENIED;
-            case METHOD_NOT_ALLOWED -> ERROR_VIEW_METHOD_NOT_ALLOWED;
-            case NOT_ACCEPTABLE -> ERROR_VIEW_NOT_ACCEPTABLE;
-            case UNSUPPORTED_MEDIA_TYPE -> ERROR_VIEW_UNSUPPORTED_MEDIA;
-            case TOO_MANY_REQUESTS -> ERROR_VIEW_RATE_LIMITED;
-            case NOT_IMPLEMENTED -> ERROR_VIEW_NOT_IMPLEMENTED;
-            case BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT -> ERROR_VIEW_SERVICE_UNAVAILABLE;
-            default -> ERROR_VIEW_INTERNAL;
+            case NOT_FOUND -> ERROR_PAGE_NOT_FOUND;
+            case BAD_REQUEST -> ERROR_PAGE_INVALID_ARGUMENT;
+            case UNAUTHORIZED -> ERROR_PAGE_AUTH_REQUIRED;
+            case FORBIDDEN -> ERROR_PAGE_ACCESS_DENIED;
+            case METHOD_NOT_ALLOWED -> ERROR_PAGE_METHOD_NOT_ALLOWED;
+            case NOT_ACCEPTABLE -> ERROR_PAGE_NOT_ACCEPTABLE;
+            case UNSUPPORTED_MEDIA_TYPE -> ERROR_PAGE_UNSUPPORTED_MEDIA;
+            case TOO_MANY_REQUESTS -> ERROR_PAGE_RATE_LIMITED;
+            case NOT_IMPLEMENTED -> ERROR_PAGE_NOT_IMPLEMENTED;
+            case BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT -> ERROR_PAGE_SERVICE_UNAVAILABLE;
+            default -> ERROR_PAGE_INTERNAL;
         };
     }
 
