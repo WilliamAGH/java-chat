@@ -51,6 +51,20 @@ assert_no_source_dispatch() {
     fi
 }
 
+write_java25_specification_pdf_fixture() {
+    local fixture_path="$1"
+    local title_fragment="$2"
+    printf '%s\n' \
+        '%PDF-1.4' \
+        "% $title_fragment" \
+        '1 0 obj' \
+        '<< /Type /Catalog >>' \
+        'endobj' \
+        'trailer' \
+        '<< /Root 1 0 R >>' \
+        '%%EOF' > "$fixture_path"
+}
+
 set --
 # shellcheck source=fetch_all_docs.sh
 source "$FETCH_SCRIPT"
@@ -469,7 +483,166 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     --cut-directories \
     5 \
     --minimum-html-files \
-    5000
+    5000 \
+    --java25-specification-pdfs
+
+JAVA25_INVALID_PDF="$TEST_WORK_DIRECTORY/java25-invalid.pdf"
+printf '<html>not a PDF</html>\n' > "$JAVA25_INVALID_PDF"
+if validate_java25_specification_pdf \
+    "$JAVA25_INVALID_PDF" "invalid Java 25 specification" "Language Specification"; then
+    fail_documentation_fetch_test "non-PDF Java 25 specification content was accepted"
+fi
+
+JAVA25_WRONG_SPECIFICATION_PDF="$TEST_WORK_DIRECTORY/java25-wrong-specification.pdf"
+write_java25_specification_pdf_fixture \
+    "$JAVA25_WRONG_SPECIFICATION_PDF" "Virtual Machine Specification"
+if validate_java25_specification_pdf \
+    "$JAVA25_WRONG_SPECIFICATION_PDF" "wrong Java 25 specification" "Language Specification"; then
+    fail_documentation_fetch_test "wrong Java 25 specification content was accepted"
+fi
+
+JAVA25_PDF_SUCCESS_ROOT="$TEST_WORK_DIRECTORY/java25-pdf-success"
+JAVA25_PDF_SUCCESS_CAPTURE="$JAVA25_PDF_SUCCESS_ROOT/wget-arguments"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    DOCS_ROOT="$JAVA25_PDF_SUCCESS_ROOT/data/docs"
+    LOG_FILE="$JAVA25_PDF_SUCCESS_ROOT/fetch.log"
+    JAVA25_PDF_SUCCESS_STAGE="$JAVA25_PDF_SUCCESS_ROOT/stage"
+    log() {
+        :
+    }
+    create_documentation_fetch_staging_directory() {
+        mkdir -p "$JAVA25_PDF_SUCCESS_ROOT" "$JAVA25_PDF_SUCCESS_STAGE"
+        printf '%s\n' "$JAVA25_PDF_SUCCESS_STAGE"
+    }
+    generate_java_api_javadoc_seed() {
+        :
+    }
+    reconcile_java_api_seed_mirror() {
+        :
+    }
+    fetch_java_api_javadoc_seed() {
+        printf '<html>Java 25 API</html>\n' > "$1/index.html"
+        cd - > /dev/null
+    }
+    validate_staged_documentation_identity() {
+        :
+    }
+    wget() {
+        local wget_argument
+        local output_document=""
+        local requested_url=""
+        printf '%s\n' "$@" >> "$JAVA25_PDF_SUCCESS_CAPTURE"
+        for wget_argument in "$@"; do
+            case "$wget_argument" in
+                --output-document=*) output_document="${wget_argument#--output-document=}" ;;
+                --*) ;;
+                *) requested_url="$wget_argument" ;;
+            esac
+        done
+        case "$requested_url" in
+            https://docs.oracle.com/javase/specs/jls/se25/jls25.pdf)
+                write_java25_specification_pdf_fixture "$output_document" "Language Specification"
+                ;;
+            https://docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf)
+                write_java25_specification_pdf_fixture "$output_document" "Virtual Machine Specification"
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    fetch_source \
+        --java-release 25 \
+        --java25-specification-pdfs \
+        --url "https://docs.oracle.com/en/java/javase/25/docs/api/" \
+        --mirror-path "java/java25-complete" \
+        --name "Java 25 Complete API" \
+        --source-version "25-ga" \
+        --cut-directories 5 \
+        --minimum-html-files 1
+); then
+    fail_documentation_fetch_test "Java 25 source refresh did not publish both specification PDFs"
+fi
+for JAVA25_SPECIFICATION_PATH in \
+    "$JAVA25_PDF_SUCCESS_ROOT/data/docs/java/java25-complete/docs.oracle.com/javase/specs/jls/se25/jls25.pdf" \
+    "$JAVA25_PDF_SUCCESS_ROOT/data/docs/java/java25-complete/docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf"; do
+    [ -f "$JAVA25_SPECIFICATION_PATH" ] \
+        || fail_documentation_fetch_test "Java 25 source refresh omitted $JAVA25_SPECIFICATION_PATH"
+done
+grep -Fxq -- "--max-redirect=0" "$JAVA25_PDF_SUCCESS_CAPTURE" \
+    || fail_documentation_fetch_test "Java 25 specification fetch accepted redirects"
+grep -Fxq -- "https://docs.oracle.com/javase/specs/jls/se25/jls25.pdf" "$JAVA25_PDF_SUCCESS_CAPTURE" \
+    || fail_documentation_fetch_test "Java 25 source refresh did not request the canonical JLS 25 PDF"
+grep -Fxq -- "https://docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf" "$JAVA25_PDF_SUCCESS_CAPTURE" \
+    || fail_documentation_fetch_test "Java 25 source refresh did not request the canonical JVMS 25 PDF"
+
+JAVA25_PDF_FAILURE_ROOT="$TEST_WORK_DIRECTORY/java25-pdf-http-failure"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    DOCS_ROOT="$JAVA25_PDF_FAILURE_ROOT/data/docs"
+    LOG_FILE="$JAVA25_PDF_FAILURE_ROOT/fetch.log"
+    JAVA25_PDF_FAILURE_STAGE="$JAVA25_PDF_FAILURE_ROOT/stage"
+    JAVA25_PDF_FAILURE_TARGET="$DOCS_ROOT/java/java25-complete"
+    mkdir -p "$JAVA25_PDF_FAILURE_TARGET"
+    printf '<html>active Java 25 API</html>\n' > "$JAVA25_PDF_FAILURE_TARGET/index.html"
+    log() {
+        :
+    }
+    create_documentation_fetch_staging_directory() {
+        mkdir -p "$JAVA25_PDF_FAILURE_STAGE"
+        printf '%s\n' "$JAVA25_PDF_FAILURE_STAGE"
+    }
+    generate_java_api_javadoc_seed() {
+        :
+    }
+    reconcile_java_api_seed_mirror() {
+        :
+    }
+    fetch_java_api_javadoc_seed() {
+        printf '<html>Java 25 API</html>\n' > "$1/index.html"
+        cd - > /dev/null
+    }
+    validate_staged_documentation_identity() {
+        :
+    }
+    wget() {
+        local wget_argument
+        local output_document=""
+        local requested_url=""
+        for wget_argument in "$@"; do
+            case "$wget_argument" in
+                --output-document=*) output_document="${wget_argument#--output-document=}" ;;
+                --*) ;;
+                *) requested_url="$wget_argument" ;;
+            esac
+        done
+        case "$requested_url" in
+            https://docs.oracle.com/javase/specs/jls/se25/jls25.pdf) return 8 ;;
+            https://docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf)
+                write_java25_specification_pdf_fixture "$output_document" "Virtual Machine Specification"
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    if fetch_source \
+        --java-release 25 \
+        --java25-specification-pdfs \
+        --url "https://docs.oracle.com/en/java/javase/25/docs/api/" \
+        --mirror-path "java/java25-complete" \
+        --name "Java 25 Complete API" \
+        --source-version "25-ga" \
+        --cut-directories 5 \
+        --minimum-html-files 1; then
+        exit 1
+    fi
+    [ "$(< "$JAVA25_PDF_FAILURE_TARGET/index.html")" = "<html>active Java 25 API</html>" ]
+    [ ! -e "$JAVA25_PDF_FAILURE_TARGET/docs.oracle.com/javase/specs/jls/se25/jls25.pdf" ]
+); then
+    fail_documentation_fetch_test "HTTP failure replaced the active Java 25 mirror"
+fi
 
 if ! (
     set --
