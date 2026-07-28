@@ -16,6 +16,7 @@ import io.qdrant.client.grpc.JsonWithInt.Value;
 import io.qdrant.client.grpc.Points.RetrievedPoint;
 import io.qdrant.client.grpc.Points.ScrollPoints;
 import io.qdrant.client.grpc.Points.ScrollResponse;
+import io.qdrant.client.grpc.Points.UpsertPoints;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -384,9 +385,15 @@ public class HybridVectorService {
             points.add(point);
         }
 
+        // Waited writes apply backpressure so bulk ingestion cannot queue writes faster than the
+        // cluster applies them, and read-after-write verification observes the applied state.
         RetrySupport.executeWithRetry(
                 () -> QdrantFutureAwaiter.awaitFuture(
-                        qdrantClient.upsertAsync(Objects.requireNonNull(collectionName), points),
+                        qdrantClient.upsertAsync(UpsertPoints.newBuilder()
+                                .setCollectionName(Objects.requireNonNull(collectionName))
+                                .addAllPoints(points)
+                                .setWait(true)
+                                .build()),
                         UPSERT_TIMEOUT_SECONDS),
                 "Qdrant hybrid upsert");
 
