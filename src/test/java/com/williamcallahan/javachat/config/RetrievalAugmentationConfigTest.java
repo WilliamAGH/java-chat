@@ -27,4 +27,44 @@ class RetrievalAugmentationConfigTest {
 
         assertThrows(IllegalArgumentException.class, config::validateConfiguration);
     }
+
+    @Test
+    void validateConfigurationAcceptsRerankerTimeoutBelowResponsePreparationDeadline() {
+        RetrievalAugmentationConfig config = new RetrievalAugmentationConfig();
+        config.setRerankerTimeout(RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.minusNanos(1));
+
+        assertDoesNotThrow(config::validateConfiguration);
+    }
+
+    @Test
+    void validateConfigurationRejectsRerankerTimeoutAtResponsePreparationDeadline() {
+        RetrievalAugmentationConfig config = new RetrievalAugmentationConfig();
+        config.setRerankerTimeout(RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT);
+
+        assertThrows(IllegalArgumentException.class, config::validateConfiguration);
+    }
+
+    @Test
+    void validateConfigurationRejectsRerankerTimeoutAboveResponsePreparationDeadline() {
+        RetrievalAugmentationConfig config = new RetrievalAugmentationConfig();
+        config.setRerankerTimeout(RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.plusNanos(1));
+
+        assertThrows(IllegalArgumentException.class, config::validateConfiguration);
+    }
+
+    @Test
+    void validateConfigurationRejectsNegativeRerankerTimeout() {
+        RetrievalAugmentationConfig config = new RetrievalAugmentationConfig();
+        config.setRerankerTimeout(Duration.ofNanos(-1));
+
+        assertThrows(IllegalArgumentException.class, config::validateConfiguration);
+    }
+
+    @Test
+    void validateConfigurationRejectsMissingRerankerTimeout() {
+        RetrievalAugmentationConfig config = new RetrievalAugmentationConfig();
+        config.setRerankerTimeout(null);
+
+        assertThrows(IllegalArgumentException.class, config::validateConfiguration);
+    }
 }

@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.config.RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT;
 import static com.williamcallahan.javachat.web.SseConstants.*;
 
 import com.fasterxml.jackson.core.JsonProcessingException;

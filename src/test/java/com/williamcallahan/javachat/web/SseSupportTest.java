@@ -1,9 +1,9 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.config.RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
 import static com.williamcallahan.javachat.web.SseConstants.HEARTBEAT_INTERVAL_SECONDS;
-import static com.williamcallahan.javachat.web.SseConstants.RESPONSE_PREPARATION_TIMEOUT;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_RETRIEVAL_TIMEOUT;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
 import static com.williamcallahan.javachat.web.SseConstants.STREAM_BACKPRESSURE_BUFFER_CAPACITY;

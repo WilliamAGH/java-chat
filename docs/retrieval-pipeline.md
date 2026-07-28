@@ -298,7 +298,7 @@ All four must be non-blank and distinct (validated on startup).
 |---|---|---|---|
 | `app.rag.search-top-k` | `12` | Must be > 0 | Candidates fetched from hybrid search before reranking |
 | `app.rag.search-return-k` | `6` | Must be > 0, must be <= `search-top-k` | Results returned to the LLM after reranking |
-| `app.rag.reranker-timeout` | `8s` | Must be positive | Timeout for LLM reranking call |
+| `app.rag.reranker-timeout` | `8s` | Must be positive and less than `20s` | Timeout for LLM reranking call |
 | `app.rag.search-citations` | `3` | Must be >= 0 | Citation references included in the response |
 | `app.rag.search-mmr-lambda` | `0.5` | Must be in [0.0, 1.0] | MMR lambda (higher = relevance, lower = diversity) |
 | `app.rag.chunk-max-tokens` | `900` | Must be > 0 | Max tokens per ingested chunk (see [ingestion.md](ingestion.md)) |
