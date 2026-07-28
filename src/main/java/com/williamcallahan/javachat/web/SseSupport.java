@@ -6,6 +6,7 @@ import static com.williamcallahan.javachat.web.SseConstants.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
+import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.http.HttpServletResponse;
@@ -40,6 +41,8 @@ public class SseSupport {
 
     private static final String RESPONSE_PREPARATION_MESSAGE = "Preparing your response";
     private static final String RESPONSE_PREPARATION_DETAILS = "Finding relevant Java documentation.";
+    private static final String RESPONSE_PREPARATION_DEADLINE_ELAPSED_MESSAGE =
+            "Response preparation deadline elapsed before subscription";
     /** Fallback JSON payload when SSE error serialization fails. */
     private static final String ERROR_FALLBACK_JSON =
             "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
@@ -239,16 +242,48 @@ public class SseSupport {
      * @return true when the failure or one of its causes is a timeout
      */
     public boolean isResponsePreparationTimeout(Throwable preparationFailure) {
-        Set<Throwable> inspectedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
-        return isResponsePreparationTimeout(preparationFailure, inspectedFailures);
+        Set<Throwable> inspectedAggregateFailures = Collections.newSetFromMap(new IdentityHashMap<>());
+        if (containsNonRetryableHybridSearchFailure(preparationFailure, inspectedAggregateFailures)) {
+            return false;
+        }
+        Set<Throwable> inspectedTimeoutFailures = Collections.newSetFromMap(new IdentityHashMap<>());
+        return containsTimeout(preparationFailure, inspectedTimeoutFailures);
     }
 
-    private boolean isResponsePreparationTimeout(Throwable preparationFailure, Set<Throwable> inspectedFailures) {
+    private boolean containsTimeout(Throwable preparationFailure, Set<Throwable> inspectedFailures) {
         if (preparationFailure == null || !inspectedFailures.add(preparationFailure)) {
             return false;
         }
-        return preparationFailure instanceof TimeoutException
-                || isResponsePreparationTimeout(preparationFailure.getCause(), inspectedFailures);
+        if (preparationFailure instanceof TimeoutException
+                || containsTimeout(preparationFailure.getCause(), inspectedFailures)) {
+            return true;
+        }
+        for (Throwable suppressedFailure : preparationFailure.getSuppressed()) {
+            if (containsTimeout(suppressedFailure, inspectedFailures)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsNonRetryableHybridSearchFailure(
+            Throwable preparationFailure, Set<Throwable> inspectedFailures) {
+        if (preparationFailure == null || !inspectedFailures.add(preparationFailure)) {
+            return false;
+        }
+        if (preparationFailure instanceof HybridSearchPartialFailureException hybridSearchFailure
+                && !hybridSearchFailure.isRetryable()) {
+            return true;
+        }
+        if (containsNonRetryableHybridSearchFailure(preparationFailure.getCause(), inspectedFailures)) {
+            return true;
+        }
+        for (Throwable suppressedFailure : preparationFailure.getSuppressed()) {
+            if (containsNonRetryableHybridSearchFailure(suppressedFailure, inspectedFailures)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -303,9 +338,14 @@ public class SseSupport {
      */
     public Flux<ServerSentEvent<String>> enforceResponsePreparationDeadline(
             Flux<ServerSentEvent<String>> operationEvents, long responsePreparationDeadlineNanos) {
-        Duration remainingPreparationBudget =
-                Duration.ofNanos(Math.max(0L, responsePreparationDeadlineNanos - System.nanoTime()));
-        return operationEvents.timeout(Mono.delay(remainingPreparationBudget), ignoredOperationEvent -> Mono.never());
+        return Flux.defer(() -> {
+            long remainingPreparationNanos = responsePreparationDeadlineNanos - System.nanoTime();
+            if (remainingPreparationNanos <= 0L) {
+                return Flux.error(new TimeoutException(RESPONSE_PREPARATION_DEADLINE_ELAPSED_MESSAGE));
+            }
+            return operationEvents.timeout(
+                    Mono.delay(Duration.ofNanos(remainingPreparationNanos)), ignoredOperationEvent -> Mono.never());
+        });
     }
 
     private void recordCoalescedChunkOverflow(String overflowedChunk) {

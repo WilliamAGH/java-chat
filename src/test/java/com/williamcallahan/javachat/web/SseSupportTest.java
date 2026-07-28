@@ -9,10 +9,12 @@ import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEV
 import static com.williamcallahan.javachat.web.SseConstants.STREAM_BACKPRESSURE_BUFFER_CAPACITY;
 import static com.williamcallahan.javachat.web.SseConstants.STREAM_CHUNK_COALESCE_MAX_ITEMS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
@@ -39,6 +41,9 @@ class SseSupportTest {
     private static final int BACKPRESSURE_OVERFLOW_BUFFER_MULTIPLIER = 2;
     private static final int DEADLINE_TEST_MULTIPLIER = 2;
     private static final Duration BACKPRESSURE_TEST_COMPLETION_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration DELAYED_SUBSCRIPTION_BUDGET = Duration.ofSeconds(1);
+    private static final Duration DELAYED_SUBSCRIPTION_DELAY = Duration.ofMillis(1_250);
+    private static final Duration DELAYED_SUBSCRIPTION_VERIFICATION_TIMEOUT = Duration.ofMillis(1_750);
 
     @Autowired
     ObjectMapper objectMapper;
@@ -150,6 +155,25 @@ class SseSupportTest {
     }
 
     @Test
+    void responsePreparationDeadlineUsesTheRemainingBudgetAtSubscription() {
+        SseSupport sseSupport = createSseSupport();
+        AtomicInteger operationSubscriptionCount = new AtomicInteger();
+        Flux<ServerSentEvent<String>> stalledOperationEvents = Flux.defer(() -> {
+            operationSubscriptionCount.incrementAndGet();
+            return Flux.never();
+        });
+        long responsePreparationDeadlineNanos = System.nanoTime() + DELAYED_SUBSCRIPTION_BUDGET.toNanos();
+        Flux<ServerSentEvent<String>> deadlineBoundEvents =
+                sseSupport.enforceResponsePreparationDeadline(stalledOperationEvents, responsePreparationDeadlineNanos);
+
+        StepVerifier.create(deadlineBoundEvents.delaySubscription(DELAYED_SUBSCRIPTION_DELAY))
+                .expectError(TimeoutException.class)
+                .verify(DELAYED_SUBSCRIPTION_VERIFICATION_TIMEOUT);
+
+        assertEquals(0, operationSubscriptionCount.get());
+    }
+
+    @Test
     void responsePreparationTimeoutErrorUsesTheStableRetryableContract() throws JsonProcessingException {
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         SseSupport sseSupport = new SseSupport(objectMapper, meterRegistry);
@@ -187,6 +211,37 @@ class SseSupportTest {
                 new RuntimeException("retrieval failed", new TimeoutException("embedding deadline"));
 
         assertTrue(sseSupport.isResponsePreparationTimeout(wrappedTimeout));
+    }
+
+    @Test
+    void responsePreparationTimeoutDetectionTraversesSuppressedDependencyFailures() {
+        SseSupport sseSupport = createSseSupport();
+        RuntimeException fanOutFailure = new RuntimeException("retrieval fan-out failed");
+        fanOutFailure.addSuppressed(
+                new IllegalStateException("later collection failed", new TimeoutException("Qdrant deadline")));
+
+        assertTrue(sseSupport.isResponsePreparationTimeout(fanOutFailure));
+    }
+
+    @Test
+    void responsePreparationTimeoutDoesNotHidePermanentFanOutFailure() {
+        SseSupport sseSupport = createSseSupport();
+        HybridSearchPartialFailureException mixedFanOutFailure = new HybridSearchPartialFailureException(
+                "retrieval fan-out failed",
+                List.of(
+                        new HybridSearchPartialFailureException.CollectionSearchFailure(
+                                "docs",
+                                "InvalidArgument",
+                                "invalid filter",
+                                HybridSearchPartialFailureException.FailureDisposition.PERMANENT),
+                        new HybridSearchPartialFailureException.CollectionSearchFailure(
+                                "pdfs",
+                                "Timeout",
+                                "deadline exceeded",
+                                HybridSearchPartialFailureException.FailureDisposition.TRANSIENT)),
+                List.of(new IllegalArgumentException("invalid filter"), new TimeoutException("Qdrant deadline")));
+
+        assertFalse(sseSupport.isResponsePreparationTimeout(mixedFanOutFailure));
     }
 
     @Test

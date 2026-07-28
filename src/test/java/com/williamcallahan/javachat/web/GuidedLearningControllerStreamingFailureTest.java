@@ -43,6 +43,7 @@ import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.net.SocketTimeoutException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -238,10 +239,11 @@ class GuidedLearningControllerStreamingFailureTest {
     }
 
     @Test
-    void wrappedEmbeddingDeadlineUsesTheRetrievalTimeoutContract() throws JsonProcessingException {
+    void wrappedLocalEmbeddingSocketDeadlineUsesTheRetrievalTimeoutContract() throws JsonProcessingException {
+        TimeoutException embeddingTimeout = new TimeoutException("embedding request deadline");
+        embeddingTimeout.initCause(new SocketTimeoutException("read timed out"));
         EmbeddingServiceTemporarilyUnavailableException embeddingDeadlineFailure =
-                new EmbeddingServiceTemporarilyUnavailableException(
-                        UPSTREAM_SECRET_MESSAGE, new TimeoutException("embedding request deadline"));
+                new EmbeddingServiceTemporarilyUnavailableException(UPSTREAM_SECRET_MESSAGE, embeddingTimeout);
         when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());

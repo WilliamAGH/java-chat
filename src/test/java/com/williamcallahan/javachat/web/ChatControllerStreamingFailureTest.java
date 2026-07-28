@@ -41,7 +41,6 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
-import com.williamcallahan.javachat.service.EmbeddingServiceTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
@@ -49,6 +48,7 @@ import com.williamcallahan.javachat.service.RerankingFailureException;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
+import io.grpc.Status;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.Arrays;
 import java.util.List;
@@ -227,7 +227,7 @@ class ChatControllerStreamingFailureTest {
     }
 
     @Test
-    void wrappedEmbeddingDeadlineUsesTheRetrievalTimeoutContract() throws JsonProcessingException {
+    void wrappedQdrantDeadlineUsesTheRetrievalTimeoutContract() throws JsonProcessingException {
         ChatService chatService = mock(ChatService.class);
         ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
@@ -240,14 +240,21 @@ class ChatControllerStreamingFailureTest {
                 createSseSupport(),
                 new ExceptionResponseBuilder(),
                 new AppProperties());
-        EmbeddingServiceTemporarilyUnavailableException embeddingDeadlineFailure =
-                new EmbeddingServiceTemporarilyUnavailableException(
-                        UPSTREAM_SECRET_MESSAGE, new TimeoutException("embedding request deadline"));
+        TimeoutException qdrantDeadlineFailure = new TimeoutException("Qdrant query deadline");
+        qdrantDeadlineFailure.initCause(Status.DEADLINE_EXCEEDED.asRuntimeException());
+        HybridSearchPartialFailureException.CollectionSearchFailure collectionSearchFailure =
+                new HybridSearchPartialFailureException.CollectionSearchFailure(
+                        "java-docs",
+                        "Timeout",
+                        UPSTREAM_SECRET_MESSAGE,
+                        HybridSearchPartialFailureException.FailureDisposition.TRANSIENT);
+        HybridSearchPartialFailureException hybridDeadlineFailure = new HybridSearchPartialFailureException(
+                "Qdrant retrieval failed", List.of(collectionSearchFailure), List.of(qdrantDeadlineFailure));
         when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any(), anyLong()))
-                .thenThrow(embeddingDeadlineFailure);
+                .thenThrow(hybridDeadlineFailure);
 
         List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
                 chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
@@ -280,9 +287,7 @@ class ChatControllerStreamingFailureTest {
         assertLogField(retrievalTimeoutWarning, "code", STATUS_CODE_RETRIEVAL_TIMEOUT);
         assertLogField(retrievalTimeoutWarning, "stage", STATUS_STAGE_RETRIEVAL);
         assertLogField(
-                retrievalTimeoutWarning,
-                "exceptionType",
-                EmbeddingServiceTemporarilyUnavailableException.class.getSimpleName());
+                retrievalTimeoutWarning, "exceptionType", HybridSearchPartialFailureException.class.getSimpleName());
         assertNull(retrievalTimeoutWarning.getThrowableProxy());
         assertFalse(retrievalTimeoutWarning.toString().contains(UPSTREAM_SECRET_MESSAGE));
         assertEquals(
