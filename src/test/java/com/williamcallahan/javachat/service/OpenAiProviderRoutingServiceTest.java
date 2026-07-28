@@ -26,6 +26,7 @@ import com.williamcallahan.javachat.config.ConfiguredProviderBackoff;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import io.grpc.Status;
 import java.io.InterruptedIOException;
+import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.InstantSource;
@@ -84,6 +85,15 @@ class OpenAiProviderRoutingServiceTest {
         OpenAiProviderRoutingService routingService = createRoutingService();
 
         assertFalse(routingService.shouldBackoffConfiguredProvider(wrappedOkHttpCallTimeout()));
+    }
+
+    @Test
+    void shouldBackoffConfiguredProviderTreatsSocketReadTimeoutAsBackoffEligible() {
+        OpenAiProviderRoutingService routingService = createRoutingService();
+        OpenAIIoException socketReadTimeout =
+                new OpenAIIoException(OPENAI_REQUEST_FAILED_MESSAGE, new SocketTimeoutException("Read timed out"));
+
+        assertTrue(routingService.shouldBackoffConfiguredProvider(socketReadTimeout));
     }
 
     @Test

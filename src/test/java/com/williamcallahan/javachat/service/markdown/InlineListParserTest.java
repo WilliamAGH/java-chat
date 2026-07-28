@@ -272,13 +272,4 @@ class InlineListParserTest {
                 conversion.primaryListElement().child(1).text());
         assertEquals("Read the guide.", conversion.trailingText());
     }
-
-    private static void assertCorporateSuffixRemainsInList(String rawListEntryText, String expectedListEntryText) {
-        InlineListParser.Conversion conversion = InlineListParser.tryConvert("1. First 2. " + rawListEntryText);
-
-        assertNotNull(conversion, rawListEntryText);
-        assertEquals(
-                expectedListEntryText, conversion.primaryListElement().child(1).text(), rawListEntryText);
-        assertEquals("", conversion.trailingText(), rawListEntryText);
-    }
 }
