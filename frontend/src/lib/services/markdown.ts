@@ -30,8 +30,6 @@ const ASCII_LOWERCASE_START = 97;
 const ASCII_LOWERCASE_END = 122;
 const COMMONMARK_MAX_FENCE_INDENTATION = 3;
 const COMMONMARK_INDENTED_CODE_SPACES = 4;
-const NUMERIC_LIST_MARKER_MAX_DIGITS = 9;
-const STRUCTURAL_MARKDOWN_PARSER = new Marked({ gfm: true, breaks: true });
 
 type FenceMarker = { character: string; length: number };
 type BacktickRun = { length: number };
@@ -167,42 +165,15 @@ function hasOnlyClosingFenceSpacing(src: string, suffixStartIndex: number): bool
 }
 
 function hasTrailingFenceProse(src: string, suffixStartIndex: number): boolean {
-  let firstVisibleIndex = suffixStartIndex;
-  while (
-    firstVisibleIndex < src.length &&
-    (src[firstVisibleIndex] === " " || src[firstVisibleIndex] === "\t")
-  ) {
-    firstVisibleIndex++;
-  }
-  if (
-    firstVisibleIndex >= src.length ||
-    src[firstVisibleIndex] === NEWLINE ||
-    src[firstVisibleIndex] === "\r"
-  ) {
-    return false;
-  }
-
-  const firstVisibleCharacter = src[firstVisibleIndex];
-  const firstVisibleCode = firstVisibleCharacter.charCodeAt(0);
-  const startsWithLetter =
-    (firstVisibleCode >= ASCII_LOWERCASE_START && firstVisibleCode <= ASCII_LOWERCASE_END) ||
-    (firstVisibleCode >= ASCII_UPPERCASE_START && firstVisibleCode <= ASCII_UPPERCASE_END);
-  const startsWithDigit =
-    firstVisibleCode >= ASCII_DIGIT_START && firstVisibleCode <= ASCII_DIGIT_END;
-  if (!startsWithLetter && !startsWithDigit) {
-    return false;
-  }
-
-  for (let cursor = firstVisibleIndex + 1; cursor < src.length; cursor++) {
-    const character = src[cursor];
-    if (character === NEWLINE || character === "\r") {
-      break;
-    }
-    if (character === " " || character === "\t") {
-      return true;
-    }
-  }
-  return firstVisibleCode >= ASCII_UPPERCASE_START && firstVisibleCode <= ASCII_UPPERCASE_END;
+  const lineEndIndex = src.indexOf(NEWLINE, suffixStartIndex);
+  const suffixEndIndex = lineEndIndex < 0 ? src.length : lineEndIndex;
+  const trailingText = src.slice(suffixStartIndex, suffixEndIndex).trim();
+  const containsWordBoundary = trailingText.includes(" ") || trailingText.includes("\t");
+  const terminalCharacter = trailingText.at(-1);
+  return (
+    containsWordBoundary &&
+    (terminalCharacter === "." || terminalCharacter === "!" || terminalCharacter === "?")
+  );
 }
 
 function scanBacktickRun(src: string, index: number): BacktickRun | null {
@@ -449,220 +420,6 @@ function normalizeMarkdownForStreaming(content: string): string {
   return normalized;
 }
 
-function numericOrderedListContinuationIndentation(markdownLine: string): number | null {
-  const indentationSpaces = leadingSpaceCount(markdownLine, 0);
-  if (indentationSpaces > COMMONMARK_MAX_FENCE_INDENTATION) {
-    return null;
-  }
-
-  let cursor = indentationSpaces;
-  let digitCount = 0;
-  while (
-    cursor < markdownLine.length &&
-    digitCount < NUMERIC_LIST_MARKER_MAX_DIGITS &&
-    markdownLine.charCodeAt(cursor) >= ASCII_DIGIT_START &&
-    markdownLine.charCodeAt(cursor) <= ASCII_DIGIT_END
-  ) {
-    cursor++;
-    digitCount++;
-  }
-  if (
-    digitCount === 0 ||
-    (cursor < markdownLine.length &&
-      markdownLine.charCodeAt(cursor) >= ASCII_DIGIT_START &&
-      markdownLine.charCodeAt(cursor) <= ASCII_DIGIT_END)
-  ) {
-    return null;
-  }
-
-  if (markdownLine[cursor] !== "." && markdownLine[cursor] !== ")") {
-    return null;
-  }
-  const markerEndIndex = cursor + 1;
-  if (markerEndIndex >= markdownLine.length) {
-    return markerEndIndex + 1;
-  }
-  if (markdownLine[markerEndIndex] !== " " && markdownLine[markerEndIndex] !== "\t") {
-    return null;
-  }
-
-  let contentStartIndex = markerEndIndex;
-  while (
-    contentStartIndex < markdownLine.length &&
-    (markdownLine[contentStartIndex] === " " || markdownLine[contentStartIndex] === "\t")
-  ) {
-    contentStartIndex++;
-  }
-  if (contentStartIndex >= markdownLine.length) {
-    return markerEndIndex + 1;
-  }
-  const markerPadding = contentStartIndex - markerEndIndex;
-  return markerEndIndex + (markerPadding > COMMONMARK_INDENTED_CODE_SPACES ? 1 : markerPadding);
-}
-
-function scanFenceWithinListContinuation(
-  markdownLine: string,
-  maximumIndentation: number,
-): { marker: FenceMarker; markerIndex: number } | null {
-  const markerIndex = leadingSpaceCount(markdownLine, 0);
-  if (markerIndex > maximumIndentation) {
-    return null;
-  }
-  const marker = scanFenceMarker(markdownLine, markerIndex);
-  return marker ? { marker, markerIndex } : null;
-}
-
-function countLineBreaks(markdownText: string, startIndex: number, endIndex: number): number {
-  let lineBreakCount = 0;
-  for (let cursor = startIndex; cursor < endIndex; cursor++) {
-    if (markdownText[cursor] === NEWLINE) {
-      lineBreakCount++;
-    }
-  }
-  return lineBreakCount;
-}
-
-function parsedNumericListMarkerLines(markdownText: string): ReadonlySet<number> {
-  const markerLines = new Set<number>();
-  const structuralTokens = STRUCTURAL_MARKDOWN_PARSER.lexer(markdownText);
-  let sourceCursor = 0;
-  let sourceLine = 0;
-
-  for (const structuralToken of structuralTokens) {
-    const tokenStartIndex = markdownText.startsWith(structuralToken.raw, sourceCursor)
-      ? sourceCursor
-      : markdownText.indexOf(structuralToken.raw, sourceCursor);
-    if (tokenStartIndex < 0) {
-      continue;
-    }
-    sourceLine += countLineBreaks(markdownText, sourceCursor, tokenStartIndex);
-
-    if (structuralToken.type === "list" && structuralToken.ordered) {
-      let listCursor = 0;
-      let listLine = sourceLine;
-      for (const orderedListMember of structuralToken.items) {
-        const memberStartIndex = structuralToken.raw.indexOf(orderedListMember.raw, listCursor);
-        if (memberStartIndex < 0) {
-          continue;
-        }
-        listLine += countLineBreaks(structuralToken.raw, listCursor, memberStartIndex);
-        markerLines.add(listLine);
-        const memberEndIndex = memberStartIndex + orderedListMember.raw.length;
-        listLine += countLineBreaks(structuralToken.raw, memberStartIndex, memberEndIndex);
-        listCursor = memberEndIndex;
-      }
-    }
-
-    const tokenEndIndex = tokenStartIndex + structuralToken.raw.length;
-    sourceLine += countLineBreaks(markdownText, tokenStartIndex, tokenEndIndex);
-    sourceCursor = tokenEndIndex;
-  }
-
-  return markerLines;
-}
-
-function indentFenceFollowingNumericListHeader(markdownText: string): string {
-  const markdownLines = markdownText.split(NEWLINE);
-  const parsedListMarkerLines = parsedNumericListMarkerLines(markdownText);
-  const indentedLines: string[] = [];
-  const nestedFenceState = new MarkdownCodeRegionState();
-  let awaitedListContinuationIndentation: number | null = null;
-  let nestedFenceIndentation = "";
-  let nestedFenceTargetIndentation = 0;
-  let nestedFenceMaximumSourceIndentation = COMMONMARK_MAX_FENCE_INDENTATION;
-
-  for (let lineIndex = 0; lineIndex < markdownLines.length; lineIndex++) {
-    const markdownLine = markdownLines[lineIndex];
-    if (nestedFenceState.isInsideFence()) {
-      const fenceCandidate = scanFenceWithinListContinuation(
-        markdownLine,
-        nestedFenceMaximumSourceIndentation,
-      );
-      const closesNestedFence =
-        fenceCandidate &&
-        nestedFenceState.wouldCloseFence(
-          markdownLine,
-          fenceCandidate.markerIndex,
-          fenceCandidate.marker,
-        );
-      if (closesNestedFence) {
-        indentedLines.push(
-          `${" ".repeat(nestedFenceTargetIndentation)}${markdownLine.slice(
-            fenceCandidate.markerIndex,
-          )}`,
-        );
-        nestedFenceState.exitFence();
-        nestedFenceIndentation = "";
-        nestedFenceTargetIndentation = 0;
-        nestedFenceMaximumSourceIndentation = COMMONMARK_MAX_FENCE_INDENTATION;
-      } else {
-        indentedLines.push(`${nestedFenceIndentation}${markdownLine}`);
-      }
-      continue;
-    }
-
-    const listContinuationIndentation = numericOrderedListContinuationIndentation(markdownLine);
-    if (listContinuationIndentation !== null) {
-      const nextLine = markdownLines[lineIndex + 1];
-      const nextLineStartsFence =
-        nextLine !== undefined &&
-        scanFenceWithinListContinuation(
-          nextLine,
-          listContinuationIndentation + COMMONMARK_MAX_FENCE_INDENTATION,
-        ) !== null;
-      awaitedListContinuationIndentation =
-        nextLineStartsFence && parsedListMarkerLines.has(lineIndex)
-          ? listContinuationIndentation
-          : null;
-      indentedLines.push(markdownLine);
-      continue;
-    }
-
-    if (awaitedListContinuationIndentation !== null) {
-      const fenceCandidate = scanFenceWithinListContinuation(
-        markdownLine,
-        awaitedListContinuationIndentation + COMMONMARK_MAX_FENCE_INDENTATION,
-      );
-      if (fenceCandidate) {
-        nestedFenceIndentation = " ".repeat(
-          Math.max(0, awaitedListContinuationIndentation - fenceCandidate.markerIndex),
-        );
-        nestedFenceTargetIndentation = awaitedListContinuationIndentation;
-        nestedFenceMaximumSourceIndentation =
-          awaitedListContinuationIndentation +
-          COMMONMARK_MAX_FENCE_INDENTATION -
-          nestedFenceIndentation.length;
-        nestedFenceState.enterFence(fenceCandidate.marker, false);
-        awaitedListContinuationIndentation = null;
-        indentedLines.push(
-          `${" ".repeat(nestedFenceTargetIndentation)}${markdownLine.slice(
-            fenceCandidate.markerIndex,
-          )}`,
-        );
-        continue;
-      }
-      awaitedListContinuationIndentation = null;
-    }
-
-    indentedLines.push(markdownLine);
-  }
-
-  const unfinishedNestedFence = nestedFenceState.openFence();
-  if (unfinishedNestedFence) {
-    indentedLines.push(
-      `${" ".repeat(nestedFenceTargetIndentation)}${unfinishedNestedFence.character.repeat(
-        Math.max(unfinishedNestedFence.length, FENCE_MIN_LENGTH),
-      )}`,
-    );
-  }
-
-  return indentedLines.join(NEWLINE);
-}
-
-function prepareMarkdownForParsing(markdownText: string): string {
-  return normalizeMarkdownForStreaming(indentFenceFollowingNumericListHeader(markdownText));
-}
-
 /** Enrichment close marker. */
 const ENRICHMENT_CLOSE = "}}";
 
@@ -849,7 +606,7 @@ function createEnrichmentExtension(
 
       if (token.resolved !== true) {
         const unresolvedContent = typeof token.content === "string" ? token.content : "";
-        return markdownParser.parse(prepareMarkdownForParsing(unresolvedContent), {
+        return markdownParser.parse(normalizeMarkdownForStreaming(unresolvedContent), {
           async: false,
           gfm: true,
           breaks: false,
@@ -866,7 +623,7 @@ function createEnrichmentExtension(
         return "";
       }
 
-      const normalizedEnrichmentMarkdown = prepareMarkdownForParsing(enrichmentMarkdown);
+      const normalizedEnrichmentMarkdown = normalizeMarkdownForStreaming(enrichmentMarkdown);
 
       // Render inner content as markdown
       // IMPORTANT: Use gfm but disable breaks to prevent fence interference
@@ -916,7 +673,7 @@ export function parseMarkdown(
     return "";
   }
 
-  const normalizedContent = prepareMarkdownForParsing(markdownText);
+  const normalizedContent = normalizeMarkdownForStreaming(markdownText);
 
   if (import.meta.env.DEV && normalizedContent !== markdownText) {
     for (let markerIndex = 0; markerIndex < markdownText.length; markerIndex++) {

@@ -343,185 +343,22 @@ describe("parseMarkdown", () => {
     expect(renderedContainer.textContent).toContain("The result is one.");
   });
 
-  it("preserves fence-like language lines inside fenced code", () => {
-    const markdown = ["```text", "alpha", "```ruby", "beta", "```"].join("\n");
-
-    for (const isStreaming of [false, true]) {
-      const renderedHtml = parseMarkdown(markdown, isStreaming);
-      const renderedContainer = document.createElement("div");
-      renderedContainer.innerHTML = renderedHtml;
-      const codeBlocks = renderedContainer.querySelectorAll("pre > code");
-
-      expect(codeBlocks).toHaveLength(1);
-      expect(codeBlocks[0].className).toBe("language-text");
-      expect(codeBlocks[0].textContent).toContain("alpha\n```ruby\nbeta");
-      expect(renderedContainer.querySelectorAll("p")).toHaveLength(0);
-    }
-  });
-
-  it("keeps fenced template code nested under numeric list items", () => {
-    const numericListMarkers = ["1.", "12.", "100.", "123456789."];
-
-    for (const numericListMarker of numericListMarkers) {
-      const listContinuationIndentation = " ".repeat(numericListMarker.length + 1);
-      for (const sourceIndentation of ["", listContinuationIndentation]) {
-        const markdown = [
-          `${numericListMarker} Template example`,
-          `${sourceIndentation}\`\`\`text`,
-          `${sourceIndentation}{{name}}`,
-          `${sourceIndentation}Goodbye`,
-          `${sourceIndentation}\`\`\``,
-        ].join("\n");
-
-        for (const isStreaming of [false, true]) {
-          const renderedHtml = parseMarkdown(markdown, isStreaming);
-          const renderedContainer = document.createElement("div");
-          renderedContainer.innerHTML = renderedHtml;
-          const listItems = renderedContainer.querySelectorAll("ol > li");
-          const nestedCodeBlocks = listItems[0]?.querySelectorAll("pre > code");
-
-          expect(listItems).toHaveLength(1);
-          expect(nestedCodeBlocks).toHaveLength(1);
-          expect(nestedCodeBlocks?.[0].textContent).toContain("{{name}}\nGoodbye");
-          expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
-        }
-      }
-    }
-  });
-
-  it("keeps fence-like template code nested under numeric list items", () => {
-    const markdown = [
-      "1. Template example",
-      "```text",
-      "{{name}}",
-      "```ruby",
-      "Goodbye",
-      "```",
-    ].join("\n");
-
-    for (const isStreaming of [false, true]) {
-      const renderedHtml = parseMarkdown(markdown, isStreaming);
-      const renderedContainer = document.createElement("div");
-      renderedContainer.innerHTML = renderedHtml;
-      const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
-
-      expect(nestedCodeBlocks).toHaveLength(1);
-      expect(nestedCodeBlocks[0].textContent).toContain("{{name}}\n```ruby\nGoodbye");
-      expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
-    }
-  });
-
-  it("does not reparent fences after numeral-looking paragraph continuations", () => {
-    const markdown = [
-      "Before explanation.",
-      "123456789. This remains paragraph text.",
-      "```java",
-      "int answer = 1;",
-      "```",
-    ].join("\n");
-
-    for (const isStreaming of [false, true]) {
-      const renderedHtml = parseMarkdown(markdown, isStreaming);
-      const renderedContainer = document.createElement("div");
-      renderedContainer.innerHTML = renderedHtml;
-      const topLevelCodeBlocks = renderedContainer.querySelectorAll(":scope > pre > code");
-
-      expect(renderedContainer.querySelectorAll("ol")).toHaveLength(0);
-      expect(renderedContainer.querySelector("p")?.textContent).toContain(
-        "123456789. This remains paragraph text.",
+  it("preserves fence-like language lines after an attached opening", () => {
+    for (const fenceLikeLanguageLine of ["```ruby", "```Java"]) {
+      const markdown = ["Example:```text", "alpha", fenceLikeLanguageLine, "beta", "```"].join(
+        "\n",
       );
-      expect(topLevelCodeBlocks).toHaveLength(1);
-      expect(topLevelCodeBlocks[0].textContent).toContain("int answer = 1;");
-    }
-  });
 
-  it("keeps over-indented close candidates literal in repaired list fences", () => {
-    const markdown = ["1. Template example", "```text", "{{name}}", "    ```"].join("\n");
+      for (const isStreaming of [false, true]) {
+        const renderedHtml = parseMarkdown(markdown, isStreaming);
+        const renderedContainer = document.createElement("div");
+        renderedContainer.innerHTML = renderedHtml;
+        const codeBlocks = renderedContainer.querySelectorAll("pre > code");
 
-    for (const isStreaming of [false, true]) {
-      const renderedHtml = parseMarkdown(markdown, isStreaming);
-      const renderedContainer = document.createElement("div");
-      renderedContainer.innerHTML = renderedHtml;
-      const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
-
-      expect(nestedCodeBlocks).toHaveLength(1);
-      expect(nestedCodeBlocks[0].textContent).toContain("{{name}}\n    ```");
-      expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
-    }
-  });
-
-  it("keeps mixed-indentation list fences in one nested code block", () => {
-    for (const fenceMarker of ["```", "~~~"]) {
-      const sourceIndentations = [
-        { opening: "  ", closing: "     " },
-        { opening: "      ", closing: "   " },
-      ];
-      for (const sourceIndentation of sourceIndentations) {
-        const markdown = [
-          "1. Template example",
-          `${sourceIndentation.opening}${fenceMarker}text`,
-          `${sourceIndentation.opening}{{name}}`,
-          `${sourceIndentation.closing}${fenceMarker}`,
-        ].join("\n");
-
-        for (const isStreaming of [false, true]) {
-          const renderedHtml = parseMarkdown(markdown, isStreaming);
-          const renderedContainer = document.createElement("div");
-          renderedContainer.innerHTML = renderedHtml;
-          const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
-
-          expect(nestedCodeBlocks).toHaveLength(1);
-          expect(nestedCodeBlocks[0].textContent).toContain("{{name}}");
-          expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
-        }
+        expect(codeBlocks).toHaveLength(1);
+        expect(codeBlocks[0].className).toBe("language-text");
+        expect(codeBlocks[0].textContent).toContain(`alpha\n${fenceLikeLanguageLine}\nbeta`);
       }
-    }
-  });
-
-  it("repairs fenced code in consecutive numeric list items", () => {
-    const markdown = [
-      "1. First",
-      "```text",
-      "first",
-      "```",
-      "2. Second",
-      "```text",
-      "second",
-      "```",
-    ].join("\n");
-
-    for (const isStreaming of [false, true]) {
-      const renderedHtml = parseMarkdown(markdown, isStreaming);
-      const renderedContainer = document.createElement("div");
-      renderedContainer.innerHTML = renderedHtml;
-      const listItems = renderedContainer.querySelectorAll("ol > li");
-
-      expect(listItems).toHaveLength(2);
-      expect(listItems[0].querySelector("pre > code")?.textContent).toContain("first");
-      expect(listItems[1].querySelector("pre > code")?.textContent).toContain("second");
-      expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
-    }
-  });
-
-  it("repairs numeric list fences after a nonblank block boundary", () => {
-    const markdown = [
-      "# Template heading",
-      "14. Template example",
-      "```text",
-      "{{name}}",
-      "```",
-    ].join("\n");
-
-    for (const isStreaming of [false, true]) {
-      const renderedHtml = parseMarkdown(markdown, isStreaming);
-      const renderedContainer = document.createElement("div");
-      renderedContainer.innerHTML = renderedHtml;
-      const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
-
-      expect(renderedContainer.querySelector("h1")?.textContent).toBe("Template heading");
-      expect(nestedCodeBlocks).toHaveLength(1);
-      expect(nestedCodeBlocks[0].textContent).toContain("{{name}}");
-      expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
     }
   });
 
