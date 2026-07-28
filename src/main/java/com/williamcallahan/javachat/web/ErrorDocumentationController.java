@@ -13,7 +13,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -29,7 +31,8 @@ public class ErrorDocumentationController {
 
     private static final Logger log = LoggerFactory.getLogger(ErrorDocumentationController.class);
 
-    private static final String BROWSER_ERROR_PAGE = "errors/browser-error.html";
+    private static final String BROWSER_ERROR_PAGE_ROOT = "errors/";
+    private static final String HTML_EXTENSION = ".html";
 
     /**
      * Rejects direct access to the former public error-documentation catalog.
@@ -42,21 +45,42 @@ public class ErrorDocumentationController {
     }
 
     /**
-     * Renders the Java Chat browser error page for an active servlet error dispatch.
+     * Renders a Java Chat browser error page for an active servlet error dispatch.
      *
+     * @param errorType internal status-specific page name
      * @return HTML with the original error status, or 404 for direct catalog access
      */
-    @GetMapping(value = "/browser-error", produces = MediaType.TEXT_HTML_VALUE)
-    public ResponseEntity<String> errorPage(HttpServletRequest request) {
+    @RequestMapping(
+            value = "/{errorType}",
+            method = {
+                RequestMethod.GET,
+                RequestMethod.POST,
+                RequestMethod.PUT,
+                RequestMethod.DELETE,
+                RequestMethod.PATCH,
+                RequestMethod.HEAD,
+                RequestMethod.OPTIONS
+            },
+            produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> errorType(@PathVariable String errorType, HttpServletRequest request) {
         Optional<HttpStatus> errorStatus = resolveErrorStatus(request);
-        if (errorStatus.isEmpty()) {
+        if (errorStatus.isEmpty() || !isSafeErrorType(errorType)) {
             return ResponseEntity.notFound().build();
         }
-        return serveHtmlFile(errorStatus.orElseThrow());
+        return serveHtmlFile(errorType, errorStatus.orElseThrow());
     }
 
-    private ResponseEntity<String> serveHtmlFile(HttpStatus errorStatus) {
-        ClassPathResource errorPageResource = new ClassPathResource(BROWSER_ERROR_PAGE);
+    private boolean isSafeErrorType(String errorType) {
+        return !errorType.isBlank()
+                && errorType
+                        .codePoints()
+                        .allMatch(character ->
+                                Character.isLowerCase(character) || Character.isDigit(character) || character == '-');
+    }
+
+    private ResponseEntity<String> serveHtmlFile(String errorType, HttpStatus errorStatus) {
+        ClassPathResource errorPageResource =
+                new ClassPathResource(BROWSER_ERROR_PAGE_ROOT + errorType + HTML_EXTENSION);
         if (!errorPageResource.exists()) {
             return ResponseEntity.notFound().build();
         }
