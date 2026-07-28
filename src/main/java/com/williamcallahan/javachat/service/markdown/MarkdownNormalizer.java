@@ -26,16 +26,28 @@ final class MarkdownNormalizer {
     private static String normalizeFences(String markdownText) {
         StringBuilder normalizedBuilder = new StringBuilder(markdownText.length() + 64);
         MarkdownBlockContext blockContext = new MarkdownBlockContext();
+        boolean attachedFenceOpen = false;
         int lineStartIndex = 0;
 
         while (lineStartIndex < markdownText.length()) {
             int lineEndIndex = MarkdownBlockContext.lineEndIndex(markdownText, lineStartIndex);
-            MarkdownBlockContext.LineContext lineContext =
-                    blockContext.classifyLine(markdownText, lineStartIndex, lineEndIndex);
-            if (lineContext.isCodeBlock()) {
-                normalizedBuilder.append(markdownText, lineStartIndex, lineEndIndex);
+            boolean startedInsideFence = blockContext.isInsideFencedCodeBlock();
+            if (attachedFenceOpen
+                    && appendAttachedClosingFenceWithProse(
+                            normalizedBuilder, markdownText, lineStartIndex, lineEndIndex, blockContext)) {
+                attachedFenceOpen = false;
             } else {
-                appendTextLine(normalizedBuilder, markdownText, lineStartIndex, lineEndIndex, blockContext);
+                MarkdownBlockContext.LineContext lineContext =
+                        blockContext.classifyLine(markdownText, lineStartIndex, lineEndIndex);
+                if (lineContext.isCodeBlock()) {
+                    normalizedBuilder.append(markdownText, lineStartIndex, lineEndIndex);
+                } else if (appendTextLine(
+                        normalizedBuilder, markdownText, lineStartIndex, lineEndIndex, blockContext)) {
+                    attachedFenceOpen = true;
+                }
+                if (startedInsideFence && !blockContext.isInsideFencedCodeBlock()) {
+                    attachedFenceOpen = false;
+                }
             }
 
             if (lineEndIndex < markdownText.length()) {
@@ -51,7 +63,46 @@ final class MarkdownNormalizer {
         return normalizedBuilder.toString();
     }
 
-    private static void appendTextLine(
+    private static boolean appendAttachedClosingFenceWithProse(
+            StringBuilder normalizedBuilder,
+            String markdownText,
+            int lineStartIndex,
+            int lineEndIndex,
+            MarkdownBlockContext blockContext) {
+        Optional<MarkdownBlockContext.FenceMarker> fenceMarker =
+                MarkdownBlockContext.scanFenceAtBlockIndentation(markdownText, lineStartIndex, lineEndIndex);
+        if (fenceMarker.isEmpty() || !blockContext.matchesCurrentFence(fenceMarker.get())) {
+            return false;
+        }
+        int markerEndIndex = fenceMarker.get().endIndex();
+        if (!hasTrailingProse(markdownText, markerEndIndex, lineEndIndex)) {
+            return false;
+        }
+
+        normalizedBuilder.append(markdownText, lineStartIndex, markerEndIndex);
+        blockContext.classifyLine(markdownText, lineStartIndex, markerEndIndex);
+        appendLineBreakIfNeeded(normalizedBuilder);
+        appendTextLine(normalizedBuilder, markdownText, markerEndIndex, lineEndIndex, blockContext);
+        return true;
+    }
+
+    private static boolean hasTrailingProse(String markdownText, int suffixStartIndex, int lineEndIndex) {
+        int firstVisibleIndex = suffixStartIndex;
+        while (firstVisibleIndex < lineEndIndex && Character.isWhitespace(markdownText.charAt(firstVisibleIndex))) {
+            firstVisibleIndex++;
+        }
+        if (firstVisibleIndex >= lineEndIndex || !Character.isLetterOrDigit(markdownText.charAt(firstVisibleIndex))) {
+            return false;
+        }
+        for (int cursor = firstVisibleIndex + 1; cursor < lineEndIndex; cursor++) {
+            if (Character.isWhitespace(markdownText.charAt(cursor))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean appendTextLine(
             StringBuilder normalizedBuilder,
             String markdownText,
             int lineStartIndex,
@@ -70,7 +121,7 @@ final class MarkdownNormalizer {
                 if (attachedFenceContext.isCodeBlock()) {
                     appendLineBreakIfNeeded(normalizedBuilder);
                     normalizedBuilder.append(markdownText, cursor, lineEndIndex);
-                    return;
+                    return true;
                 }
             }
 
@@ -84,6 +135,7 @@ final class MarkdownNormalizer {
             normalizedBuilder.append(markdownText.charAt(cursor));
             cursor++;
         }
+        return false;
     }
 
     private static String indentBlocksUnderNumericHeaders(String markdownText) {
@@ -105,12 +157,6 @@ final class MarkdownNormalizer {
 
             if (isNumericHeader) {
                 inNumericHeader = true;
-                normalizedBuilder.append(line);
-            } else if (inNumericHeader
-                    && lineContext == MarkdownBlockContext.LineContext.TEXT
-                    && !startedInsideInlineCode
-                    && startsEnrichmentMarker(trimmedLine)) {
-                inNumericHeader = false;
                 normalizedBuilder.append(line);
             } else if (inNumericHeader && (lineContext.isCodeBlock() || shouldIndentContinuationLine(trimmedLine))) {
                 normalizedBuilder
@@ -148,10 +194,6 @@ final class MarkdownNormalizer {
         boolean unorderedMarker =
                 firstCharacter == '-' || firstCharacter == '*' || firstCharacter == '+' || firstCharacter == '•';
         return !unorderedMarker && !OrderedMarkerScanner.startsWithOrderedMarker(trimmedLine);
-    }
-
-    private static boolean startsEnrichmentMarker(String trimmedLine) {
-        return trimmedLine.startsWith("{{");
     }
 
     private static boolean isNumericHeader(String trimmedLine) {

@@ -145,13 +145,36 @@ class MarkdownNormalizerTest {
     }
 
     @Test
-    void preNormalizeForListsAndFences_keepsEnrichmentMarkerOutsideNumericListCodeIndentation() {
-        String markdownWithFollowingEnrichment = String.join(
-                "\n", "1. Learn the language", "", "{{hint:Read the official documentation}}", "", "### Next topic");
+    void preNormalizeForListsAndFences_repairsAttachedClosingFenceWithTrailingProse() {
+        String attachedFences = String.join("\n", "Before```java", "int answer = 42;", "```The result is 42.");
+        String expectedNormalizedMarkdown =
+                String.join("\n", "Before", "```java", "int answer = 42;", "```", "The result is 42.");
 
-        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(markdownWithFollowingEnrichment);
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(attachedFences);
 
-        assertEquals(markdownWithFollowingEnrichment, normalizedMarkdown);
+        assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_preservesFenceLikeCodeAfterAttachedOpeningFence() {
+        String fenceLikeCodeContent =
+                String.join("\n", "Before```text", "literal content", "```ruby", "still literal content", "```");
+        String expectedNormalizedMarkdown =
+                "Before\n" + String.join("\n", "```text", "literal content", "```ruby", "still literal content", "```");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(fenceLikeCodeContent);
+
+        assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_keepsUnknownBraceMarkerInsideNumericList() {
+        String markdownWithTemplate = String.join("\n", "1. Render the value", "{{name}}", "Continue rendering.");
+        String expectedMarkdown = String.join("\n", "1. Render the value", "    {{name}}", "    Continue rendering.");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(markdownWithTemplate);
+
+        assertEquals(expectedMarkdown, normalizedMarkdown);
     }
 
     @Test

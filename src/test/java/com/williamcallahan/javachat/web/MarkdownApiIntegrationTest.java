@@ -35,7 +35,7 @@ class MarkdownApiIntegrationTest {
     ObjectMapper objectMapper;
 
     @Test
-    void closingFenceProseIsOutsideCode_viaApi() throws Exception {
+    void attachedClosingFenceSeparatesProseViaApi() throws Exception {
         String input = "Here's an example:```java\nint x = 10 % 3;\n```The result is 1.";
         String payload = objectMapper.writeValueAsString(MarkdownRenderRequest.create(input));
         String html = mvc.perform(
@@ -52,9 +52,10 @@ class MarkdownApiIntegrationTest {
 
         assertTrue(html.contains("<pre>"));
         int codeClose = html.indexOf("</code></pre>");
-        int theIdx = html.indexOf("The", codeClose + 1);
-        int restIdx = html.indexOf("result is 1.", codeClose + 1);
-        assertTrue(codeClose >= 0 && theIdx > codeClose && restIdx > codeClose, "Prose must be outside the code block");
+        int trailingProse = html.indexOf("The result is 1.", codeClose + 1);
+        assertTrue(
+                codeClose >= 0 && trailingProse > codeClose,
+                "Trailing prose must remain outside the repaired code block");
     }
 
     /**
