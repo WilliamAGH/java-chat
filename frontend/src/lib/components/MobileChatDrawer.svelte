@@ -404,6 +404,9 @@
         position: fixed;
         inset: auto 0 0;
         width: 100%;
+        /* Reset the UA dialog default (calc(100% - 2em - 6px)) so the drawer
+           spans the full viewport width on phones. */
+        max-width: 100%;
         height: 85vh;
         height: 85dvh;
         max-height: 85vh;
