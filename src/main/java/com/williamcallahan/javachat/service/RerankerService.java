@@ -9,23 +9,33 @@ import com.fasterxml.jackson.databind.cfg.CoercionAction;
 import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
 import com.fasterxml.jackson.databind.type.LogicalType;
 import com.williamcallahan.javachat.config.AppProperties;
+import java.io.InterruptedIOException;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
-import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 
 /**
@@ -43,8 +53,14 @@ public class RerankerService {
     /** Maximum character length of document text included in the rerank prompt. */
     private static final int RERANK_PROMPT_TEXT_MAX_LENGTH = 500;
 
+    private static final String RERANKER_CACHE_NAME = "reranker-cache";
+    private static final String OK_HTTP_CALL_TIMEOUT_MESSAGE = "timeout";
+
     private final OpenAIStreamingService openAIStreamingService;
     private final ObjectMapper mapper;
+    private final Cache rerankerCache;
+    private final ConcurrentMap<RerankerCacheKey, CompletableFuture<CachedRerank>> inFlightReranks =
+            new ConcurrentHashMap<>();
     private final Duration rerankerTimeout;
     private final double rerankerTemperature;
     private final int rerankerOutputTokenBudget;
@@ -55,13 +71,20 @@ public class RerankerService {
      * @param openAIStreamingService streaming LLM client
      * @param objectMapper Jackson object mapper
      * @param appProperties application configuration containing reranker request settings
+     * @param cacheManager application cache manager
      */
     public RerankerService(
-            OpenAIStreamingService openAIStreamingService, ObjectMapper objectMapper, AppProperties appProperties) {
+            OpenAIStreamingService openAIStreamingService,
+            ObjectMapper objectMapper,
+            AppProperties appProperties,
+            CacheManager cacheManager) {
         this.openAIStreamingService = Objects.requireNonNull(openAIStreamingService, "openAIStreamingService");
         this.mapper = Objects.requireNonNull(objectMapper, "objectMapper")
                 .copy()
                 .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION.mappedFeature());
+        CacheManager configuredCacheManager = Objects.requireNonNull(cacheManager, "cacheManager");
+        this.rerankerCache =
+                Objects.requireNonNull(configuredCacheManager.getCache(RERANKER_CACHE_NAME), "rerankerCache");
         this.mapper
                 .coercionConfigFor(LogicalType.Integer)
                 .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
@@ -85,40 +108,68 @@ public class RerankerService {
      * @param returnK maximum number of documents to return
      * @return relevant documents ordered most relevant first
      */
-    @Cacheable(
-            value = "reranker-cache",
-            sync = true,
-            key =
-                    "#query + ':' + T(com.williamcallahan.javachat.service.RerankerService).computeDocsHash(#documents) + ':' + #returnK")
     public List<Document> rerank(String query, List<Document> documents, int returnK) {
-        return rerank(query, documents, returnK, rerankerTimeout);
+        return rerank(query, documents, returnK, System.nanoTime() + rerankerTimeout.toNanos());
     }
 
     /**
-     * Reranks candidates within the caller's remaining retrieval-stage budget.
+     * Reranks candidates within the caller's absolute retrieval-stage deadline.
      *
      * @param query retrieval query
      * @param documents candidate documents to order
      * @param returnK maximum number of documents to return
-     * @param remainingStageBudget time remaining in the caller's retrieval stage deadline
+     * @param stageDeadlineNanos absolute {@link System#nanoTime()} deadline owned by the caller
      * @return relevant documents ordered most relevant first
      */
-    @Cacheable(
-            value = "reranker-cache",
-            sync = true,
-            key =
-                    "#query + ':' + T(com.williamcallahan.javachat.service.RerankerService).computeDocsHash(#documents) + ':' + #returnK")
-    public List<Document> rerank(String query, List<Document> documents, int returnK, Duration remainingStageBudget) {
+    public List<Document> rerank(String query, List<Document> documents, int returnK, long stageDeadlineNanos) {
+        requireRemainingStageBudget(stageDeadlineNanos);
         if (documents.size() <= 1) {
             return documents;
         }
 
+        RerankerCacheKey cacheKey = new RerankerCacheKey(query, computeDocsHash(documents), returnK);
+        requireRemainingStageBudget(stageDeadlineNanos);
+        CachedRerank cachedRerank = rerankerCache.get(cacheKey, CachedRerank.class);
+        if (cachedRerank != null) {
+            requireRemainingStageBudget(stageDeadlineNanos);
+            return cachedRerank.documents();
+        }
+
+        CompletableFuture<CachedRerank> ownedRerank = new CompletableFuture<>();
+        CompletableFuture<CachedRerank> existingRerank = inFlightReranks.putIfAbsent(cacheKey, ownedRerank);
+        if (existingRerank != null) {
+            return awaitInFlightRerank(existingRerank, stageDeadlineNanos).documents();
+        }
+
+        try {
+            requireRemainingStageBudget(stageDeadlineNanos);
+            CachedRerank completedDuringAdmission = rerankerCache.get(cacheKey, CachedRerank.class);
+            if (completedDuringAdmission != null) {
+                ownedRerank.complete(completedDuringAdmission);
+                requireRemainingStageBudget(stageDeadlineNanos);
+                return completedDuringAdmission.documents();
+            }
+            CachedRerank completedRerank =
+                    new CachedRerank(rerankUncached(query, documents, returnK, stageDeadlineNanos));
+            rerankerCache.put(cacheKey, completedRerank);
+            ownedRerank.complete(completedRerank);
+            requireRemainingStageBudget(stageDeadlineNanos);
+            return completedRerank.documents();
+        } catch (RuntimeException | Error rerankingFailure) {
+            ownedRerank.completeExceptionally(rerankingFailure);
+            throw rerankingFailure;
+        } finally {
+            inFlightReranks.remove(cacheKey, ownedRerank);
+        }
+    }
+
+    private List<Document> rerankUncached(
+            String query, List<Document> documents, int returnK, long stageDeadlineNanos) {
+        requireRemainingStageBudget(stageDeadlineNanos);
         log.debug("Reranking {} documents", documents.size());
 
-        long promptConstructionStartedNanos = System.nanoTime();
         String prompt = buildRerankPrompt(query, documents);
-        Duration promptConstructionDuration = Duration.ofNanos(System.nanoTime() - promptConstructionStartedNanos);
-        Duration rerankRequestTimeout = tighterRerankTimeout(remainingStageBudget.minus(promptConstructionDuration));
+        Duration rerankRequestTimeout = tighterRerankTimeout(requireRemainingStageBudget(stageDeadlineNanos));
         Optional<String> llmOutputOptional = callLlmForReranking(prompt, rerankRequestTimeout);
         if (llmOutputOptional.isEmpty() || llmOutputOptional.get().isBlank()) {
             throw new RerankingFailureException("Reranking response was empty");
@@ -135,12 +186,55 @@ public class RerankerService {
         return limitDocuments(reordered, returnK);
     }
 
-    private Duration tighterRerankTimeout(Duration remainingStageBudget) {
-        Duration requiredRemainingStageBudget = Objects.requireNonNull(remainingStageBudget, "remainingStageBudget");
-        if (requiredRemainingStageBudget.isZero() || requiredRemainingStageBudget.isNegative()) {
+    private record RerankerCacheKey(String query, String documentsHash, int returnK) {
+        private RerankerCacheKey {
+            query = Objects.requireNonNull(query, "query");
+            documentsHash = Objects.requireNonNull(documentsHash, "documentsHash");
+        }
+    }
+
+    private record CachedRerank(List<Document> documents) {
+        private CachedRerank {
+            documents = List.copyOf(Objects.requireNonNull(documents, "documents"));
+        }
+    }
+
+    private static CachedRerank awaitInFlightRerank(
+            CompletableFuture<CachedRerank> inFlightRerank, long stageDeadlineNanos) {
+        Duration remainingStageBudget = requireRemainingStageBudget(stageDeadlineNanos);
+        try {
+            CachedRerank completedRerank = inFlightRerank.get(remainingStageBudget.toNanos(), TimeUnit.NANOSECONDS);
+            requireRemainingStageBudget(stageDeadlineNanos);
+            return completedRerank;
+        } catch (TimeoutException cacheWaitTimeout) {
+            throw new RerankingFailureException(
+                    "Retrieval stage deadline elapsed while waiting for reranking", cacheWaitTimeout);
+        } catch (InterruptedException interruptedWait) {
+            Thread.currentThread().interrupt();
+            throw new RerankingFailureException("Interrupted while waiting for reranking", interruptedWait);
+        } catch (ExecutionException completedRerankFailure) {
+            Throwable rerankingFailure = completedRerankFailure.getCause();
+            if (rerankingFailure instanceof RerankingFailureException rerankingException) {
+                throw rerankingException;
+            }
+            if (rerankingFailure instanceof Error error) {
+                throw error;
+            }
+            throw new RerankingFailureException("Reranking request failed", rerankingFailure);
+        }
+    }
+
+    private static Duration requireRemainingStageBudget(long stageDeadlineNanos) {
+        long remainingStageNanos = stageDeadlineNanos - System.nanoTime();
+        if (remainingStageNanos <= 0) {
             String failureMessage = "Retrieval stage deadline elapsed before reranking";
             throw new RerankingFailureException(failureMessage, new TimeoutException(failureMessage));
         }
+        return Duration.ofNanos(remainingStageNanos);
+    }
+
+    private Duration tighterRerankTimeout(Duration remainingStageBudget) {
+        Duration requiredRemainingStageBudget = Objects.requireNonNull(remainingStageBudget, "remainingStageBudget");
         return requiredRemainingStageBudget.compareTo(rerankerTimeout) < 0
                 ? requiredRemainingStageBudget
                 : rerankerTimeout;
@@ -159,9 +253,27 @@ public class RerankerService {
                             timeoutOrApiError -> log.debug("Reranker LLM call timed out or failed", timeoutOrApiError))
                     .blockOptional();
         } catch (RuntimeException rerankFailure) {
+            Throwable preservedFailure = preserveProviderTimeout(rerankFailure, rerankRequestTimeout);
             throw new RerankingFailureException(
-                    "Reranking request failed within timeout " + rerankRequestTimeout, rerankFailure);
+                    "Reranking request failed within timeout " + rerankRequestTimeout, preservedFailure);
         }
+    }
+
+    private static Throwable preserveProviderTimeout(RuntimeException providerFailure, Duration requestTimeout) {
+        Set<Throwable> inspectedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable failureInChain = providerFailure;
+        while (failureInChain != null && inspectedFailures.add(failureInChain)) {
+            if (failureInChain instanceof SocketTimeoutException
+                    || (failureInChain.getClass().equals(InterruptedIOException.class)
+                            && OK_HTTP_CALL_TIMEOUT_MESSAGE.equals(failureInChain.getMessage()))) {
+                TimeoutException timeoutFailure =
+                        new TimeoutException("Reranking request exceeded timeout " + requestTimeout);
+                timeoutFailure.initCause(providerFailure);
+                return timeoutFailure;
+            }
+            failureInChain = failureInChain.getCause();
+        }
+        return providerFailure;
     }
 
     /**

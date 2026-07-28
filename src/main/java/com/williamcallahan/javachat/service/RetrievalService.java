@@ -7,7 +7,6 @@ import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.config.RetrievalAugmentationConfig;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.util.QueryVersionExtractor;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -15,6 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -304,10 +304,8 @@ public class RetrievalService {
             progressListener.accept(
                     new RetrievalNotice(RETRIEVAL_RERANK_STATUS_SUMMARY, RETRIEVAL_RERANK_STATUS_DETAILS));
             List<Document> reranked = rerankerService.rerank(
-                    query,
-                    candidateRetrieval.documents(),
-                    returnDocumentLimit,
-                    remainingStageBudget(stageDeadlineNanos));
+                    query, candidateRetrieval.documents(), returnDocumentLimit, stageDeadlineNanos);
+            requireRemainingStageBudget(stageDeadlineNanos);
             promptDocuments = retainRequestedVersionCoverage(
                     reranked, candidateRetrieval.documents(), requestedVersions, returnDocumentLimit);
         }
@@ -536,8 +534,12 @@ public class RetrievalService {
         return System.nanoTime() + RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.toNanos();
     }
 
-    private static Duration remainingStageBudget(long stageDeadlineNanos) {
-        return Duration.ofNanos(Math.max(0L, stageDeadlineNanos - System.nanoTime()));
+    private static void requireRemainingStageBudget(long stageDeadlineNanos) {
+        long remainingStageNanos = stageDeadlineNanos - System.nanoTime();
+        if (remainingStageNanos <= 0) {
+            String failureMessage = "Retrieval stage deadline elapsed while reranking";
+            throw new RerankingFailureException(failureMessage, new TimeoutException(failureMessage));
+        }
     }
 
     private static void appendSearchOutcome(
