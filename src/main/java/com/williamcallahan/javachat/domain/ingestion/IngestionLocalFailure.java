@@ -31,13 +31,8 @@ public record IngestionLocalFailure(String filePath, String phase, String detail
      */
     public boolean allowsFollowingFileAttempt() {
         return switch (phase) {
-            case "filename",
-                    "file-attributes",
-                    "pdf-extraction",
-                    "html-read",
-                    "chunking",
-                    "empty-document",
-                    "content-guard" -> true;
+            case "filename", "file-attributes", "pdf-extraction", "html-read", "empty-document", "content-guard" ->
+                true;
             default -> false;
         };
     }
