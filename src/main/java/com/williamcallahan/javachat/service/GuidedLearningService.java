@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import com.williamcallahan.javachat.config.RetrievalAugmentationConfig;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import com.williamcallahan.javachat.domain.markdown.MarkdownCitation;
 import com.williamcallahan.javachat.domain.prompt.PromptSegmentPriority;
@@ -210,6 +211,30 @@ public class GuidedLearningService {
             String slug,
             String userMessage,
             Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener) {
+        return buildStructuredGuidedPromptWithContext(
+                history,
+                slug,
+                userMessage,
+                retrievalProgressListener,
+                System.nanoTime() + RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.toNanos());
+    }
+
+    /**
+     * Builds the guided prompt within the caller-owned response-preparation deadline.
+     *
+     * @param history conversation history
+     * @param slug lesson slug for context retrieval
+     * @param userMessage user's question
+     * @param retrievalProgressListener receives live user-facing retrieval progress notices
+     * @param stageDeadlineNanos absolute {@link System#nanoTime()} response-preparation deadline
+     * @return guided prompt outcome including structured prompt and context documents
+     */
+    public GuidedChatPromptOutcome buildStructuredGuidedPromptWithContext(
+            List<Message> history,
+            String slug,
+            String userMessage,
+            Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener,
+            long stageDeadlineNanos) {
         GuidedLesson lesson = requireListedLesson(slug);
         String curatedLessonMarkdown = requiredCuratedLessonMarkdown(lesson);
         String query = buildLessonQuery(lesson) + "\n" + userMessage;
@@ -218,7 +243,7 @@ public class GuidedLearningService {
         List<String> requestedVersions = isJavaLesson ? parsedVersions : List.of();
         List<String> effectiveDocSets = effectiveDocSetsFor(lesson, requestedVersions);
         List<Document> lessonContextDocuments =
-                retrieveLessonContext(query, effectiveDocSets, retrievalProgressListener);
+                retrieveLessonContext(query, effectiveDocSets, retrievalProgressListener, stageDeadlineNanos);
 
         String guidance = buildLessonGuidance(lesson, curatedLessonMarkdown, effectiveDocSets, requestedVersions);
         List<Document> curatedLessonContextDocuments = curatedLessonContextDocuments(lesson, curatedLessonMarkdown);
@@ -394,8 +419,23 @@ public class GuidedLearningService {
             String query,
             List<String> effectiveDocSets,
             Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener) {
+        return retrieveLessonContext(
+                query,
+                effectiveDocSets,
+                retrievalProgressListener,
+                System.nanoTime() + RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.toNanos());
+    }
+
+    private List<Document> retrieveLessonContext(
+            String query,
+            List<String> effectiveDocSets,
+            Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener,
+            long stageDeadlineNanos) {
         return retrievalService.retrieve(
-                query, RetrievalConstraint.forOfficialDocSets(effectiveDocSets), retrievalProgressListener);
+                query,
+                RetrievalConstraint.forOfficialDocSets(effectiveDocSets),
+                retrievalProgressListener,
+                stageDeadlineNanos);
     }
 
     private List<String> effectiveDocSetsFor(GuidedLesson lesson, List<String> requestedVersions) {

@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.ModelConfiguration;
+import com.williamcallahan.javachat.config.RetrievalAugmentationConfig;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import com.williamcallahan.javachat.domain.SearchQualityLevel;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
@@ -161,9 +162,30 @@ public class ChatService {
             List<Message> history,
             String latestUserMessage,
             Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener) {
+        return buildStructuredPromptWithContextOutcome(
+                history,
+                latestUserMessage,
+                retrievalProgressListener,
+                System.nanoTime() + RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.toNanos());
+    }
 
-        RetrievalService.RetrievalOutcome retrievalOutcome =
-                retrieveTokenConstrainedOfficialDocumentation(latestUserMessage, retrievalProgressListener);
+    /**
+     * Builds a context-augmented prompt within the caller-owned response-preparation deadline.
+     *
+     * @param history existing chat history
+     * @param latestUserMessage user query
+     * @param retrievalProgressListener receives live user-facing retrieval progress notices
+     * @param stageDeadlineNanos absolute {@link System#nanoTime()} response-preparation deadline
+     * @return structured prompt outcome with segments and retrieval metadata
+     */
+    public StructuredPromptOutcome buildStructuredPromptWithContextOutcome(
+            List<Message> history,
+            String latestUserMessage,
+            Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener,
+            long stageDeadlineNanos) {
+
+        RetrievalService.RetrievalOutcome retrievalOutcome = retrieveTokenConstrainedOfficialDocumentation(
+                latestUserMessage, retrievalProgressListener, stageDeadlineNanos);
         logger.debug(
                 "Using GPT-5.4 retrieval context: {} documents with max {} tokens each",
                 retrievalOutcome.documents().size(),
@@ -216,12 +238,31 @@ public class ChatService {
      */
     public RetrievalService.RetrievalOutcome retrieveTokenConstrainedOfficialDocumentation(
             String query, Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener) {
+        return retrieveTokenConstrainedOfficialDocumentation(
+                query,
+                retrievalProgressListener,
+                System.nanoTime() + RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.toNanos());
+    }
+
+    /**
+     * Retrieves constrained official documentation within the caller-owned deadline.
+     *
+     * @param query learner query
+     * @param retrievalProgressListener receives live user-facing retrieval progress notices
+     * @param stageDeadlineNanos absolute {@link System#nanoTime()} response-preparation deadline
+     * @return constrained official-document retrieval outcome
+     */
+    public RetrievalService.RetrievalOutcome retrieveTokenConstrainedOfficialDocumentation(
+            String query,
+            Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener,
+            long stageDeadlineNanos) {
         return retrievalService.retrieveWithLimitOutcome(
                 query,
                 ModelConfiguration.RAG_LIMIT_CONSTRAINED,
                 ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED,
                 officialDocumentationConstraint(),
-                retrievalProgressListener);
+                retrievalProgressListener,
+                stageDeadlineNanos);
     }
 
     private static RetrievalConstraint officialDocumentationConstraint() {

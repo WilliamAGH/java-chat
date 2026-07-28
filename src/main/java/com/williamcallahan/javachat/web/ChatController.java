@@ -7,6 +7,7 @@ import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.RetrievalAugmentationConfig;
 import com.williamcallahan.javachat.model.ChatTurn;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
@@ -124,6 +125,8 @@ public class ChatController extends BaseController {
             @Valid @RequestBody ChatStreamRequest request, HttpServletResponse response) {
         sseSupport.configureStreamingHeaders(response);
         long requestToken = REQUEST_SEQUENCE.incrementAndGet();
+        long responsePreparationDeadlineNanos =
+                System.nanoTime() + RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.toNanos();
 
         String sessionId = request.resolvedSessionId();
         String latest = request.latest();
@@ -153,12 +156,16 @@ public class ChatController extends BaseController {
 
                     // Build structured prompt for intelligent truncation.
                     ChatService.StructuredPromptOutcome promptOutcome =
-                            chatService.buildStructuredPromptWithContextOutcome(history, latest, retrievalNotice -> {
-                                // A failed emission only means the client went away; progress
-                                // notices are diagnostics and must not fail retrieval.
-                                retrievalProgressEvents.tryEmitNext(
-                                        sseSupport.statusEvent(retrievalNotice.summary(), retrievalNotice.details()));
-                            });
+                            chatService.buildStructuredPromptWithContextOutcome(
+                                    history,
+                                    latest,
+                                    retrievalNotice -> {
+                                        // A failed emission only means the client went away; progress
+                                        // notices are diagnostics and must not fail retrieval.
+                                        retrievalProgressEvents.tryEmitNext(sseSupport.statusEvent(
+                                                retrievalNotice.summary(), retrievalNotice.details()));
+                                    },
+                                    responsePreparationDeadlineNanos);
 
                     // Use OpenAI streaming only (legacy fallback removed)
                     StringBuilder fullResponse = new StringBuilder();
@@ -212,7 +219,7 @@ public class ChatController extends BaseController {
                 })
                 .subscribeOn(Schedulers.boundedElastic());
         Flux<ServerSentEvent<String>> deadlineBoundOperationEvents =
-                sseSupport.enforceResponsePreparationDeadline(operationEvents);
+                sseSupport.enforceResponsePreparationDeadline(operationEvents, responsePreparationDeadlineNanos);
         Flux<ServerSentEvent<String>> operationEventsWithProgress = Flux.merge(
                 retrievalProgressEvents.asFlux(),
                 deadlineBoundOperationEvents.doFinally(terminationSignal -> retrievalProgressEvents.tryEmitComplete()));
