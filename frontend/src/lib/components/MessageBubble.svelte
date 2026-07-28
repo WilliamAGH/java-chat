@@ -168,6 +168,9 @@
     position: relative;
     overflow: visible;
     max-width: 85%;
+    /* Allow the flex row to shrink the bubble below its content's min-content
+       width so the in-flow copy action never overflows narrow chat panels. */
+    min-width: 0;
     padding: var(--space-4);
     border-radius: var(--radius-xl);
     transition: background-color var(--duration-fast) var(--ease-out);
