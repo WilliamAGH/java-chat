@@ -127,11 +127,7 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
     }
 
     cancelStatusTimer();
-    statusClearTimer = setTimeout(() => {
-      statusMessage = "";
-      statusDetails = "";
-      statusClearTimer = null;
-    }, statusClearDelayMs);
+    statusClearTimer = setTimeout(clearStatusNow, statusClearDelayMs);
   }
 
   function isCitationPartialFailureStatus(
