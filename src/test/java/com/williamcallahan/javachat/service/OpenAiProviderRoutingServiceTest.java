@@ -80,10 +80,10 @@ class OpenAiProviderRoutingServiceTest {
     }
 
     @Test
-    void shouldBackoffConfiguredProviderTreatsWrappedOkHttpCallTimeoutAsBackoffEligible() {
+    void shouldBackoffConfiguredProviderIgnoresWrappedOkHttpCallTimeout() {
         OpenAiProviderRoutingService routingService = createRoutingService();
 
-        assertTrue(routingService.shouldBackoffConfiguredProvider(wrappedOkHttpCallTimeout()));
+        assertFalse(routingService.shouldBackoffConfiguredProvider(wrappedOkHttpCallTimeout()));
     }
 
     @Test
@@ -105,6 +105,22 @@ class OpenAiProviderRoutingServiceTest {
         OpenAIClient openAiClient = mock(OpenAIClient.class);
 
         routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, wrappedCallerInterruption());
+
+        OpenAiProviderCandidate configuredProvider =
+                routingService.admitConfiguredProviderRequest(openAiClient).orElseThrow();
+        assertEquals(RateLimitService.ApiProvider.OPENAI, configuredProvider.provider());
+    }
+
+    @Test
+    void okHttpCallTimeoutKeepsConfiguredProviderEligible() {
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
+                .thenReturn(true);
+        OpenAiProviderRoutingService routingService =
+                new OpenAiProviderRoutingService(rateLimitService, configuredAppProperties());
+        OpenAIClient openAiClient = mock(OpenAIClient.class);
+
+        routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, wrappedOkHttpCallTimeout());
 
         OpenAiProviderCandidate configuredProvider =
                 routingService.admitConfiguredProviderRequest(openAiClient).orElseThrow();

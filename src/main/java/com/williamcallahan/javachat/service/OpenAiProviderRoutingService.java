@@ -42,8 +42,9 @@ public final class OpenAiProviderRoutingService {
     /**
      * Identifies the whole-call timeout message emitted by OkHttp 4.12 {@code RealCall.timeoutExit}.
      *
-     * <p>OpenAI Java 4.16 wraps the corresponding {@link InterruptedIOException} in an
-     * {@link OpenAIIoException}, which is a provider failure rather than caller cancellation.</p>
+     * <p>OpenAI Java 4.43.0 wraps the corresponding {@link InterruptedIOException} in an
+     * {@link OpenAIIoException}. The timeout belongs to the caller-owned request budget, so it
+     * remains a request-local retryable failure without disabling the provider for other requests.</p>
      */
     private static final String OK_HTTP_CALL_TIMEOUT_MESSAGE = "timeout";
 
@@ -214,7 +215,9 @@ public final class OpenAiProviderRoutingService {
     }
 
     boolean shouldBackoffConfiguredProvider(Throwable throwable) {
-        if (isCallerCancellation(throwable) || containsPermanentProviderFailure(throwable)) {
+        if (isCallerCancellation(throwable)
+                || containsOkHttpCallTimeout(throwable)
+                || containsPermanentProviderFailure(throwable)) {
             return false;
         }
         return throwable instanceof OpenAIIoException
@@ -250,6 +253,19 @@ public final class OpenAiProviderRoutingService {
 
     private static boolean isPermanentProviderStatusCode(int statusCode) {
         return statusCode == HTTP_UNAUTHORIZED || statusCode == HTTP_FORBIDDEN || statusCode == HTTP_NOT_FOUND;
+    }
+
+    private boolean containsOkHttpCallTimeout(Throwable throwable) {
+        Set<Throwable> visitedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable timeoutCandidate = throwable;
+        while (timeoutCandidate != null && visitedFailures.add(timeoutCandidate)) {
+            if (timeoutCandidate instanceof InterruptedIOException interruptedIoException
+                    && isOkHttpCallTimeout(interruptedIoException)) {
+                return true;
+            }
+            timeoutCandidate = timeoutCandidate.getCause();
+        }
+        return false;
     }
 
     private boolean isServerError(Throwable throwable) {
