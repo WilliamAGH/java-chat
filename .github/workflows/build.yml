@@ -243,6 +243,7 @@ jobs:
           if docker run --name java-chat-ci-runtime-name-conflict \
             --network java-chat-ci_default \
             --env OPENAI_API_KEY=ci-smoke-token \
+            --env OPENAI_BASE_URL=https://api.llm-gateway.iocloudhost.net/v1 \
             --env APP_LOCAL_EMBEDDING_ENABLED=true \
             --env SPRING_PROFILES_ACTIVE=ci \
             --env SPRING_APPLICATION_NAME="$conflicting_runtime_name" \
