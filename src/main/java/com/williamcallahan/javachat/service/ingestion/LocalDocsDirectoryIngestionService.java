@@ -91,8 +91,8 @@ public final class LocalDocsDirectoryIngestionService implements LocalDocumentat
             ingestionRunStore.write(realSelectedRoot, backlogStatus, eligibleFileInventory.inventoryFingerprint());
             int selectedFileIndex = firstSelectedFileIndex;
             int selectedFileEndIndex = firstSelectedFileIndex + selectedFileCount;
-            boolean failed = false;
-            while (selectedFileIndex < selectedFileEndIndex && !failed) {
+            boolean runStopped = false;
+            while (selectedFileIndex < selectedFileEndIndex && !runStopped) {
                 int batchEndIndex = Math.min(selectedFileIndex + LOCAL_INGESTION_FILE_BATCH_SIZE, selectedFileEndIndex);
                 List<Path> fileBatch = List.copyOf(eligibleFiles.subList(selectedFileIndex, batchEndIndex));
                 backlogStatus = backlogStatus.startBatch(fileBatch.size());
@@ -101,6 +101,7 @@ public final class LocalDocsDirectoryIngestionService implements LocalDocumentat
                 int batchProcessedCount = 0;
                 int batchSkippedCount = 0;
                 int batchFailedCount = 0;
+                boolean batchStoppedRun = false;
                 for (LocalDocsFileOutcome fileOutcome : fileProcessor.processBatch(realSelectedRoot, fileBatch)) {
                     if (fileOutcome.processed()) {
                         batchProcessedCount++;
@@ -110,10 +111,15 @@ public final class LocalDocsDirectoryIngestionService implements LocalDocumentat
                         batchSkippedCount++;
                     }
                     fileOutcome.failure().ifPresent(failures::add);
+                    batchStoppedRun = batchStoppedRun
+                            || fileOutcome
+                                    .failure()
+                                    .map(ingestionFailure -> !ingestionFailure.allowsFollowingFileAttempt())
+                                    .orElse(false);
                 }
                 backlogStatus = backlogStatus.completeBatch(batchProcessedCount, batchSkippedCount, batchFailedCount);
                 ingestionRunStore.write(realSelectedRoot, backlogStatus, eligibleFileInventory.inventoryFingerprint());
-                failed = batchFailedCount > 0;
+                runStopped = batchStoppedRun;
                 selectedFileIndex = batchEndIndex;
             }
             backlogStatus = backlogStatus.finish();

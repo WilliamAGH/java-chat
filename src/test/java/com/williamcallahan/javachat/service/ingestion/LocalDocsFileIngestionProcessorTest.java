@@ -246,6 +246,40 @@ class LocalDocsFileIngestionProcessorTest {
     }
 
     @Test
+    void shouldStopBeforeLaterFileWhenQuarantineWriteFails(@TempDir Path temporaryDirectory) throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        Path selectedDocumentationRoot =
+                temporaryDirectory.resolve("corpus").resolve(documentationSource.relativeMirrorPath());
+        Files.createDirectories(selectedDocumentationRoot);
+        Path rejectedFile = selectedDocumentationRoot.resolve("rejected.html");
+        Path laterFile = selectedDocumentationRoot.resolve("later.html");
+        Files.writeString(
+                rejectedFile,
+                "<html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1></body></html>",
+                StandardCharsets.UTF_8);
+        Files.writeString(laterFile, javaApiHtml(), StandardCharsets.UTF_8);
+
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        doThrow(new IOException("quarantine storage unavailable"))
+                .when(ingestionFixture.quarantineService)
+                .quarantine(rejectedFile);
+
+        List<LocalDocsFileOutcome> outcomes = ingestionFixture
+                .ingestionProcessor()
+                .processBatch(selectedDocumentationRoot, List.of(rejectedFile, laterFile));
+
+        assertEquals(1, outcomes.size());
+        assertEquals(
+                "quarantine-write", outcomes.getFirst().failure().orElseThrow().phase());
+        verify(ingestionFixture.chunkProcessingService, never())
+                .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
+        verify(ingestionFixture.fileIngestionMarkerStore, never())
+                .markFileIngested(anyString(), any(FileIngestionRecord.class));
+    }
+
+    @Test
     void shouldSendAnchoredJavadocSectionsToChunkingForConfiguredJavaApiFile(@TempDir Path temporaryDirectory)
             throws IOException {
         JavaApiDocumentationSource javaApiDocumentationSource =

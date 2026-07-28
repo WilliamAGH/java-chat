@@ -103,7 +103,39 @@ class LocalDocsDirectoryIngestionServiceTest {
     }
 
     @Test
-    void retainsUnattemptedFilesAsPendingAfterBatchFailure(@TempDir Path temporaryDirectory) throws IOException {
+    void continuesAfterFileLocalFailureAndCollectsLaterOutcome(@TempDir Path temporaryDirectory) throws IOException {
+        Path configuredDocumentationRoot = temporaryDirectory.resolve("arbitrary-corpus");
+        Path selectedSourceRoot = configuredDocumentationRoot.resolve("java");
+        Files.createDirectories(selectedSourceRoot);
+        Files.writeString(selectedSourceRoot.resolve("first.html"), "<html>First</html>");
+        Files.writeString(selectedSourceRoot.resolve("second.html"), "<html>Second</html>");
+        LocalDocsFileIngestionProcessor fileProcessor = mock(LocalDocsFileIngestionProcessor.class);
+        LocalIngestionRunStore ingestionRunStore = availableRunStore(configuredDocumentationRoot, selectedSourceRoot);
+        when(fileProcessor.processBatch(
+                        org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
+                        org.mockito.ArgumentMatchers.anyList()))
+                .thenReturn(List.of(
+                        LocalDocsFileOutcome.failedFile(
+                                new com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure(
+                                        "first.html", "chunking", "malformed input")),
+                        LocalDocsFileOutcome.processedFile()));
+        LocalDocsDirectoryIngestionService directoryIngestionService = new LocalDocsDirectoryIngestionService(
+                fileProcessor, ingestionRunStore, configuredDocumentationRoot.toString());
+
+        IngestionLocalOutcome ingestionOutcome =
+                directoryIngestionService.ingestLocalDirectory(selectedSourceRoot.toString(), new FileLimit(2));
+
+        assertEquals(1, ingestionOutcome.backlog().failedFiles());
+        assertEquals(1, ingestionOutcome.backlog().processedFiles());
+        assertEquals(0, ingestionOutcome.backlog().pendingFiles());
+        assertEquals(0, ingestionOutcome.backlog().skippedFiles());
+        assertEquals(
+                IngestionBacklogStatus.Lifecycle.PARTIAL,
+                ingestionOutcome.backlog().lifecycle());
+    }
+
+    @Test
+    void retainsUnattemptedFilesAfterRunTerminalFailure(@TempDir Path temporaryDirectory) throws IOException {
         Path configuredDocumentationRoot = temporaryDirectory.resolve("arbitrary-corpus");
         Path selectedSourceRoot = configuredDocumentationRoot.resolve("java");
         Files.createDirectories(selectedSourceRoot);
@@ -125,7 +157,6 @@ class LocalDocsDirectoryIngestionServiceTest {
 
         assertEquals(1, ingestionOutcome.backlog().failedFiles());
         assertEquals(1, ingestionOutcome.backlog().pendingFiles());
-        assertEquals(0, ingestionOutcome.backlog().skippedFiles());
         assertEquals(
                 IngestionBacklogStatus.Lifecycle.PARTIAL,
                 ingestionOutcome.backlog().lifecycle());

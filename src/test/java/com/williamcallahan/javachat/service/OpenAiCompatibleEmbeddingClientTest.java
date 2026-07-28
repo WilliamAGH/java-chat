@@ -2,9 +2,11 @@ package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -58,6 +60,52 @@ class OpenAiCompatibleEmbeddingClientTest {
     private static final Duration MINIMUM_EXPECTED_STRICT_LAUNCH_INTERVAL = Duration.ofSeconds(1);
     private static final Duration TEST_SATURATED_LIVE_REQUEST_BUDGET = Duration.ofMillis(250);
     private static final Duration MAXIMUM_EXPECTED_SATURATION_DELAY = Duration.ofSeconds(1);
+
+    @Test
+    void closesBatchClientWhenLiveClientCloseFails() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        IllegalStateException liveCloseFailure = new IllegalStateException("live close failed");
+        doThrow(liveCloseFailure).when(liveClient).close();
+        OpenAiCompatibleEmbeddingClient embeddingClient =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings());
+
+        OpenAiCompatibleEmbeddingClient.EmbeddingClientCloseException thrownFailure = assertThrows(
+                OpenAiCompatibleEmbeddingClient.EmbeddingClientCloseException.class, embeddingClient::close);
+
+        assertSame(liveCloseFailure, thrownFailure.getCause());
+        verify(batchClient).close();
+    }
+
+    @Test
+    void suppressesBatchCloseFailureBehindLiveCloseFailure() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        IllegalStateException liveCloseFailure = new IllegalStateException("live close failed");
+        IllegalStateException batchCloseFailure = new IllegalStateException("batch close failed");
+        doThrow(liveCloseFailure).when(liveClient).close();
+        doThrow(batchCloseFailure).when(batchClient).close();
+        OpenAiCompatibleEmbeddingClient embeddingClient =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings());
+
+        OpenAiCompatibleEmbeddingClient.EmbeddingClientCloseException thrownFailure = assertThrows(
+                OpenAiCompatibleEmbeddingClient.EmbeddingClientCloseException.class, embeddingClient::close);
+
+        assertSame(liveCloseFailure, thrownFailure.getCause());
+        assertEquals(1, liveCloseFailure.getSuppressed().length);
+        assertSame(batchCloseFailure, liveCloseFailure.getSuppressed()[0]);
+    }
+
+    @Test
+    void closesSharedClientOnlyOnce() {
+        OpenAIClient sharedClient = mock(OpenAIClient.class);
+        OpenAiCompatibleEmbeddingClient embeddingClient =
+                OpenAiCompatibleEmbeddingClient.create(sharedClient, gatewaySettings());
+
+        embeddingClient.close();
+
+        verify(sharedClient).close();
+    }
 
     @Test
     void callUsesSdkAndPreservesIndexOrdering() {

@@ -96,7 +96,7 @@ public class LocalDocsFileIngestionProcessor {
      *
      * @param root root ingestion directory
      * @param files ordered files to process
-     * @return ordered outcomes through the first failure
+     * @return ordered outcomes through all file-local failures or the first run-terminal failure
      */
     public List<LocalDocsFileOutcome> processBatch(Path root, List<Path> files) {
         Objects.requireNonNull(root, "root");
@@ -115,7 +115,7 @@ public class LocalDocsFileIngestionProcessor {
                 LocalDocsFileOutcome deferredOutcome =
                         deferredPreparation.transition().get();
                 outcomes.add(deferredOutcome);
-                if (deferredOutcome.failure().isPresent()) {
+                if (stopsRun(deferredOutcome)) {
                     return List.copyOf(outcomes);
                 }
                 continue;
@@ -126,7 +126,7 @@ public class LocalDocsFileIngestionProcessor {
                 }
                 pendingDocumentCount = 0;
                 outcomes.add(terminalPreparation.outcome());
-                if (terminalPreparation.outcome().failure().isPresent()) {
+                if (stopsRun(terminalPreparation.outcome())) {
                     return List.copyOf(outcomes);
                 }
                 continue;
@@ -149,7 +149,7 @@ public class LocalDocsFileIngestionProcessor {
             if (requiresSingleton) {
                 LocalDocsFileOutcome singletonOutcome = processDocuments(processingRequest);
                 outcomes.add(singletonOutcome);
-                if (singletonOutcome.failure().isPresent()) {
+                if (stopsRun(singletonOutcome)) {
                     return List.copyOf(outcomes);
                 }
                 continue;
@@ -159,6 +159,13 @@ public class LocalDocsFileIngestionProcessor {
         }
         flushNewFileBatch(pendingNewFiles, outcomes);
         return List.copyOf(outcomes);
+    }
+
+    private static boolean stopsRun(LocalDocsFileOutcome fileOutcome) {
+        return fileOutcome
+                .failure()
+                .map(ingestionFailure -> !ingestionFailure.allowsFollowingFileAttempt())
+                .orElse(false);
     }
 
     private FilePreparation prepare(Path root, Path file) {
@@ -721,7 +728,8 @@ public class LocalDocsFileIngestionProcessor {
             log.warn(
                     "Failed to quarantine invalid content (exception type: {})",
                     quarantineException.getClass().getSimpleName());
-            return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "content-guard", quarantineException));
+            return LocalDocsFileOutcome.failedFile(
+                    failureFactory.failure(file, "quarantine-write", quarantineException));
         }
     }
 

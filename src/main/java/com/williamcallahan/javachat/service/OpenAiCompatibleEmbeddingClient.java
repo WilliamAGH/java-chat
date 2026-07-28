@@ -588,9 +588,34 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
      */
     @Override
     public void close() {
-        liveEmbeddingClient.close();
+        RuntimeException closeFailure = null;
+        try {
+            liveEmbeddingClient.close();
+        } catch (RuntimeException liveCloseFailure) {
+            closeFailure = liveCloseFailure;
+        }
         if (closeBatchEmbeddingClient) {
-            batchEmbeddingClient.close();
+            try {
+                batchEmbeddingClient.close();
+            } catch (RuntimeException batchCloseFailure) {
+                if (closeFailure == null) {
+                    closeFailure = batchCloseFailure;
+                } else {
+                    closeFailure.addSuppressed(batchCloseFailure);
+                }
+            }
+        }
+        if (closeFailure != null) {
+            throw new EmbeddingClientCloseException(closeFailure);
+        }
+    }
+
+    /**
+     * Reports a failed embedding-client shutdown after every owned client was given a close attempt.
+     */
+    public static final class EmbeddingClientCloseException extends RuntimeException {
+        private EmbeddingClientCloseException(RuntimeException primaryCloseFailure) {
+            super("Failed to close an embedding client", primaryCloseFailure);
         }
     }
 
