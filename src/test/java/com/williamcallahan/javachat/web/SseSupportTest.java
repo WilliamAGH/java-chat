@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -150,10 +151,19 @@ class SseSupportTest {
 
     @Test
     void responsePreparationTimeoutErrorUsesTheStableRetryableContract() throws JsonProcessingException {
-        SseSupport sseSupport = createSseSupport();
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        SseSupport sseSupport = new SseSupport(objectMapper, meterRegistry);
+        Flux<ServerSentEvent<String>> timeoutEvents = sseSupport.responsePreparationTimeoutError();
+        StepVerifier.create(timeoutEvents, 0).thenCancel().verify();
+        assertEquals(
+                0.0,
+                meterRegistry
+                        .get(SseSupport.RETRIEVAL_TIMEOUT_COUNTER_NAME)
+                        .counter()
+                        .count());
 
-        ServerSentEvent<String> timeoutEvent = Objects.requireNonNull(
-                sseSupport.responsePreparationTimeoutError().blockFirst(), "response preparation timeout event");
+        ServerSentEvent<String> timeoutEvent =
+                Objects.requireNonNull(timeoutEvents.blockFirst(), "response preparation timeout event");
         SseSupport.SseEventPayload timeoutEventPayload = objectMapper.readValue(
                 Objects.requireNonNull(timeoutEvent.data(), "response preparation timeout event data"),
                 SseSupport.SseEventPayload.class);
@@ -162,6 +172,12 @@ class SseSupportTest {
         assertEquals(STATUS_CODE_RETRIEVAL_TIMEOUT, timeoutEventPayload.code());
         assertEquals(STATUS_STAGE_RETRIEVAL, timeoutEventPayload.stage());
         assertEquals(Boolean.TRUE, timeoutEventPayload.retryable());
+        assertEquals(
+                1.0,
+                meterRegistry
+                        .get(SseSupport.RETRIEVAL_TIMEOUT_COUNTER_NAME)
+                        .counter()
+                        .count());
     }
 
     @Test
@@ -201,6 +217,6 @@ class SseSupportTest {
     }
 
     private SseSupport createSseSupport() {
-        return new SseSupport(objectMapper);
+        return new SseSupport(objectMapper, new SimpleMeterRegistry());
     }
 }

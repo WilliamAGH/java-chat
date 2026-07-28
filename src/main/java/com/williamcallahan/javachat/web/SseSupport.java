@@ -6,17 +6,20 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Metrics;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Component;
@@ -72,12 +75,12 @@ public class SseSupport {
     /** Partial citation conversion cannot succeed by retrying the same stream. */
     private static final boolean CITATION_PARTIAL_FAILURE_STATUS_RETRYABLE = false;
 
-    private static final Counter COALESCED_CHUNK_OVERFLOW_COUNTER =
-            Metrics.counter("javachat.sse.backpressure.overflowed_chunks");
-    private static final Counter DROPPED_HEARTBEAT_COUNTER =
-            Metrics.counter("javachat.sse.backpressure.dropped_heartbeats");
+    static final String RETRIEVAL_TIMEOUT_COUNTER_NAME = "javachat.sse.terminal.retrieval.timeouts";
 
     private final ObjectWriter jsonWriter;
+    private final Counter coalescedChunkOverflowCounter;
+    private final Counter droppedHeartbeatCounter;
+    private final Counter retrievalTimeoutCounter;
     private final AtomicLong coalescedChunkOverflowCount = new AtomicLong();
     private final AtomicLong droppedHeartbeatCount = new AtomicLong();
 
@@ -86,8 +89,23 @@ public class SseSupport {
      *
      * @param objectMapper JSON mapper for safe SSE serialization
      */
+    @Autowired
     public SseSupport(ObjectMapper objectMapper) {
-        this.jsonWriter = objectMapper.writer();
+        this(objectMapper, Metrics.globalRegistry);
+    }
+
+    SseSupport(ObjectMapper objectMapper, MeterRegistry meterRegistry) {
+        this.jsonWriter = Objects.requireNonNull(objectMapper, "objectMapper").writer();
+        MeterRegistry requiredMeterRegistry = Objects.requireNonNull(meterRegistry, "meterRegistry");
+        this.coalescedChunkOverflowCounter = Counter.builder("javachat.sse.backpressure.overflowed_chunks")
+                .description("Coalesced SSE text chunks rejected by the downstream buffer")
+                .register(requiredMeterRegistry);
+        this.droppedHeartbeatCounter = Counter.builder("javachat.sse.backpressure.dropped_heartbeats")
+                .description("SSE keepalive heartbeats dropped by downstream backpressure")
+                .register(requiredMeterRegistry);
+        this.retrievalTimeoutCounter = Counter.builder(RETRIEVAL_TIMEOUT_COUNTER_NAME)
+                .description("Retryable retrieval timeout terminal events emitted over SSE")
+                .register(requiredMeterRegistry);
     }
 
     /**
@@ -211,11 +229,12 @@ public class SseSupport {
      */
     public Flux<ServerSentEvent<String>> responsePreparationTimeoutError() {
         return sseError(SseEventPayload.builder("Response preparation timed out")
-                .details("Java documentation retrieval did not complete in time. Please retry.")
-                .code(STATUS_CODE_RETRIEVAL_TIMEOUT)
-                .stage(STATUS_STAGE_RETRIEVAL)
-                .retryable(true)
-                .build());
+                        .details("Java documentation retrieval did not complete in time. Please retry.")
+                        .code(STATUS_CODE_RETRIEVAL_TIMEOUT)
+                        .stage(STATUS_STAGE_RETRIEVAL)
+                        .retryable(true)
+                        .build())
+                .doOnNext(timeoutEvent -> retrievalTimeoutCounter.increment());
     }
 
     /**
@@ -280,7 +299,7 @@ public class SseSupport {
     }
 
     private void recordCoalescedChunkOverflow(String overflowedChunk) {
-        COALESCED_CHUNK_OVERFLOW_COUNTER.increment();
+        coalescedChunkOverflowCounter.increment();
         long totalOverflowedChunks = coalescedChunkOverflowCount.incrementAndGet();
         if (totalOverflowedChunks % STREAM_BACKPRESSURE_DROP_LOG_INTERVAL == 0) {
             log.warn(
@@ -293,7 +312,7 @@ public class SseSupport {
     }
 
     private void recordDroppedHeartbeat() {
-        DROPPED_HEARTBEAT_COUNTER.increment();
+        droppedHeartbeatCounter.increment();
         long totalDroppedHeartbeats = droppedHeartbeatCount.incrementAndGet();
         if (totalDroppedHeartbeats % STREAM_BACKPRESSURE_DROP_LOG_INTERVAL == 0) {
             log.warn("Dropped {} SSE heartbeats due to downstream backpressure", totalDroppedHeartbeats);

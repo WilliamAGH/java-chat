@@ -48,6 +48,7 @@ import com.williamcallahan.javachat.service.RerankingFailureException;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
@@ -93,9 +94,11 @@ class ChatControllerStreamingFailureTest {
     private ExpectedLogEvents pipelineLogEvents;
     private ExpectedLogEvents reactorHookLogEvents;
     private ExpectedLogEvents reactorOperatorLogEvents;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void capturePipelineLogs() {
+        meterRegistry = new SimpleMeterRegistry();
         pipelineLogEvents = ExpectedLogEvents.capture(pipelineLogger);
         reactorHookLogEvents = ExpectedLogEvents.capture(reactorHooksLogger);
         reactorOperatorLogEvents = ExpectedLogEvents.capture(reactorOperatorsLogger);
@@ -265,6 +268,28 @@ class ChatControllerStreamingFailureTest {
         assertEquals(STATUS_STAGE_RETRIEVAL, timeoutError.stage());
         assertFalse(serializedTimeoutError.contains(UPSTREAM_SECRET_MESSAGE));
         verify(streamingService, never()).streamResponse(any(StructuredPrompt.class), anyDouble());
+        List<ILoggingEvent> retrievalTimeoutWarnings = pipelineLogEvents.events().stream()
+                .filter(logEvent -> logEvent.getLevel() == Level.WARN
+                        && "Response preparation timeout".equals(logEvent.getFormattedMessage()))
+                .toList();
+        assertEquals(1, retrievalTimeoutWarnings.size());
+        ILoggingEvent retrievalTimeoutWarning = retrievalTimeoutWarnings.getFirst();
+        assertLogFieldPresent(retrievalTimeoutWarning, "requestToken");
+        assertLogField(retrievalTimeoutWarning, "sessionId", "session?id");
+        assertLogField(retrievalTimeoutWarning, "code", STATUS_CODE_RETRIEVAL_TIMEOUT);
+        assertLogField(retrievalTimeoutWarning, "stage", STATUS_STAGE_RETRIEVAL);
+        assertLogField(
+                retrievalTimeoutWarning,
+                "exceptionType",
+                EmbeddingServiceTemporarilyUnavailableException.class.getSimpleName());
+        assertNull(retrievalTimeoutWarning.getThrowableProxy());
+        assertFalse(retrievalTimeoutWarning.toString().contains(UPSTREAM_SECRET_MESSAGE));
+        assertEquals(
+                1.0,
+                meterRegistry
+                        .get(SseSupport.RETRIEVAL_TIMEOUT_COUNTER_NAME)
+                        .counter()
+                        .count());
         assertEquals(
                 0,
                 pipelineLogEvents.events().stream()
@@ -645,7 +670,7 @@ class ChatControllerStreamingFailureTest {
                 chatMemoryService,
                 streamingService,
                 retrievalService,
-                new SseSupport(objectMapper),
+                createSseSupport(),
                 new ExceptionResponseBuilder(),
                 new AppProperties());
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
@@ -783,8 +808,13 @@ class ChatControllerStreamingFailureTest {
                         structuredField.key.equals(fieldName) && structuredField.value.equals(expectedField)));
     }
 
+    private void assertLogFieldPresent(ILoggingEvent controllerAlert, String fieldName) {
+        assertTrue(controllerAlert.getKeyValuePairs().stream()
+                .anyMatch(structuredField -> structuredField.key.equals(fieldName)));
+    }
+
     private SseSupport createSseSupport() {
-        return new SseSupport(objectMapper);
+        return new SseSupport(objectMapper, meterRegistry);
     }
 }
 

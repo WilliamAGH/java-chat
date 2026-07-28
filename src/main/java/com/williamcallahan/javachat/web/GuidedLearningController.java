@@ -1,5 +1,8 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_RETRIEVAL_TIMEOUT;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
+
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.domain.errors.ApiResponse;
@@ -343,6 +346,20 @@ public class GuidedLearningController extends BaseController {
             return sseSupport.configuredProviderUnavailableError();
         }
         if (terminalFailureContext.isEmpty() && sseSupport.isResponsePreparationTimeout(upstreamError)) {
+            log.atWarn()
+                    .setMessage("Guided response preparation timeout")
+                    .addKeyValue(
+                            "sessionId",
+                            StructuredLogValue.bounded(sessionId, MAX_GUIDED_LOG_FIELD_LENGTH)
+                                    .text())
+                    .addKeyValue(
+                            "lessonSlug",
+                            StructuredLogValue.bounded(lessonSlug, MAX_GUIDED_LOG_FIELD_LENGTH)
+                                    .text())
+                    .addKeyValue("code", STATUS_CODE_RETRIEVAL_TIMEOUT)
+                    .addKeyValue("stage", STATUS_STAGE_RETRIEVAL)
+                    .addKeyValue("exceptionType", upstreamError.getClass().getSimpleName())
+                    .log();
             return sseSupport.responsePreparationTimeoutError();
         }
         if (terminalFailureContext.isEmpty()) {

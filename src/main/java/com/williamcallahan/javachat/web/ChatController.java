@@ -1,5 +1,8 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_RETRIEVAL_TIMEOUT;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
+
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
@@ -212,6 +215,20 @@ public class ChatController extends BaseController {
                         return sseSupport.configuredProviderUnavailableError();
                     }
                     if (terminalFailureContext.isEmpty() && sseSupport.isResponsePreparationTimeout(upstreamError)) {
+                        PIPELINE_LOG
+                                .atWarn()
+                                .setMessage("Response preparation timeout")
+                                .addKeyValue("requestToken", requestToken)
+                                .addKeyValue(
+                                        "sessionId",
+                                        StructuredLogValue.bounded(sessionId, MAX_STREAM_LOG_SESSION_ID_LENGTH)
+                                                .text())
+                                .addKeyValue("code", STATUS_CODE_RETRIEVAL_TIMEOUT)
+                                .addKeyValue("stage", STATUS_STAGE_RETRIEVAL)
+                                .addKeyValue(
+                                        "exceptionType",
+                                        upstreamError.getClass().getSimpleName())
+                                .log();
                         return sseSupport.responsePreparationTimeoutError();
                     }
                     String errorDetail = buildUserFacingErrorMessage(upstreamError);

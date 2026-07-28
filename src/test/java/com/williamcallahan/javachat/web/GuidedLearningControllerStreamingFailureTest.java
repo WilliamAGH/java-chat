@@ -41,6 +41,7 @@ import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -74,10 +75,12 @@ class GuidedLearningControllerStreamingFailureTest {
     private ChatMemoryService chatMemoryService;
     private OpenAIStreamingService streamingService;
     private GuidedLearningController guidedController;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUpController() {
         controllerLogEvents = ExpectedLogEvents.capture(controllerLogger);
+        meterRegistry = new SimpleMeterRegistry();
         guidedLearningService = mock(GuidedLearningService.class);
         chatMemoryService = mock(ChatMemoryService.class);
         streamingService = mock(OpenAIStreamingService.class);
@@ -87,7 +90,7 @@ class GuidedLearningControllerStreamingFailureTest {
                 streamingService,
                 new ExceptionResponseBuilder(),
                 mock(MarkdownService.class),
-                new SseSupport(objectMapper),
+                new SseSupport(objectMapper, meterRegistry),
                 new AppProperties());
         when(guidedLearningService.getLesson(LESSON_SLUG)).thenReturn(Optional.of(listedLesson()));
     }
@@ -263,6 +266,28 @@ class GuidedLearningControllerStreamingFailureTest {
         assertEquals(Boolean.TRUE, timeoutError.retryable());
         assertEquals(STATUS_STAGE_RETRIEVAL, timeoutError.stage());
         assertFalse(serializedTimeoutError.contains(UPSTREAM_SECRET_MESSAGE));
+        List<ILoggingEvent> retrievalTimeoutWarnings = controllerLogEvents.events().stream()
+                .filter(logEvent -> logEvent.getLevel() == Level.WARN
+                        && "Guided response preparation timeout".equals(logEvent.getFormattedMessage()))
+                .toList();
+        assertEquals(1, retrievalTimeoutWarnings.size());
+        ILoggingEvent retrievalTimeoutWarning = retrievalTimeoutWarnings.getFirst();
+        assertLogField(retrievalTimeoutWarning, "sessionId", SESSION_ID);
+        assertLogField(retrievalTimeoutWarning, "lessonSlug", LESSON_SLUG);
+        assertLogField(retrievalTimeoutWarning, "code", STATUS_CODE_RETRIEVAL_TIMEOUT);
+        assertLogField(retrievalTimeoutWarning, "stage", STATUS_STAGE_RETRIEVAL);
+        assertLogField(
+                retrievalTimeoutWarning,
+                "exceptionType",
+                EmbeddingServiceTemporarilyUnavailableException.class.getSimpleName());
+        assertNull(retrievalTimeoutWarning.getThrowableProxy());
+        assertFalse(retrievalTimeoutWarning.toString().contains(UPSTREAM_SECRET_MESSAGE));
+        assertEquals(
+                1.0,
+                meterRegistry
+                        .get(SseSupport.RETRIEVAL_TIMEOUT_COUNTER_NAME)
+                        .counter()
+                        .count());
         assertEquals(0, controllerErrorCount());
         verify(streamingService, never()).streamResponse(any(StructuredPrompt.class), anyDouble());
     }
