@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -117,7 +118,8 @@ class GuidedSseCitationEventTest {
                         Flux.just("Hello"),
                         RateLimitService.ApiProvider.OPENAI,
                         List.of(lessonContextDocument.getId()))));
-        given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString(), any()))
+        given(guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        anyList(), anyString(), anyString(), any(), anyLong()))
                 .willReturn(promptOutcome);
         given(guidedLearningService.citationOutcomeForRetainedContext(
                         eq(promptOutcome), eq(List.of(lessonContextDocument.getId()))))
@@ -165,7 +167,8 @@ class GuidedSseCitationEventTest {
                         Flux.just("Hello"),
                         RateLimitService.ApiProvider.OPENAI,
                         List.of(lessonContextDocument.getId()))));
-        given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString(), any()))
+        given(guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        anyList(), anyString(), anyString(), any(), anyLong()))
                 .willReturn(promptOutcome);
         given(guidedLearningService.citationOutcomeForRetainedContext(
                         eq(promptOutcome), eq(List.of(lessonContextDocument.getId()))))

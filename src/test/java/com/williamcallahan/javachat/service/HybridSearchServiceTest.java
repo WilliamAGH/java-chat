@@ -260,10 +260,7 @@ class HybridSearchServiceTest {
             try {
                 CompletableFuture<HybridSearchService.SearchOutcome> firstSearch = CompletableFuture.supplyAsync(
                         () -> hybridSearchService.searchOutcome(
-                                HYBRID_QUERY,
-                                5,
-                                RetrievalConstraint.none(),
-                                System.nanoTime() + CONCURRENT_FAN_OUT_QUERY_TIMEOUT.toNanos()),
+                                HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()),
                         searchExecutor);
                 assertTrue(firstSearchDispatches.await(1, TimeUnit.SECONDS));
                 appProperties.getQdrant().setQueryTimeout(SATURATED_ADMISSION_TIMEOUT);

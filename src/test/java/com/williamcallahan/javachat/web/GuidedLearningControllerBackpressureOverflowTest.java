@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -99,7 +100,7 @@ class GuidedLearningControllerBackpressureOverflowTest {
         when(guidedLearningService.getLesson(LESSON_SLUG)).thenReturn(Optional.of(listedLesson()));
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(
-                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any()))
+                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         when(guidedLearningService.citationOutcomeForRetainedContext(

@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -107,7 +108,7 @@ class GuidedLearningControllerStreamingFailureTest {
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(
-                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any()))
+                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         when(guidedLearningService.citationOutcomeForRetainedContext(
@@ -148,7 +149,7 @@ class GuidedLearningControllerStreamingFailureTest {
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(
-                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any()))
+                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         when(guidedLearningService.citationOutcomeForRetainedContext(
@@ -245,7 +246,7 @@ class GuidedLearningControllerStreamingFailureTest {
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(
-                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any()))
+                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any(), anyLong()))
                 .thenThrow(embeddingDeadlineFailure);
 
         List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
@@ -304,7 +305,7 @@ class GuidedLearningControllerStreamingFailureTest {
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(
-                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any()))
+                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any(), anyLong()))
                 .thenThrow(new GuidedLearningService.UnsupportedJavaDocumentationReleaseException(
                         "22", List.of("21", "24", "25")));
 
@@ -333,7 +334,7 @@ class GuidedLearningControllerStreamingFailureTest {
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(
-                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any()))
+                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         when(guidedLearningService.citationOutcomeForRetainedContext(
