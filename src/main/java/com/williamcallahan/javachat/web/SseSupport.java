@@ -8,7 +8,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Metrics;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Duration;
 import java.util.Collections;
@@ -20,7 +19,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Component;
@@ -86,16 +84,12 @@ public class SseSupport {
     private final AtomicLong droppedHeartbeatCount = new AtomicLong();
 
     /**
-     * Creates SSE support wired to the application's ObjectMapper.
+     * Creates SSE support wired to the application's JSON and metrics registries.
      *
      * @param objectMapper JSON mapper for safe SSE serialization
+     * @param meterRegistry metrics registry exported by the application
      */
-    @Autowired
-    public SseSupport(ObjectMapper objectMapper) {
-        this(objectMapper, Metrics.globalRegistry);
-    }
-
-    SseSupport(ObjectMapper objectMapper, MeterRegistry meterRegistry) {
+    public SseSupport(ObjectMapper objectMapper, MeterRegistry meterRegistry) {
         this.jsonWriter = Objects.requireNonNull(objectMapper, "objectMapper").writer();
         MeterRegistry requiredMeterRegistry = Objects.requireNonNull(meterRegistry, "meterRegistry");
         this.coalescedChunkOverflowCounter = Counter.builder("javachat.sse.backpressure.overflowed_chunks")

@@ -22,6 +22,7 @@ import jakarta.validation.Valid;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -57,6 +58,7 @@ public class GuidedLearningController extends BaseController {
             "Guided lesson is listed in the TOC but has no packaged markdown";
     private static final String UNKNOWN_LESSON_SLUG_MESSAGE = "Unknown lesson slug: ";
     private static final Logger log = LoggerFactory.getLogger(GuidedLearningController.class);
+    private static final AtomicLong GUIDED_REQUEST_SEQUENCE = new AtomicLong();
 
     /** Timeout for synchronous curated lesson content reads. */
     private static final Duration LESSON_CONTENT_TIMEOUT = Duration.ofSeconds(25);
@@ -254,6 +256,7 @@ public class GuidedLearningController extends BaseController {
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> stream(
             @Valid @RequestBody GuidedStreamRequest request, HttpServletResponse response) {
+        long requestToken = GUIDED_REQUEST_SEQUENCE.incrementAndGet();
         String sessionId = request.resolvedSessionId();
         GuidedLesson listedLesson = requireListedLesson(request.slug());
         String userQuery =
@@ -270,24 +273,26 @@ public class GuidedLearningController extends BaseController {
                 log.warn("Configured provider temporarily unavailable for guided session");
                 return sseSupport.configuredProviderUnavailableError();
             }
-            return streamGuidedResponse(sessionId, userQuery, canonicalLessonSlug);
+            return streamGuidedResponse(requestToken, sessionId, userQuery, canonicalLessonSlug);
         });
         Flux<ServerSentEvent<String>> deadlineBoundOperationEvents =
                 sseSupport.enforceResponsePreparationDeadline(operationEvents);
         return Flux.concat(
                         sseSupport.responsePreparationStatus(), sseSupport.withHeartbeats(deadlineBoundOperationEvents))
-                .onErrorResume(error -> guidedStreamError(error, sessionId, canonicalLessonSlug));
+                .onErrorResume(error -> guidedStreamError(error, requestToken, sessionId, canonicalLessonSlug));
     }
 
     /**
      * Builds and streams the guided lesson response via OpenAI.
      *
+     * @param requestToken request correlation token
      * @param sessionId chat session identifier
      * @param userQuery user's question
      * @param lessonSlug lesson context identifier
      * @return SSE stream of response chunks with heartbeats
      */
-    private Flux<ServerSentEvent<String>> streamGuidedResponse(String sessionId, String userQuery, String lessonSlug) {
+    private Flux<ServerSentEvent<String>> streamGuidedResponse(
+            long requestToken, String sessionId, String userQuery, String lessonSlug) {
         return Flux.defer(() -> {
                     List<org.springframework.ai.chat.messages.Message> history = chatMemory.getHistory(sessionId);
                     StringBuilder fullResponse = new StringBuilder();
@@ -326,10 +331,11 @@ public class GuidedLearningController extends BaseController {
                             .doOnComplete(() -> chatMemory.addExchange(sessionId, userQuery, fullResponse.toString()));
                 })
                 .subscribeOn(Schedulers.boundedElastic())
-                .onErrorResume(error -> guidedStreamError(error, sessionId, lessonSlug));
+                .onErrorResume(error -> guidedStreamError(error, requestToken, sessionId, lessonSlug));
     }
 
-    private Flux<ServerSentEvent<String>> guidedStreamError(Throwable error, String sessionId, String lessonSlug) {
+    private Flux<ServerSentEvent<String>> guidedStreamError(
+            Throwable error, long requestToken, String sessionId, String lessonSlug) {
         Optional<ReportedStreamingFailure> terminalFailureContext = ReportedStreamingFailure.findInCauseChain(error);
         Throwable upstreamError = terminalFailureContext
                 .map(ReportedStreamingFailure::upstreamFailure)
@@ -348,6 +354,7 @@ public class GuidedLearningController extends BaseController {
         if (terminalFailureContext.isEmpty() && sseSupport.isResponsePreparationTimeout(upstreamError)) {
             log.atWarn()
                     .setMessage("Guided response preparation timeout")
+                    .addKeyValue("requestToken", requestToken)
                     .addKeyValue(
                             "sessionId",
                             StructuredLogValue.bounded(sessionId, MAX_GUIDED_LOG_FIELD_LENGTH)

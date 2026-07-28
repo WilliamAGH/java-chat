@@ -272,6 +272,7 @@ class GuidedLearningControllerStreamingFailureTest {
                 .toList();
         assertEquals(1, retrievalTimeoutWarnings.size());
         ILoggingEvent retrievalTimeoutWarning = retrievalTimeoutWarnings.getFirst();
+        assertLogFieldPresent(retrievalTimeoutWarning, "requestToken");
         assertLogField(retrievalTimeoutWarning, "sessionId", SESSION_ID);
         assertLogField(retrievalTimeoutWarning, "lessonSlug", LESSON_SLUG);
         assertLogField(retrievalTimeoutWarning, "code", STATUS_CODE_RETRIEVAL_TIMEOUT);
@@ -392,5 +393,10 @@ class GuidedLearningControllerStreamingFailureTest {
         assertTrue(controllerAlert.getKeyValuePairs().stream()
                 .anyMatch(structuredField ->
                         structuredField.key.equals(fieldName) && structuredField.value.equals(expectedField)));
+    }
+
+    private void assertLogFieldPresent(ILoggingEvent controllerAlert, String fieldName) {
+        assertTrue(controllerAlert.getKeyValuePairs().stream()
+                .anyMatch(structuredField -> structuredField.key.equals(fieldName)));
     }
 }

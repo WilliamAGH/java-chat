@@ -19,6 +19,8 @@ import com.williamcallahan.javachat.service.EmbeddingModelKeepAlive;
 import com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException;
 import com.williamcallahan.javachat.service.ExternalServiceHealth;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
+import com.williamcallahan.javachat.web.SseSupport;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.qdrant.client.QdrantClient;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterAll;
@@ -56,6 +58,8 @@ import org.springframework.test.web.servlet.MockMvc;
 class JavaChatApplicationTests {
 
     private static final String TEST_SOURCE_COMMIT = "java-chat-test-source-commit";
+    private static final String RETRIEVAL_TIMEOUT_METER_NAME = "javachat.sse.terminal.retrieval.timeouts";
+    private static final String RETRIEVAL_TIMEOUT_PROMETHEUS_NAME = "javachat_sse_terminal_retrieval_timeouts_total";
     private static final int UNAVAILABLE_QDRANT_TEST_PORT = 1;
     private static final Logger EXTERNAL_SERVICE_HEALTH_LOGGER =
             (Logger) LoggerFactory.getLogger(ExternalServiceHealth.class);
@@ -83,6 +87,12 @@ class JavaChatApplicationTests {
     @Autowired
     QdrantHealthIndicator qdrantHealthIndicator;
 
+    @Autowired
+    SseSupport sseSupport;
+
+    @Autowired
+    MeterRegistry meterRegistry;
+
     @BeforeEach
     void reportExternalDependenciesUnavailable() {
         doThrow(new EmbeddingServiceUnavailableException("provider unavailable for readiness test"))
@@ -104,6 +114,21 @@ class JavaChatApplicationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.deployment.commit").value(TEST_SOURCE_COMMIT))
                 .andExpect(jsonPath("$.build.commit").isString());
+    }
+
+    @Test
+    void exposesRetrievalTimeoutMetricThroughPrometheus() throws Exception {
+        double initialTimeoutCount =
+                meterRegistry.get(RETRIEVAL_TIMEOUT_METER_NAME).counter().count();
+
+        assertNotNull(sseSupport.responsePreparationTimeoutError().blockFirst());
+
+        assertEquals(
+                initialTimeoutCount + 1,
+                meterRegistry.get(RETRIEVAL_TIMEOUT_METER_NAME).counter().count());
+        mockMvc.perform(get("/actuator/prometheus"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString(RETRIEVAL_TIMEOUT_PROMETHEUS_NAME)));
     }
 
     @Test
