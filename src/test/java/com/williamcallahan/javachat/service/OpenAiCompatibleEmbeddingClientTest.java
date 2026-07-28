@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -346,6 +347,22 @@ class OpenAiCompatibleEmbeddingClientTest {
             assertRemainingTransportBudget(
                     CALLER_OWNED_LIVE_REQUEST_BUDGET,
                     liveRequestOptionsCaptor.getValue().getTimeout().read());
+        }
+    }
+
+    @Test
+    void expiredCallerBudgetFailsAsTimeoutBeforeGatewayDispatch() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+
+        try (OpenAiCompatibleEmbeddingClient clientAdapter =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
+            EmbeddingServiceTemporarilyUnavailableException deadlineFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
+                    () -> clientAdapter.embed(List.of("expired query"), LlmGatewayTier.LIVE, Duration.ZERO));
+
+            assertInstanceOf(TimeoutException.class, deadlineFailure.getCause());
+            verifyNoInteractions(liveClient);
         }
     }
 

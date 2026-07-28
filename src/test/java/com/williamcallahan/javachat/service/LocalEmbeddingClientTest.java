@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -164,10 +166,11 @@ class LocalEmbeddingClientTest {
             LocalEmbeddingClient localEmbeddingClient =
                     new LocalEmbeddingClient(baseUrl, "local-model", 3, 1, new RestTemplateBuilder());
 
-            assertThrows(
+            EmbeddingServiceTemporarilyUnavailableException deadlineFailure = assertThrows(
                     EmbeddingServiceTemporarilyUnavailableException.class,
                     () -> localEmbeddingClient.embed(List.of("expired"), LlmGatewayTier.LIVE, Duration.ZERO));
 
+            assertInstanceOf(TimeoutException.class, deadlineFailure.getCause());
             assertEquals(0, requestCounter.get());
         } finally {
             httpServer.stop(0);
