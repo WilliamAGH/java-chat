@@ -3,6 +3,7 @@
  *
  * Implements an **inverted scroll model** where:
  * - Auto-scroll is NEVER enabled during streaming
+ * - Settled final content is revealed while the user follows the newest message
  * - User scroll position is always respected
  * - Indicator appears when new content streams off-screen
  * - Indicator disappears when user scrolls to ~95% of content
@@ -71,13 +72,22 @@ export interface ScrollAnchorOptions {
 /** Default configuration values. */
 const DEFAULT_NEAR_BOTTOM_THRESHOLD = 0.95;
 const DEFAULT_INDICATOR_DELAY_MS = 150;
+const USER_SCROLL_KEYS = new Set([
+  "ArrowDown",
+  "ArrowUp",
+  "End",
+  "Home",
+  "PageDown",
+  "PageUp",
+  " ",
+]);
 
 /**
  * Creates a reactive scroll indicator for chat containers.
  *
- * Returns an object with reactive state (via Svelte 5 runes) and
- * methods to wire up scroll behavior. Auto-scroll is completely disabled;
- * only the "new content" indicator and manual jump-to-bottom are provided.
+ * Returns an object with reactive state (via Svelte 5 runes) and methods to wire
+ * up scroll behavior. Streaming chunks never auto-scroll; settled final content
+ * is revealed only while the user remains on the newest-message path.
  */
 export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
   const nearBottomThreshold = options.nearBottomThreshold ?? DEFAULT_NEAR_BOTTOM_THRESHOLD;
@@ -90,6 +100,26 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
   // Reactive state (Svelte 5 runes)
   let unseenCount = $state(0);
   let showIndicator = $state(false);
+  let followsNewestContent = true;
+  let userScrollIntent = false;
+
+  function markUserScrollIntent(): void {
+    userScrollIntent = true;
+  }
+
+  function markKeyboardScrollIntent(keyboardEvent: KeyboardEvent): void {
+    if (USER_SCROLL_KEYS.has(keyboardEvent.key)) {
+      markUserScrollIntent();
+    }
+  }
+
+  function detachUserIntentListeners(): void {
+    if (!container) return;
+    container.removeEventListener("wheel", markUserScrollIntent);
+    container.removeEventListener("touchstart", markUserScrollIntent);
+    container.removeEventListener("pointerdown", markUserScrollIntent);
+    container.removeEventListener("keydown", markKeyboardScrollIntent);
+  }
 
   /**
    * Checks if the container is scrolled near the bottom.
@@ -150,7 +180,6 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
     if (!container) return;
 
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
     container.scrollTo({
       top: container.scrollHeight,
       behavior: prefersReducedMotion ? "auto" : "smooth",
@@ -181,7 +210,13 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      * Call this when the container is mounted or changes.
      */
     attach(element: HTMLElement | null): void {
+      detachUserIntentListeners();
       container = element;
+      if (!container) return;
+      container.addEventListener("wheel", markUserScrollIntent, { passive: true });
+      container.addEventListener("touchstart", markUserScrollIntent, { passive: true });
+      container.addEventListener("pointerdown", markUserScrollIntent, { passive: true });
+      container.addEventListener("keydown", markKeyboardScrollIntent);
     },
 
     /**
@@ -189,6 +224,8 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      * Call this when the component unmounts.
      */
     cleanup(): void {
+      detachUserIntentListeners();
+      container = null;
       if (indicatorTimeoutId) {
         clearTimeout(indicatorTimeoutId);
         indicatorTimeoutId = null;
@@ -210,6 +247,8 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
       if (!container) return;
 
       if (isNearBottom()) {
+        followsNewestContent = true;
+        userScrollIntent = false;
         // User reached near-bottom, clear indicator
         unseenCount = 0;
         showIndicator = false;
@@ -218,6 +257,9 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
           clearTimeout(indicatorTimeoutId);
           indicatorTimeoutId = null;
         }
+      } else if (userScrollIntent) {
+        followsNewestContent = false;
+        userScrollIntent = false;
       }
     },
 
@@ -267,8 +309,24 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      * - Simply scrolls once and clears the indicator
      */
     async scrollOnce(): Promise<void> {
+      followsNewestContent = true;
       clearIndicatorStateInternal();
       await performScroll();
+    },
+
+    /**
+     * Reveals settled success or error content unless the user intentionally scrolled away.
+     */
+    async revealFinalContentIfFollowing(): Promise<void> {
+      if (followsNewestContent) {
+        clearIndicatorStateInternal();
+        await performScroll();
+        return;
+      }
+      if (unseenCount === 0) {
+        unseenCount = 1;
+      }
+      updateIndicatorVisibility();
     },
 
     /**
@@ -279,6 +337,7 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      * issues when passed as a callback prop.
      */
     async jumpToBottom(): Promise<void> {
+      followsNewestContent = true;
       clearIndicatorStateInternal();
       await performScroll();
     },
@@ -287,6 +346,8 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      * Resets all state. Use when clearing chat or switching contexts.
      */
     reset(): void {
+      followsNewestContent = true;
+      userScrollIntent = false;
       clearIndicatorStateInternal();
     },
   };
