@@ -170,7 +170,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     private static final class EmbeddingProviderCooldown {
         private long providerCooldownDeadlineNanos;
 
-        private synchronized CompletableFuture<CreateEmbeddingResponse> dispatch(
+        private CompletableFuture<CreateEmbeddingResponse> dispatch(
                 Supplier<CompletableFuture<CreateEmbeddingResponse>> embeddingRequestDispatch) {
             rejectActive();
             return embeddingRequestDispatch.get();
