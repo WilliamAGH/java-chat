@@ -22,7 +22,9 @@ collections and state remain read-only for rollback; never clear or rewrite them
 
 ## Scrape (fetch HTML mirrors)
 
-The scrape phase mirrors upstream documentation into the configured `DOCS_DIR` (default `data/docs/`) using `wget`.
+The scrape phase mirrors upstream documentation into the configured `DOCS_DIR` (default `data/docs/`) using
+`wget`. Java 25 specification validation also requires MuPDF's `mutool`; install both with
+`brew install wget mupdf` on macOS or `apt install wget mupdf-tools` on Ubuntu.
 
 ### Source ownership
 

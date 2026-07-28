@@ -42,7 +42,7 @@ validate_fetch_result() {
 # Requires the single parser that verifies Java 25 specification PDFs are readable.
 require_java25_specification_pdf_parser() {
     if ! command -v mutool >/dev/null 2>&1; then
-        log "${RED}✗ Java 25 specification validation requires mutool. Install with: brew install mupdf${NC}"
+        log "${RED}✗ Java 25 specification validation requires mutool. Install with: brew install mupdf (macOS) or apt install mupdf-tools (Ubuntu)${NC}"
         return 1
     fi
 }

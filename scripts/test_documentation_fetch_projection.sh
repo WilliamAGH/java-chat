@@ -63,7 +63,17 @@ write_java25_specification_byte_gate_stub() {
 write_java25_specification_parser_output() {
     local parsed_title="$1"
     local parsed_edition="$2"
-    printf '%s\n%s\n' "$parsed_title" "$parsed_edition"
+    case "$parsed_title" in
+        "The Java® Language Specification")
+            printf '%s\n' "The Java® Language" "Specification" "$parsed_edition"
+            ;;
+        "The Java® Virtual Machine Specification")
+            printf '%s\n' "The Java® Virtual" "Machine Specification" "$parsed_edition"
+            ;;
+        *)
+            printf '%s\n%s\n' "$parsed_title" "$parsed_edition"
+            ;;
+    esac
 }
 
 set --
@@ -611,7 +621,8 @@ if ! (
 ); then
     fail_documentation_fetch_test "missing mutool did not fail before Java 25 specification downloads"
 fi
-if ! grep -Fq -- "brew install mupdf" "$JAVA25_MISSING_PARSER_LOG"; then
+if ! grep -Fq -- "brew install mupdf" "$JAVA25_MISSING_PARSER_LOG" \
+    || ! grep -Fq -- "apt install mupdf-tools" "$JAVA25_MISSING_PARSER_LOG"; then
     fail_documentation_fetch_test "missing mutool did not report its installation command"
 fi
 
