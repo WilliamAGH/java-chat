@@ -104,8 +104,16 @@ final class MarkdownBlockContext {
             tildeFences = new FenceSequence(indexedTildeFences);
         }
 
+        /** Selects fences whose suffix semantics belong to a caller's Markdown boundary. */
         @FunctionalInterface
         interface FenceQualifier {
+            /**
+             * Indicates whether a parsed fence should participate in lookahead queries.
+             *
+             * @param markdown source Markdown
+             * @param indexedFence parsed fence and line metadata
+             * @return true when the caller recognizes the fence as a structural boundary
+             */
             boolean includes(String markdown, IndexedFence indexedFence);
         }
 
@@ -142,6 +150,7 @@ final class MarkdownBlockContext {
          */
         record IndexedFence(FenceMarker marker, int lineStartIndex, int lineEndIndex, boolean standalone) {}
 
+        /** Stores one fence character's source-ordered markers and range maxima. */
         private static final class FenceSequence {
 
             private final IndexedFence[] indexedFences;
