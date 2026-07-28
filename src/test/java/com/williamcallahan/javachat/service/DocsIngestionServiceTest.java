@@ -162,7 +162,14 @@ class DocsIngestionServiceTest {
                         redirectTargetUrl, "<html><body>Canonical page</body></html>"));
         when(htmlContentExtractor.extractCleanContent(any())).thenReturn("");
         when(chunkProcessingService.processAndStoreChunks(any(), any(), any(), any()))
-                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
+                .thenAnswer(invocation -> redirectTargetUrl.equals(invocation.getArgument(1, String.class))
+                        ? new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of("canonical-hash"), 1, 1)
+                        : new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
+        when(hybridVectorService.hasExactPointIdsForUrl(
+                        QdrantCollectionKind.DOCS,
+                        redirectTargetUrl,
+                        List.of(contentHasher.uuidFromHash("canonical-hash"))))
+                .thenReturn(true);
         DocsIngestionService ingestionService = ingestionServiceFor(rootUrl);
 
         ingestionService.crawlAndIngest(new PageLimit(3), crawlPageFetcher);
@@ -198,7 +205,14 @@ class DocsIngestionServiceTest {
                         redirectTargetUrl, "<html><body>Canonical page</body></html>"));
         when(htmlContentExtractor.extractCleanContent(any())).thenReturn("");
         when(chunkProcessingService.processAndStoreChunks(any(), any(), any(), any()))
-                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
+                .thenAnswer(invocation -> redirectTargetUrl.equals(invocation.getArgument(1, String.class))
+                        ? new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of("canonical-hash"), 1, 1)
+                        : new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
+        when(hybridVectorService.hasExactPointIdsForUrl(
+                        QdrantCollectionKind.DOCS,
+                        redirectTargetUrl,
+                        List.of(contentHasher.uuidFromHash("canonical-hash"))))
+                .thenReturn(true);
         DocsIngestionService ingestionService = ingestionServiceFor(rootUrl);
 
         ingestionService.crawlAndIngest(new PageLimit(3), crawlPageFetcher);
@@ -207,6 +221,33 @@ class DocsIngestionServiceTest {
         verify(localStoreService, times(2)).saveHtml(any(), any());
         verify(chunkProcessingService, times(2)).processAndStoreChunks(any(), any(), any(), any());
         verify(hybridVectorService).deleteByUrl(QdrantCollectionKind.DOCS, redirectSourceUrl);
+    }
+
+    @Test
+    void redirectSourceRemainsSearchableWhenCanonicalChunkingFails() throws IOException {
+        String rootUrl = "https://docs.example.com/root/";
+        String redirectSourceUrl = rootUrl + "old-page";
+        String redirectTargetUrl = rootUrl + "new-page";
+        String rootHtml = "<html><body><a href=\"/root/old-page\">Old page</a></body></html>";
+        DocsIngestionService.CrawlPageFetcher crawlPageFetcher = mock(DocsIngestionService.CrawlPageFetcher.class);
+        when(crawlPageFetcher.fetch(rootUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(rootUrl, rootHtml));
+        when(crawlPageFetcher.fetch(redirectSourceUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(
+                        redirectTargetUrl, "<html><body>Canonical page</body></html>"));
+        when(htmlContentExtractor.extractCleanContent(any())).thenReturn("");
+        when(chunkProcessingService.processAndStoreChunks(any(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    if (redirectTargetUrl.equals(invocation.getArgument(1, String.class))) {
+                        throw new IOException("canonical chunking failed");
+                    }
+                    return new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0);
+                });
+        DocsIngestionService ingestionService = ingestionServiceFor(rootUrl);
+
+        assertThrows(IOException.class, () -> ingestionService.crawlAndIngest(new PageLimit(2), crawlPageFetcher));
+
+        verify(hybridVectorService, never()).deleteByUrl(QdrantCollectionKind.DOCS, redirectSourceUrl);
     }
 
     @Test

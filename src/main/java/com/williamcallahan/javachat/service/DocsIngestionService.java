@@ -87,7 +87,8 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
         PageLimit requiredPageLimit = Objects.requireNonNull(pageLimit, "pageLimit");
         CrawlPageFetcher requiredPageFetcher = Objects.requireNonNull(crawlPageFetcher, "crawlPageFetcher");
         Set<String> seenRequestedUrls = new LinkedHashSet<>();
-        Set<String> processedFinalUrls = new LinkedHashSet<>();
+        Set<String> attemptedFinalUrls = new LinkedHashSet<>();
+        Set<String> successfullyProcessedFinalUrls = new LinkedHashSet<>();
         Deque<String> pendingSourceUrls = new ArrayDeque<>();
         pendingSourceUrls.add(crawlBoundary.rootUrl());
         int fetchedPageCount = 0;
@@ -102,10 +103,10 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
             String finalSourceUrl = pageSnapshot.finalUrl();
             crawlBoundary.requireContainsRedirectTarget(finalSourceUrl);
             seenRequestedUrls.add(finalSourceUrl);
-            if (!sourceUrl.equals(finalSourceUrl)) {
-                hybridVectorService.deleteByUrl(QdrantCollectionKind.DOCS, sourceUrl);
-            }
-            if (!processedFinalUrls.add(finalSourceUrl)) {
+            if (!attemptedFinalUrls.add(finalSourceUrl)) {
+                if (successfullyProcessedFinalUrls.contains(finalSourceUrl)) {
+                    deleteRedirectSourceIfNeeded(sourceUrl, finalSourceUrl);
+                }
                 continue;
             }
             Document sourceDocument = pageSnapshot.document();
@@ -123,6 +124,8 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
                 JavaApiPageExtraction javaApiExtraction = htmlExtractor.extractJavaApiPage(sourceDocument);
                 if (javaApiExtraction.excluded()) {
                     hybridVectorService.deleteByUrl(QdrantCollectionKind.DOCS, finalSourceUrl);
+                    successfullyProcessedFinalUrls.add(finalSourceUrl);
+                    deleteRedirectSourceIfNeeded(sourceUrl, finalSourceUrl);
                     INDEXING_LOG.debug("[INDEXING] Skipping class-use Java API page content");
                     continue;
                 }
@@ -142,6 +145,8 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
                                 QdrantCollectionKind.DOCS,
                                 finalSourceUrl,
                                 expectedPointUuids(initialChunkingOutcome.allChunkHashes()))) {
+                    successfullyProcessedFinalUrls.add(finalSourceUrl);
+                    deleteRedirectSourceIfNeeded(sourceUrl, finalSourceUrl);
                     INDEXING_LOG.debug("[INDEXING] Skipping unchanged Java API page with complete vector coverage");
                     continue;
                 }
@@ -156,6 +161,8 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
                 }
                 applyJavaApiDocumentType(replacementDocuments);
                 replaceAndMarkDocuments(finalSourceUrl, replacementDocuments);
+                successfullyProcessedFinalUrls.add(finalSourceUrl);
+                deleteRedirectSourceIfNeeded(sourceUrl, finalSourceUrl);
                 continue;
             }
 
@@ -172,6 +179,8 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
                             QdrantCollectionKind.DOCS,
                             finalSourceUrl,
                             expectedPointUuids(chunkingOutcome.allChunkHashes()))) {
+                successfullyProcessedFinalUrls.add(finalSourceUrl);
+                deleteRedirectSourceIfNeeded(sourceUrl, finalSourceUrl);
                 INDEXING_LOG.debug("[INDEXING] Skipping URL with exact vector identity coverage");
                 continue;
             }
@@ -189,6 +198,14 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
                 replacementDocuments = requireCompleteReplacement(replacementChunkingOutcome);
             }
             replaceAndMarkDocuments(finalSourceUrl, replacementDocuments);
+            successfullyProcessedFinalUrls.add(finalSourceUrl);
+            deleteRedirectSourceIfNeeded(sourceUrl, finalSourceUrl);
+        }
+    }
+
+    private void deleteRedirectSourceIfNeeded(String requestedSourceUrl, String finalSourceUrl) throws IOException {
+        if (!requestedSourceUrl.equals(finalSourceUrl)) {
+            hybridVectorService.deleteByUrl(QdrantCollectionKind.DOCS, requestedSourceUrl);
         }
     }
 
