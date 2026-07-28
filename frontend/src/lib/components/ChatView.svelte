@@ -8,22 +8,18 @@
     import {
         hasVisibleChatMessageText,
         streamChat,
-        type ChatMessage,
-        type Citation,
     } from "../services/chat";
-    import { generateSessionId } from "../utils/session";
+    import { StreamFailureError } from "../services/sse";
     import { createChatMessageId } from "../utils/chatMessageId";
     import { createStreamingState } from "../composables/createStreamingState.svelte";
     import { createScrollAnchor } from "../composables/createScrollAnchor.svelte";
+    import {
+        chatSession,
+        type ChatSessionMessage,
+    } from "../composables/chatSession.svelte";
 
-    /** Extended message type that includes inline citations from the stream. */
-    interface MessageWithCitations extends ChatMessage {
-        /** Citations received inline from the SSE stream (eliminates separate API call). */
-        citations?: Citation[];
-    }
-
-    // View-specific state
-    let messages = $state<MessageWithCitations[]>([]);
+    // Transcript and session id live in the module-level session store so
+    // switching between the Chat and Learn tabs does not discard them.
     let messagesContainer: HTMLElement | null = $state(null);
     let activeStreamingMessageId = $state<string | null>(null);
     let activeChatStreamController: AbortController | null = null;
@@ -62,12 +58,12 @@
         };
     });
 
-    // Session ID for chat continuity
-    const sessionId = generateSessionId("chat");
+    // Session ID for chat continuity (survives view switches via the store)
+    const sessionId = $derived(chatSession.sessionId);
 
     let hasStreamingContent = $derived.by(() => {
         if (!streaming.isStreaming || !activeStreamingMessageId) return false;
-        const activeMessage = messages.find(
+        const activeMessage = chatSession.messages.find(
             (existingMessage) =>
                 existingMessage.messageId === activeStreamingMessageId,
         );
@@ -75,15 +71,15 @@
     });
 
     function findMessageIndex(messageId: string): number {
-        return messages.findIndex(
+        return chatSession.messages.findIndex(
             (existingMessage) => existingMessage.messageId === messageId,
         );
     }
 
     function ensureAssistantMessage(messageId: string): void {
         if (findMessageIndex(messageId) >= 0) return;
-        messages = [
-            ...messages,
+        chatSession.messages = [
+            ...chatSession.messages,
             {
                 messageId,
                 role: "assistant",
@@ -95,18 +91,18 @@
 
     function updateAssistantMessage(
         messageId: string,
-        updater: (message: MessageWithCitations) => MessageWithCitations,
+        updater: (message: ChatSessionMessage) => ChatSessionMessage,
     ): void {
         const targetIndex = findMessageIndex(messageId);
         if (targetIndex < 0) return;
 
-        const existingMessage = messages[targetIndex];
+        const existingMessage = chatSession.messages[targetIndex];
         const updatedMessage = updater(existingMessage);
 
-        messages = [
-            ...messages.slice(0, targetIndex),
+        chatSession.messages = [
+            ...chatSession.messages.slice(0, targetIndex),
             updatedMessage,
-            ...messages.slice(targetIndex + 1),
+            ...chatSession.messages.slice(targetIndex + 1),
         ];
     }
 
@@ -165,37 +161,37 @@
                 error instanceof Error
                     ? error.message
                     : "Sorry, I encountered an error. Please try again.";
+            const errorDetails =
+                error instanceof StreamFailureError
+                    ? error.details
+                    : undefined;
+            const errorRetryable =
+                error instanceof StreamFailureError &&
+                error.retryable === true;
             ensureAssistantMessage(assistantMessageId);
             updateAssistantMessage(assistantMessageId, (existingMessage) =>
                 hasVisibleChatMessageText(existingMessage.messageText)
-                    ? { ...existingMessage, streamErrorMessage: errorMessage }
+                    ? {
+                          ...existingMessage,
+                          streamErrorMessage: errorMessage,
+                          errorDetails,
+                          errorRetryable,
+                      }
                     : {
                           ...existingMessage,
                           messageText: errorMessage,
                           isError: true,
+                          errorDetails,
+                          errorRetryable,
                       },
             );
         }
     }
 
-    async function handleSend(message: string): Promise<void> {
-        if (!message.trim() || streaming.isStreaming) return;
-
-        const userQuery = message.trim();
+    async function streamAssistantResponse(userQuery: string): Promise<void> {
         cancelInFlightChatStream();
         const chatStreamController = new AbortController();
         activeChatStreamController = chatStreamController;
-
-        // Add user message
-        messages = [
-            ...messages,
-            {
-                messageId: createChatMessageId("chat", sessionId),
-                role: "user",
-                messageText: userQuery,
-                timestamp: Date.now(),
-            },
-        ];
 
         try {
             // Scroll once when user sends - no auto-scroll during streaming
@@ -223,10 +219,55 @@
                         streaming.finishStream();
                     }
                     activeStreamingMessageId = null;
-                    // No final scroll - user maintains their position
+                    // Give successful responses and terminal errors the same
+                    // final reveal after their DOM content has settled.
+                    await scrollAnchor.revealFinalContentIfFollowing();
                 }
             }
         }
+    }
+
+    async function handleSend(message: string): Promise<void> {
+        if (!message.trim() || streaming.isStreaming) return;
+
+        const userQuery = message.trim();
+
+        // Add user message
+        chatSession.messages = [
+            ...chatSession.messages,
+            {
+                messageId: createChatMessageId("chat", sessionId),
+                role: "user",
+                messageText: userQuery,
+                timestamp: Date.now(),
+            },
+        ];
+
+        await streamAssistantResponse(userQuery);
+    }
+
+    /**
+     * Re-runs the question that produced a failed assistant message.
+     * The failed bubble is removed and the existing user message is reused,
+     * so the transcript reads as one continuous conversation.
+     */
+    async function handleRetryMessage(
+        failedMessage: ChatSessionMessage,
+    ): Promise<void> {
+        if (streaming.isStreaming) return;
+        const failedIndex = findMessageIndex(failedMessage.messageId);
+        if (failedIndex < 0) return;
+
+        const precedingUserMessage = chatSession.messages
+            .slice(0, failedIndex)
+            .findLast((candidateMessage) => candidateMessage.role === "user");
+        if (!precedingUserMessage) return;
+
+        chatSession.messages = chatSession.messages.filter(
+            (existingMessage) =>
+                existingMessage.messageId !== failedMessage.messageId,
+        );
+        await streamAssistantResponse(precedingUserMessage.messageText);
     }
 
     function handleSuggestionClick(suggestion: string) {
@@ -242,11 +283,11 @@
             onscroll={scrollAnchor.onUserScroll}
         >
             <div class="messages-inner">
-                {#if messages.length === 0 && !streaming.isStreaming}
+                {#if chatSession.messages.length === 0 && !streaming.isStreaming}
                     <WelcomeScreen onSuggestionClick={handleSuggestionClick} />
                 {:else}
                     <StreamingMessagesList
-                        {messages}
+                        messages={chatSession.messages}
                         isStreaming={streaming.isStreaming}
                         statusMessage={streaming.statusMessage}
                         statusDetails={streaming.statusDetails}
@@ -260,12 +301,13 @@
                             isStreaming,
                         })}
                             {@const typedMessage =
-                                message as MessageWithCitations}
+                                message as ChatSessionMessage}
                             <div class="message-with-citations">
                                 <MessageBubble
                                     message={typedMessage}
                                     {index}
                                     {isStreaming}
+                                    onRetry={handleRetryMessage}
                                 />
                                 {#if typedMessage.role === "assistant" && typedMessage.citations && typedMessage.citations.length > 0 && !typedMessage.isError}
                                     <CitationPanel

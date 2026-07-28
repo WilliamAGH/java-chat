@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent } from "@testing-library/svelte";
 import { tick } from "svelte";
 import { createCitationPartialFailureStatusFixture } from "../../test/citationPartialFailureStatus";
+import { resetChatSession } from "../composables/chatSession.svelte";
+import { StreamFailureError } from "../services/sse";
 
 type StreamChatFunction = typeof import("../services/chat").streamChat;
 
@@ -37,10 +39,12 @@ async function sendChatMessage(
 describe("ChatView streaming stability", () => {
   beforeEach(() => {
     streamChatMock.mockReset();
+    resetChatSession();
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("does not submit while an IME composition is active", async () => {
@@ -267,12 +271,29 @@ describe("ChatView streaming stability", () => {
 
   it("renders a visible error bubble when the stream fails before text", async () => {
     streamChatMock.mockRejectedValue(new Error(TERMINAL_STREAM_FAILURE_MESSAGE));
+    const scrollToSpy = vi.spyOn(HTMLElement.prototype, "scrollTo");
 
     const renderedChatView = await renderChatView();
     await sendChatMessage(renderedChatView, "Explain records");
 
     const errorMessage = await renderedChatView.findByText(TERMINAL_STREAM_FAILURE_MESSAGE);
     expect(errorMessage.closest(".message.assistant.error")).not.toBeNull();
+    await vi.waitFor(() => expect(scrollToSpy).toHaveBeenCalledTimes(2));
+  });
+
+  it("gives successful responses the same final reveal as terminal errors", async () => {
+    streamChatMock.mockImplementation(async (_sessionId, _message, onChunk) => {
+      onChunk("Records are transparent carriers for immutable data.");
+    });
+    const scrollToSpy = vi.spyOn(HTMLElement.prototype, "scrollTo");
+
+    const renderedChatView = await renderChatView();
+    await sendChatMessage(renderedChatView, "Explain records");
+
+    expect(
+      await renderedChatView.findByText("Records are transparent carriers for immutable data."),
+    ).toBeTruthy();
+    await vi.waitFor(() => expect(scrollToSpy).toHaveBeenCalledTimes(2));
   });
 
   it("treats invisible streamed characters as an empty failed response", async () => {
@@ -393,5 +414,62 @@ describe("ChatView streaming stability", () => {
 
     expect(renderedChatView.container.querySelector(".message.assistant")).toBeNull();
     expect(renderedChatView.queryByText("Late status")).toBeNull();
+  });
+
+  it("retries a retryable failure without duplicating the user message", async () => {
+    const streamFailure = new StreamFailureError({
+      message: "Response preparation timed out",
+      details: "Java documentation retrieval did not complete in time. Please retry.",
+      code: "retrieval.timeout",
+      retryable: true,
+      stage: "retrieval",
+    });
+    streamChatMock
+      .mockRejectedValueOnce(streamFailure)
+      .mockImplementation(async (_sessionId, _message, onChunk) => {
+        onChunk("Records are transparent carriers for immutable data.");
+      });
+
+    const renderedChatView = await renderChatView();
+    await sendChatMessage(renderedChatView, "Explain records");
+
+    expect(
+      await renderedChatView.findByText(
+        "Java documentation retrieval did not complete in time. Please retry.",
+      ),
+    ).toBeTruthy();
+
+    const retryButton = await renderedChatView.findByRole("button", { name: /^retry$/i });
+    await fireEvent.click(retryButton);
+
+    expect(
+      await renderedChatView.findByText("Records are transparent carriers for immutable data."),
+    ).toBeTruthy();
+    expect(streamChatMock).toHaveBeenCalledTimes(2);
+    expect(streamChatMock.mock.calls[1]?.[1]).toBe("Explain records");
+
+    // The failed bubble is replaced, not appended: one user message, one answer.
+    expect(renderedChatView.container.querySelectorAll(".message.user")).toHaveLength(1);
+    expect(renderedChatView.queryByText("Response preparation timed out")).toBeNull();
+  });
+
+  it("keeps the conversation when the view is unmounted and remounted", async () => {
+    streamChatMock.mockImplementation(async (_sessionId, _message, onChunk) => {
+      onChunk("Records are transparent carriers for immutable data.");
+    });
+
+    const firstMount = await renderChatView();
+    await sendChatMessage(firstMount, "Explain records");
+    expect(
+      await firstMount.findByText("Records are transparent carriers for immutable data."),
+    ).toBeTruthy();
+
+    firstMount.unmount();
+
+    const secondMount = await renderChatView();
+    expect(
+      await secondMount.findByText("Records are transparent carriers for immutable data."),
+    ).toBeTruthy();
+    expect(secondMount.getByText("Explain records")).toBeTruthy();
   });
 });

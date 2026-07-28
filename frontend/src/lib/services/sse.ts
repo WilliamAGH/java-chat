@@ -33,6 +33,27 @@ export interface StreamSseRequestOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Terminal failure thrown when the server emits an SSE error event.
+ * Carries the full validated payload so the UI can render details and
+ * honor the server's retryable flag; a plain Error would drop them.
+ */
+export class StreamFailureError extends Error {
+  readonly details?: string;
+  readonly code?: string;
+  readonly retryable?: boolean;
+  readonly stage?: string;
+
+  constructor(streamError: StreamError) {
+    super(streamError.message);
+    this.name = "StreamFailureError";
+    this.details = streamError.details ?? undefined;
+    this.code = streamError.code ?? undefined;
+    this.retryable = streamError.retryable ?? undefined;
+    this.stage = streamError.stage ?? undefined;
+  }
+}
+
 /** Callbacks for SSE stream processing. */
 export interface SseCallbacks {
   onText: (streamText: string) => void;
@@ -120,9 +141,7 @@ function processEvent(
     }
     const streamError = errorValidation.validated;
     callbacks.onError?.(streamError);
-    const streamFailure: Error & { details?: string } = new Error(streamError.message);
-    streamFailure.details = streamError.details ?? undefined;
-    throw streamFailure;
+    throw new StreamFailureError(streamError);
   }
 
   if (normalizedSseEventType === SSE_EVENT_CITATION) {

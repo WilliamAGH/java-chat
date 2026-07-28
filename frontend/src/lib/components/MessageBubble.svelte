@@ -7,9 +7,11 @@
     message: ChatMessage
     index: number
     isStreaming?: boolean
+    /** Re-runs the question behind a failed, retryable assistant message. */
+    onRetry?: (message: ChatMessage) => void
   }
 
-  let { message, index, isStreaming = false }: Props = $props()
+  let { message, index, isStreaming = false, onRetry }: Props = $props()
 
   /** Visual feedback state for clipboard operations. */
   let copyState = $state<'idle' | 'success' | 'error'>('idle')
@@ -18,6 +20,13 @@
     message.role === 'assistant' &&
       message.isError === true &&
       isRecoverableCsrfErrorMessage(message.messageText)
+  )
+
+  let showRetryButton = $derived(
+    message.role === 'assistant' &&
+      message.errorRetryable === true &&
+      !showCsrfRefreshButton &&
+      onRetry !== undefined
   )
 
   /** Duration to show copy feedback before returning to idle. */
@@ -74,15 +83,23 @@
       {#if message.streamErrorMessage}
         <p class="stream-error" role="alert">{message.streamErrorMessage}</p>
       {/if}
+      {#if message.errorDetails}
+        <p class="error-details">{message.errorDetails}</p>
+      {/if}
       {#if showCsrfRefreshButton}
-        <button type="button" class="csrf-refresh-btn" onclick={reloadCurrentPage}>
+        <button type="button" class="error-recovery-btn" onclick={reloadCurrentPage}>
           Refresh and retry
+        </button>
+      {/if}
+      {#if showRetryButton}
+        <button type="button" class="error-recovery-btn" onclick={() => onRetry?.(message)}>
+          Retry
         </button>
       {/if}
     {/if}
   </div>
 
-  {#if message.role === 'assistant'}
+  {#if message.role === 'assistant' && !message.isError}
     <div class="bubble-actions">
       <button
         type="button"
@@ -180,6 +197,12 @@
     font-size: var(--text-sm);
   }
 
+  .error-details {
+    margin: var(--space-2) 0 0;
+    color: var(--color-text-secondary);
+    font-size: var(--text-sm);
+  }
+
   /* Wrap long unbroken user strings such as URLs. */
   .user-text {
     overflow-wrap: break-word;
@@ -193,7 +216,7 @@
     margin: 0;
   }
 
-  .csrf-refresh-btn {
+  .error-recovery-btn {
     margin-top: var(--space-3);
     display: inline-flex;
     align-items: center;
@@ -209,7 +232,7 @@
     transition: background-color var(--duration-fast) var(--ease-out);
   }
 
-  .csrf-refresh-btn:hover {
+  .error-recovery-btn:hover {
     background: var(--color-bg-hover);
   }
 
