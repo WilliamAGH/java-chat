@@ -12,10 +12,11 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.LongFunction;
 import org.springframework.stereotype.Component;
 
 /**
- * Owns deadline-aware dispatch for Qdrant search operations.
+ * Owns dense-search admission and deadline-aware dispatch for Qdrant search operations.
  */
 @Component
 final class QdrantQueryExecutor {
@@ -25,6 +26,7 @@ final class QdrantQueryExecutor {
     private final QdrantClient qdrantClient;
     private final QdrantSearchRequestFactory queryRequestFactory;
     private final AppProperties appProperties;
+    private final QdrantSearchAdmission searchAdmission = new QdrantSearchAdmission();
 
     QdrantQueryExecutor(
             QdrantClient qdrantClient, QdrantSearchRequestFactory queryRequestFactory, AppProperties appProperties) {
@@ -64,6 +66,14 @@ final class QdrantQueryExecutor {
             String documentationCollectionName, Filter exactCitationFilter, int citationCandidateLimit) {
         return queryRequestFactory.buildExactCitationScroll(
                 documentationCollectionName, exactCitationFilter, citationCandidateLimit);
+    }
+
+    <T> T executeAdmitted(
+            Duration queryTimeout,
+            long stageDeadlineNanos,
+            List<String> collectionNames,
+            LongFunction<T> admittedSearch) {
+        return searchAdmission.execute(queryTimeout, stageDeadlineNanos, collectionNames, admittedSearch);
     }
 
     CompletableFuture<List<ScoredPoint>> queryBeforeDeadline(QueryPoints queryRequest, long queryDeadlineNanos) {
