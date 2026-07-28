@@ -56,8 +56,10 @@ class OpenAiRequestFactoryTest {
         application.setLogStartupInfo(false);
         application.setRegisterShutdownHook(false);
 
-        RuntimeException startupFailure =
-                assertThrows(RuntimeException.class, () -> application.run("--app.llm.reasoning-effort=hgh"));
+        RuntimeException startupFailure = assertThrows(
+                RuntimeException.class,
+                () -> application.run(
+                        "--OPENAI_MODEL=" + ModelConfiguration.DEFAULT_MODEL, "--app.llm.reasoning-effort=hgh"));
 
         IllegalArgumentException configurationFailure = findConfigurationFailure(startupFailure);
         assertTrue(configurationFailure.getMessage().contains("Invalid app.llm.reasoning-effort value 'hgh'"));
@@ -81,7 +83,16 @@ class OpenAiRequestFactoryTest {
                 assertThrows(IllegalArgumentException.class, () -> createRequestFactory("max"));
 
         assertTrue(configurationFailure.getMessage().contains("Invalid app.llm.reasoning-effort value 'max'"));
-        assertTrue(configurationFailure.getMessage().contains("none, minimal, low, medium, high, xhigh"));
+        assertTrue(configurationFailure.getMessage().contains("none, low, medium, high, xhigh"));
+    }
+
+    @Test
+    void sdkWideMinimalReasoningEffortIsRejectedForGpt54() {
+        IllegalArgumentException configurationFailure =
+                assertThrows(IllegalArgumentException.class, () -> createRequestFactory("minimal"));
+
+        assertTrue(configurationFailure.getMessage().contains("Invalid app.llm.reasoning-effort value 'minimal'"));
+        assertTrue(configurationFailure.getMessage().contains("none, low, medium, high, xhigh"));
     }
 
     @Test

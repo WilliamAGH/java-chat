@@ -38,9 +38,8 @@ public final class OpenAiRequestFactory {
     private static final Logger log = LoggerFactory.getLogger(OpenAiRequestFactory.class);
 
     private static final String REASONING_EFFORT_PROPERTY = "app.llm.reasoning-effort";
-    private static final Set<String> SUPPORTED_REASONING_EFFORTS =
-            Set.of("none", "minimal", "low", "medium", "high", "xhigh");
-    private static final String SUPPORTED_REASONING_EFFORT_DESCRIPTION = "none, minimal, low, medium, high, xhigh";
+    private static final Set<String> SUPPORTED_REASONING_EFFORTS = Set.of("none", "low", "medium", "high", "xhigh");
+    private static final String SUPPORTED_REASONING_EFFORT_DESCRIPTION = "none, low, medium, high, xhigh";
 
     private static final int GPT54_INPUT_TOKEN_BUDGET = 100_000;
 
