@@ -303,6 +303,8 @@ class EnrichmentPlaceholderizerTest {
                 Arguments.of("U+2003 EM SPACE", "\u2003"),
                 Arguments.of("U+FEFF ZERO WIDTH NO-BREAK SPACE", "\uFEFF"),
                 Arguments.of("U+200B ZERO WIDTH SPACE", "\u200B"),
+                Arguments.of("U+200C ZERO WIDTH NON-JOINER", "\u200C"),
+                Arguments.of("U+200D ZERO WIDTH JOINER", "\u200D"),
                 Arguments.of("U+2060 WORD JOINER", "\u2060"));
     }
 }

@@ -291,6 +291,25 @@ class GuidedLearningServiceCitationTest {
     }
 
     @Test
+    void unsupportedJavaReleaseFailsBeforeRetrievalOrPromptConstruction() {
+        GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        ChatService chatService = mock(ChatService.class);
+        GuidedLearningService guidedLearningService = guidedLearningService(
+                tocProvider, retrievalService, mock(EnrichmentService.class), chatService, systemPromptConfig());
+
+        GuidedLearningService.UnsupportedJavaDocumentationReleaseException unsupportedReleaseFailure = assertThrows(
+                GuidedLearningService.UnsupportedJavaDocumentationReleaseException.class,
+                () -> guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        List.of(), LESSON_SLUG, "How does this work in Java 22?"));
+
+        assertEquals(
+                "Java 22 is not supported. Supported Java documentation releases: 21, 24, 25.",
+                unsupportedReleaseFailure.getMessage());
+        verifyNoInteractions(retrievalService, chatService);
+    }
+
+    @Test
     void nonJavaLessonKeepsItsOwnScopeForAnOffTopicJavaVersionQuestion() {
         GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
         RetrievalService retrievalService = mock(RetrievalService.class);

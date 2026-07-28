@@ -306,6 +306,23 @@ public class GuidedLearningService {
     }
 
     /**
+     * Signals that a learner requested a Java API release absent from the configured documentation corpus.
+     */
+    public static final class UnsupportedJavaDocumentationReleaseException extends IllegalArgumentException {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        /** Creates an actionable validation failure from the canonical supported-release list. */
+        public UnsupportedJavaDocumentationReleaseException(String requestedRelease, List<String> supportedReleases) {
+            super("Java "
+                    + requestedRelease
+                    + " is not supported. Supported Java documentation releases: "
+                    + String.join(", ", supportedReleases)
+                    + ".");
+        }
+    }
+
+    /**
      * Loads curated lesson markdown from the authoritative classpath lesson package.
      *
      * <p>Curated lessons are stored as {@code .md} files under {@value #CURATED_LESSONS_RESOURCE_DIR}
@@ -364,8 +381,8 @@ public class GuidedLearningService {
                     DocsSourceRegistry.javaApiDocumentationSources().stream()
                             .filter(javaApiSource -> javaApiSource.javaRelease().equals(requestedVersion))
                             .findFirst()
-                            .orElseThrow(() -> new IllegalArgumentException(
-                                    "Unsupported Java documentation release " + requestedVersion));
+                            .orElseThrow(() -> new UnsupportedJavaDocumentationReleaseException(
+                                    requestedVersion, SUPPORTED_JAVA_API_VERSIONS));
             effectiveDocSets.add(requestedSource.relativeMirrorPath());
         }
         return List.copyOf(effectiveDocSets);
