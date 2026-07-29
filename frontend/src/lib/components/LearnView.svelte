@@ -1039,6 +1039,16 @@
         letter-spacing: var(--tracking-tight);
     }
 
+    /* WebKit derives auto optical sizing in points (0.75x px); pin opsz to the
+       px font size so Safari matches Chromium (see Header.svelte .brand-text). */
+    .lesson-content :global(h2) {
+        font-variation-settings: "opsz" 24;
+    }
+
+    .lesson-content :global(h3) {
+        font-variation-settings: "opsz" 19;
+    }
+
     .lesson-content :global(h1:first-child),
     .lesson-content :global(h2:first-child) {
         margin-top: 0;

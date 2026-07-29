@@ -63,20 +63,27 @@
     margin-top: 0;
   }
 
+  /* WebKit derives auto optical sizing in points (0.75x px), so opsz is pinned
+     to each heading's px font size to keep Safari aligned with Chromium
+     (see Header.svelte .brand-text). */
   .assistant-content :global(h2) {
     font-size: var(--text-xl);
+    font-variation-settings: "opsz" 23;
   }
 
   .assistant-content :global(h1) {
     font-size: var(--text-2xl);
+    font-variation-settings: "opsz" 28;
   }
 
   .assistant-content :global(h3) {
     font-size: var(--text-lg);
+    font-variation-settings: "opsz" 19;
   }
 
   .assistant-content :global(h4) {
     font-size: var(--text-base);
+    font-variation-settings: "opsz" 16;
   }
 
   .assistant-content :global(ul),

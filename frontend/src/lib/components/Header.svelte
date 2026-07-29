@@ -95,6 +95,10 @@
     font-family: var(--font-serif);
     font-size: var(--text-lg);
     font-weight: 500;
+    /* WebKit derives auto optical sizing in points (0.75x px), which selects
+       Fraunces' small-text slab-serif J design at display sizes; pin opsz to
+       the px font size so Safari matches Chromium. */
+    font-variation-settings: "opsz" 19;
     letter-spacing: var(--tracking-tight);
   }
 
