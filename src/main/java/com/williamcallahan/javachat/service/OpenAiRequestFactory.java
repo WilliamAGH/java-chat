@@ -42,7 +42,7 @@ public final class OpenAiRequestFactory {
             Set.of("none", "minimal", "low", "medium", "high", "xhigh", "max");
     private static final String SUPPORTED_REASONING_EFFORT_DESCRIPTION = "none, minimal, low, medium, high, xhigh, max";
 
-    private static final int GPT54_INPUT_TOKEN_BUDGET = 100_000;
+    private static final int CHAT_INPUT_TOKEN_BUDGET = 100_000;
 
     /** Truncation notice for requests exceeding the application-owned prompt limit. */
     private static final String TRUNCATION_NOTICE_GENERIC = "[Context truncated due to model input limit]\n\n";
@@ -70,8 +70,8 @@ public final class OpenAiRequestFactory {
             AppProperties appProperties) {
         this.chunker = chunker;
         this.promptTruncator = promptTruncator;
-        this.openaiModel = requireUniversalChatModel(openaiModel);
-        this.promptContentTokenBudget = GPT54_INPUT_TOKEN_BUDGET - chunker.countTokens(TRUNCATION_NOTICE_GENERIC);
+        this.openaiModel = requireGatewayModel(openaiModel);
+        this.promptContentTokenBudget = CHAT_INPUT_TOKEN_BUDGET - chunker.countTokens(TRUNCATION_NOTICE_GENERIC);
         AppProperties.Llm llmConfiguration = appProperties.getLlm();
         this.completionOutputTokenBudget = llmConfiguration.getCompletionOutputTokenBudget();
         this.reasoningEffort = resolveReasoningEffort(llmConfiguration.getReasoningEffort());
@@ -203,7 +203,7 @@ public final class OpenAiRequestFactory {
         ResponseCreateParams.Builder builder = ResponseCreateParams.builder()
                 .inputOfResponse(responseInputItems)
                 .model(ResponsesModel.ofString(normalizedModelId));
-        return configureResponseParams(builder, temperature, normalizedModelId, null, false);
+        return configureResponseParams(builder, temperature, null, false);
     }
 
     private ResponseCreateParams buildResponseParams(
@@ -214,18 +214,14 @@ public final class OpenAiRequestFactory {
             boolean requireJsonObject) {
         ResponseCreateParams.Builder builder =
                 ResponseCreateParams.builder().input(prompt).model(ResponsesModel.ofString(normalizedModelId));
-        return configureResponseParams(builder, temperature, normalizedModelId, maximumOutputTokens, requireJsonObject);
+        return configureResponseParams(builder, temperature, maximumOutputTokens, requireJsonObject);
     }
 
     private ResponseCreateParams configureResponseParams(
             ResponseCreateParams.Builder builder,
             double temperature,
-            String normalizedModelId,
             Integer maximumOutputTokens,
             boolean requireJsonObject) {
-        boolean gpt5Family = ModelConfiguration.isGpt5Family(normalizedModelId);
-        boolean reasoningModel =
-                gpt5Family || canonicalModelName(normalizedModelId).startsWith("o");
         if (requireJsonObject) {
             builder.text(ResponseTextConfig.builder()
                     .format(ResponseFormatJsonObject.builder().build())
@@ -234,18 +230,15 @@ public final class OpenAiRequestFactory {
 
         if (maximumOutputTokens != null) {
             builder.maxOutputTokens(maximumOutputTokens.longValue());
-        } else if (gpt5Family) {
+        } else {
             builder.maxOutputTokens((long) completionOutputTokenBudget);
         }
 
-        if (gpt5Family) {
-            log.debug("Using GPT-5 family configuration for model: {}", normalizedModelId);
-
-            reasoningEffort.ifPresent(effort ->
-                    builder.reasoning(Reasoning.builder().effort(effort).build()));
-        } else if (!reasoningModel && Double.isFinite(temperature)) {
+        if (Double.isFinite(temperature)) {
             builder.temperature(temperature);
         }
+        reasoningEffort.ifPresent(
+                effort -> builder.reasoning(Reasoning.builder().effort(effort).build()));
 
         return builder.build();
     }
@@ -254,24 +247,11 @@ public final class OpenAiRequestFactory {
         return openaiModel;
     }
 
-    private static String requireUniversalChatModel(String configuredModel) {
-        if (!ModelConfiguration.DEFAULT_MODEL.equals(configuredModel)) {
-            throw new IllegalArgumentException(
-                    "OPENAI_MODEL must be " + ModelConfiguration.DEFAULT_MODEL + " for every Java Chat LLM request");
+    private static String requireGatewayModel(String configuredModel) {
+        if (configuredModel == null || configuredModel.isBlank()) {
+            throw new IllegalArgumentException("OPENAI_MODEL must be a non-blank gateway model alias");
         }
-        return configuredModel;
-    }
-
-    private String canonicalModelName(String modelId) {
-        if (modelId == null || modelId.isBlank()) {
-            return "";
-        }
-        String normalizedModelId = AsciiTextNormalizer.toLowerAscii(modelId.trim());
-        int providerSeparatorIndex = normalizedModelId.lastIndexOf('/');
-        if (providerSeparatorIndex < 0 || providerSeparatorIndex + 1 >= normalizedModelId.length()) {
-            return normalizedModelId;
-        }
-        return normalizedModelId.substring(providerSeparatorIndex + 1);
+        return configuredModel.trim();
     }
 
     private static Optional<ReasoningEffort> resolveReasoningEffort(String reasoningEffortSetting) {
