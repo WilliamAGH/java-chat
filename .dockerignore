@@ -3,3 +3,10 @@
 build
 frontend/.svelte-kit
 frontend/node_modules
+
+# Local env files must never enter the build context. COPY frontend/ . would
+# otherwise bake a developer's frontend/.env.local into the image and let Vite
+# read it during the build, so image contents would silently depend on the
+# builder's machine instead of the declared build args.
+**/.env
+**/.env.*
