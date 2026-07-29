@@ -114,8 +114,8 @@
 
   .brand-text {
     /* Times New Roman: Fraunces renders its small-optical-size J design (stub
-       hook) at this size in Safari, and the vendored font's STAT table blocks
-       any CSS correction there. */
+       hook) at this size in Safari, and its STAT table blocks any CSS
+       correction there. */
     font-family: "Times New Roman", Times, serif;
     font-size: var(--text-xl);
     font-weight: 500;

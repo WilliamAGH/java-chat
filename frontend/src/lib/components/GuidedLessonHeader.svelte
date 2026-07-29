@@ -78,9 +78,6 @@
     font-family: var(--font-serif);
     font-size: var(--text-xl);
     font-weight: 500;
-    /* WebKit derives auto optical sizing in points (0.75x px); pin opsz to the
-       px font size so Safari matches Chromium (see Header.svelte .brand-text). */
-    font-variation-settings: "opsz" 23;
     color: var(--color-text-primary);
     letter-spacing: var(--tracking-tight);
     white-space: nowrap;

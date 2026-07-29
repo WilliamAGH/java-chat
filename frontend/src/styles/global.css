@@ -4,17 +4,13 @@
  * Inspired by Linear, Anthropic, Stripe - editorial quality with functional clarity
  */
 
+/* Times New Roman at 107% matches the retired Fraunces display face on
+   rendered size: cap-height ratio 0.7000/0.6621 = 105.7%, x-height ratio
+   0.4820/0.4473 = 107.8% (OS/2 metrics of both fonts). */
 @font-face {
-  font-family: Fraunces;
-  src: url("/fonts/Fraunces-Variable.ttf") format("truetype");
-  font-weight: 100 900;
-  font-display: swap;
-  font-style: normal;
-  /* Force "Clean" axes defaults: no wonky, no soft, text-optimized opsz base */
-  font-variation-settings:
-    "SOFT" 0,
-    "WONK" 0,
-    "opsz" 9;
+  font-family: "Times New Roman Adjusted";
+  src: local("Times New Roman");
+  size-adjust: 107%;
 }
 
 :root {
@@ -58,11 +54,11 @@
   --color-info: #5d8ac4;
 
   /* ═══════════════════════════════════════════════════════════════════════════
-   * TYPOGRAPHY - DM Sans + Fraunces
+   * TYPOGRAPHY - DM Sans + Times New Roman
    * ═══════════════════════════════════════════════════════════════════════════ */
 
   --font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font-serif: "Fraunces", "Georgia", "Times New Roman", serif;
+  --font-serif: "Times New Roman Adjusted", "Times New Roman", Times, serif;
   --font-mono: "DM Mono", "SF Mono", "Fira Code", "Consolas", monospace;
 
   /* Type scale - Minor third (1.2) */
