@@ -5,7 +5,7 @@ CANONICAL_MODEL_PATH = "src/main/java/com/williamcallahan/javachat/config/ModelC
 EXPECTED_CHAT_MODEL = "gpt-5.4"
 SCAN_EXCLUSIONS =
   %r{\A(?:AGENTS\.md\z|CLAUDE\.md\z|src/test/|config/ast-grep(?:-tests)?/|scripts/lint/check-chat-model-ssot\.rb\z)}
-OPENAI_MODEL_ASSIGNMENT = /OPENAI_MODEL\s*[:=]\s*([A-Za-z0-9_.\/-]+)/
+OPENAI_MODEL_ASSIGNMENT = /OPENAI_MODEL\s*(?::|=|"\s*,\s*")\s*([A-Za-z0-9_.\/-]+)/
 GITHUB_MODELS_INFERENCE_MARKER =
   /(?:GITHUB_MODELS_(?:BASE_URL|CHAT_MODEL)|models\.inference\.ai\.azure\.com|GitHub Models)/i
 
@@ -22,6 +22,10 @@ def run_self_test
   unless violations_for_text("OPENAI_MODEL=#{qualified_model}", EXPECTED_CHAT_MODEL) == [qualified_model]
     raise "provider-qualified model accepted"
   end
+  comma_form_stale = 'environment("OPENAI_MODEL", "gpt-5")'
+  raise "comma-form stale model accepted" unless violations_for_text(comma_form_stale, EXPECTED_CHAT_MODEL) == ["gpt-5"]
+  comma_form_canonical = 'environment("OPENAI_MODEL", "gpt-5.4")'
+  raise "comma-form canonical model rejected" unless violations_for_text(comma_form_canonical, EXPECTED_CHAT_MODEL).empty?
   raise "GitHub Models inference marker accepted" unless "GitHub Models".match?(GITHUB_MODELS_INFERENCE_MARKER)
 end
 
