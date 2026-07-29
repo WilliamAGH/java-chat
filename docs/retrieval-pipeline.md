@@ -149,7 +149,7 @@ Both hash and URL dedup use `LinkedHashMap.putIfAbsent` to preserve reranker ord
 
 ## 4. LLM reranking
 
-`RerankerService` (`service/RerankerService.java`) reorders search results by relevance using an LLM call.
+`RerankerService` (`service/RerankerService.java`) selects and orders search results by relevance using an LLM call; documents the LLM judges unrelated are dropped.
 
 ### Prompt criteria
 
@@ -168,7 +168,7 @@ Each document is presented as `[index] title | url` followed by the first 500 ch
 - Model: the configured chat provider and chat model
 - Temperature: `0.0` (deterministic)
 - Timeout: configurable via `app.rag.reranker-timeout` (default 8s)
-- Response format: `{"order": [0, 3, 1, 2, ...]}` (0-based indices)
+- Response format: `{"order": [0, 3, ...]}` (0-based indices, most relevant first; subset or empty when not all documents are relevant)
 
 ### Response parsing
 
@@ -176,9 +176,11 @@ The response must be exactly one JSON object with exactly one `order` field. The
 unwrap Markdown fences, extract an embedded object from prose, or accept trailing JSON or other text.
 It rejects duplicate keys, unknown fields, floating-point or string index coercions, and malformed JSON.
 
-The `order` array must be a complete permutation of the source indices: every index from `0` through
-`N - 1` appears exactly once. Missing, duplicate, `null`, negative, or out-of-range indices fail
-reranking rather than being skipped. A valid ordering is then limited to `searchReturnK` (default 6).
+The `order` array may be a strict subset of the source indices: only documents the LLM judges
+relevant appear, most relevant first, and the array may be empty when no document is relevant
+(off-topic queries yield no context and no citations). Duplicate, `null`, negative, or
+out-of-range indices, or an array larger than the source set, fail reranking rather than being
+skipped. A valid selection is then limited to `searchReturnK` (default 6).
 
 ### Caching
 
