@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 class JavaApiMethodSelectorTest {
 
     @Test
-    void recognizesPunctuatedTypeMethodInvocationAndAppendsMemberSearchTerms() {
+    void recognizesPunctuatedTypeMethodInvocationAndBuildsMemberSearchTerms() {
         String citationQuery = "What does Java List.of() return?";
 
         JavaApiMethodSelector selector =
@@ -25,7 +25,7 @@ class JavaApiMethodSelectorTest {
         assertEquals("of()", exactSelector.exactOverloadAnchor().orElseThrow());
         assertEquals("List.html", selector.typePageFileName());
         assertEquals("List of", selector.sparseQueryTerms());
-        assertEquals(citationQuery + " List of", JavaApiMethodSelector.expandForSparseCitationQuery(citationQuery));
+        assertEquals("List of", JavaApiMethodSelector.sparseCitationQuery(citationQuery));
     }
 
     @Test
@@ -64,6 +64,21 @@ class JavaApiMethodSelectorTest {
                         .methodName());
         assertTrue(
                 JavaApiMethodSelector.uniqueMemberFromQuery("Show String::new").isEmpty());
+    }
+
+    @Test
+    void isolatesValidatedMemberTermsFromAnswerFormattingProse() {
+        String styledExampleQuery = "Show a Java 25 example with inline code String::formatted, a fenced code block, "
+                + "and cite official Javadoc.";
+        String thirdPartyQuery = "Show a fenced example for SpringApplication.run";
+
+        assertEquals("String formatted", JavaApiMethodSelector.sparseCitationQuery(styledExampleQuery));
+        assertEquals(
+                thirdPartyQuery + " SpringApplication run", JavaApiMethodSelector.sparseCitationQuery(thirdPartyQuery));
+        assertEquals(
+                "Compare List.of with Set.of List of",
+                JavaApiMethodSelector.sparseCitationQuery("Compare List.of with Set.of"));
+        assertEquals("Explain List.add List add", JavaApiMethodSelector.sparseCitationQuery("Explain List.add"));
     }
 
     @Test

@@ -477,7 +477,7 @@ class HybridSearchServiceTest {
 
     @Test
     void runtimeValueCitationQueryRemainsSparse() {
-        when(sparseEncoder.encode(RUNTIME_VALUE_JAVA_API_QUERY + " List of"))
+        when(sparseEncoder.encode("List of"))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(2L, 7L), List.of(3.0f, 1.0f)));
         List<QueryPoints> capturedQueries = new ArrayList<>();
         doAnswer(invocation -> {
@@ -501,7 +501,34 @@ class HybridSearchServiceTest {
         assertTrue(capturedQueries.stream()
                 .allMatch(queryRequest -> queryRequest.getFilter().toString().contains("List.html")));
         assertEquals(1, citationOutcome.documents().size());
-        verify(sparseEncoder).encode(RUNTIME_VALUE_JAVA_API_QUERY + " List of");
+        verify(sparseEncoder).encode("List of");
+        verify(qdrantClient, never()).scrollAsync(notNull(), notNull());
+        verifyNoInteractions(embeddingClient);
+    }
+
+    @Test
+    void explicitJavaMemberCitationSearchExcludesUnrelatedPromptTermsFromSparseEncoding() {
+        String styledExampleQuery = "Show a Java 25 example with inline code String::formatted, a fenced code block, "
+                + "and cite official Javadoc.";
+        when(sparseEncoder.encode("String formatted"))
+                .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(2L, 7L), List.of(3.0f, 1.0f)));
+        List<QueryPoints> capturedQueries = new ArrayList<>();
+        doAnswer(invocation -> {
+                    capturedQueries.add(invocation.getArgument(0));
+                    return Futures.immediateFuture(List.of(scoredPoint()));
+                })
+                .when(qdrantClient)
+                .queryAsync(notNull(), notNull());
+
+        HybridSearchService.SearchOutcome citationOutcome = buildSearchService()
+                .searchDocumentationCitationsOutcome(
+                        styledExampleQuery, 3, RetrievalConstraint.none(), stageDeadlineNanos());
+
+        assertEquals(2, capturedQueries.size());
+        assertTrue(capturedQueries.stream()
+                .allMatch(queryRequest -> queryRequest.getFilter().toString().contains("String.html")));
+        assertEquals(1, citationOutcome.documents().size());
+        verify(sparseEncoder).encode("String formatted");
         verify(qdrantClient, never()).scrollAsync(notNull(), notNull());
         verifyNoInteractions(embeddingClient);
     }

@@ -32,7 +32,7 @@ public record QueryEncodingServices(
                 .isPresent();
     }
 
-    String expandSparseCitationQuery(String query) {
-        return JavaApiMethodSelector.expandForSparseCitationQuery(query);
+    String sparseCitationQuery(String query) {
+        return JavaApiMethodSelector.sparseCitationQuery(query);
     }
 }

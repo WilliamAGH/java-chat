@@ -300,22 +300,25 @@ public final class JavaApiMethodSelector {
     }
 
     /**
-     * Adds component terms for an explicit selector while retaining its punctuated spelling.
+     * Builds a sparse citation query around an explicit selector.
      *
-     * <p>Lucene's {@code StandardAnalyzer} keeps {@code List.of} as one lexical term in the
-     * original query. Adding {@code List} and {@code of} separately recalls both the declaring page
-     * and the requested member. The official-document query is also constrained by type-page
-     * metadata, so common member names cannot introduce cross-type results. Document-vector
-     * encoding remains unchanged.</p>
+     * <p>A uniquely validated Java platform member uses only its declaring type and method terms.
+     * The corresponding official-document query is constrained by type-page metadata, so unrelated
+     * answer-formatting prose cannot dilute member recall and common method names cannot introduce
+     * cross-type results. Unverified and multi-member queries retain their original text while
+     * receiving component terms for broad relevance. Document-vector encoding remains unchanged.</p>
      *
-     * @param citationQuery original sparse citation query
-     * @return original query plus selector component terms when a selector is present
+     * @param citationQuery original citation query
+     * @return selector-focused query for a validated Java member, otherwise the original query with
+     *     broad selector component terms
      */
-    public static String expandForSparseCitationQuery(String citationQuery) {
+    public static String sparseCitationQuery(String citationQuery) {
         Objects.requireNonNull(citationQuery, "citationQuery");
-        return fromQuery(citationQuery)
-                .map(selector -> citationQuery + " " + selector.sparseQueryTerms())
-                .orElse(citationQuery);
+        return uniqueExplicitJavaApiMemberFromQuery(citationQuery)
+                .map(JavaApiMethodSelector::sparseQueryTerms)
+                .orElseGet(() -> fromQuery(citationQuery)
+                        .map(selector -> citationQuery + " " + selector.sparseQueryTerms())
+                        .orElse(citationQuery));
     }
 
     /**

@@ -234,9 +234,9 @@ public class HybridSearchService {
             return collectSearchOutcomes(queryDispatches, topK);
         }
 
-        String expandedCitationQuery = queryEncoding.expandSparseCitationQuery(query);
+        String sparseCitationQuery = queryEncoding.sparseCitationQuery(query);
         LexicalSparseVectorEncoder.SparseVector sparseVector =
-                queryEncoding.sparseVectorEncoder().encode(expandedCitationQuery);
+                queryEncoding.sparseVectorEncoder().encode(sparseCitationQuery);
         if (sparseVector.indices().isEmpty()) {
             return requiredRetrievalConstraints.stream()
                     .map(ignoredConstraint -> new SearchOutcome(List.of(), List.of()))
