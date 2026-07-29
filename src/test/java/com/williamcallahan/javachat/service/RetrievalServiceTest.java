@@ -82,6 +82,110 @@ class RetrievalServiceTest {
     }
 
     @Test
+    void bareJavaMemberUsesDeterministicSparseEvidenceWithoutReranking() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        String memberQuery = "Explain Javadoc String.formatted";
+        Document staticFormatDocument = apiDocumentationMemberCitationCandidate(
+                "static-format",
+                "Formats with a format string.",
+                "java.lang",
+                "String.html",
+                "format(java.lang.String,java.lang.Object...)");
+        Document formattedDocument = apiDocumentationMemberCitationCandidate(
+                "formatted",
+                "Formats this string with arguments.",
+                "java.lang",
+                "String.html",
+                "formatted(java.lang.Object...)");
+        when(hybridSearchService.searchDocumentationCitationsOutcome(
+                        eq(memberQuery), eq(10), eq(expectedScopedConstraint), anyLong()))
+                .thenReturn(new HybridSearchService.SearchOutcome(
+                        List.of(staticFormatDocument, formattedDocument), List.of()));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome(memberQuery, officialDocumentationConstraint);
+
+        assertEquals(List.of(formattedDocument), retrievalOutcome.documents());
+        verify(hybridSearchService, never())
+                .searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), anyLong());
+    }
+
+    @Test
+    void versionedBareJavaMemberUsesTheRequestedReleaseEvidence() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint java25Constraint = officialDocumentationConstraint.withDocVersions(List.of("25"));
+        String memberQuery = "Explain Java 25 String::formatted";
+        Document formattedDocument = Document.builder()
+                .id("java-25-formatted")
+                .text("Formats this string with arguments.")
+                .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "25")
+                .metadata(QdrantPayloadFieldSchema.HASH_FIELD, "java-25-formatted-hash")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, javaApiPageUrl("java.lang", "String.html"))
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.lang")
+                .metadata(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, "String.html")
+                .metadata(QdrantPayloadFieldSchema.ANCHOR_FIELD, "formatted(java.lang.Object...)")
+                .build();
+        when(hybridSearchService.searchDocumentationCitationsOutcomes(
+                        eq(memberQuery), eq(10), eq(List.of(java25Constraint)), anyLong()))
+                .thenReturn(List.of(new HybridSearchService.SearchOutcome(List.of(formattedDocument), List.of())));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome(memberQuery, officialDocumentationConstraint);
+
+        assertEquals(List.of(formattedDocument), retrievalOutcome.documents());
+        verify(hybridSearchService, never())
+                .searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), anyLong());
+    }
+
+    @Test
+    void otherOfficialApiMembersRemainOnGenericHybridRetrieval() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        Document springDocument = versionedDocument("spring-application-run", "", "spring-run-hash");
+        when(hybridSearchService.searchOutcome(
+                        eq("Explain SpringApplication.run"), anyInt(), eq(expectedScopedConstraint), anyLong()))
+                .thenReturn(new HybridSearchService.SearchOutcome(List.of(springDocument), List.of()));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
+                .thenReturn(List.of(springDocument));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome("Explain SpringApplication.run", officialDocumentationConstraint);
+
+        assertEquals(List.of(springDocument), retrievalOutcome.documents());
+        verify(hybridSearchService, never())
+                .searchDocumentationCitationsOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
+    }
+
+    @Test
+    void chainedMemberQueriesRemainOnGenericHybridRetrieval() {
+        assertGenericOfficialMemberQuery("Explain Javadoc Stream.of().map(Function)");
+    }
+
+    @Test
+    void malformedMemberSignaturesRemainOnGenericHybridRetrieval() {
+        assertGenericOfficialMemberQuery("Explain Javadoc List.of(E,");
+    }
+
+    @Test
     void retrievalReportsSearchThenRerankProgressInOrder() {
         HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         RerankerService rerankerService = mock(RerankerService.class);
@@ -134,7 +238,7 @@ class RetrievalServiceTest {
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
         RetrievalConstraint expectedCombinedConstraint =
                 officialDocumentationConstraint.withDocVersions(List.of(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
-        String versionedQuery = "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " List.of";
+        String versionedQuery = "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " collections";
         Document versionedDocument =
                 versionedDocument("represented-version", REPRESENTED_JAVA_API_SOURCE.javaRelease(), "represented-hash");
         when(hybridSearchService.searchOutcomes(
@@ -211,14 +315,14 @@ class RetrievalServiceTest {
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
         RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
-        String citationQuery = "What does List.of return?";
+        String citationQuery = "What does Javadoc List.of return?";
         String listPageUrl = javaApiPageUrl("java.util", "List.html");
         List<Document> qdrantCandidates = List.of(
                 apiDocumentationCitationCandidate("object", "A utility of() method", "java.lang", "Object.html"),
                 apiDocumentationCitationCandidate("string", "A utility of() method", "java.lang", "String.html"),
                 apiDocumentationCitationCandidate("integer", "A utility of() method", "java.lang", "Integer.html"),
-                apiDocumentationCitationCandidate(
-                        "list", "static <E> List<E> of(E element)", "java.util", "List.html"));
+                apiDocumentationMemberCitationCandidate(
+                        "list", "static <E> List<E> of(E element)", "java.util", "List.html", "of(E)"));
         when(hybridSearchService.searchDocumentationCitationsOutcome(
                         eq(citationQuery), eq(4), eq(expectedScopedConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(qdrantCandidates, List.of()));
@@ -226,9 +330,9 @@ class RetrievalServiceTest {
         RetrievalService.CitationOutcome citationOutcome =
                 retrievalService.discoverCitations(citationQuery, officialDocumentationConstraint);
 
-        assertEquals(3, citationOutcome.citations().size());
+        assertEquals(1, citationOutcome.citations().size());
         assertEquals(listPageUrl, citationOutcome.citations().getFirst().getUrl());
-        assertTrue(citationOutcome.citations().stream().anyMatch(citation -> listPageUrl.equals(citation.getUrl())));
+        assertEquals("of(E)", citationOutcome.citations().getFirst().getAnchor());
         assertEquals(0, citationOutcome.failedConversionCount());
         verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), anyLong());
     }
@@ -243,7 +347,7 @@ class RetrievalServiceTest {
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
         RetrievalConstraint expectedCombinedConstraint =
                 officialDocumentationConstraint.withDocVersions(List.of(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
-        String citationQuery = "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " List.of";
+        String citationQuery = "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " collections";
         Document versionedCitation = versionedCitationDocument(
                 "represented-version-citation", REPRESENTED_JAVA_API_SOURCE.javaRelease(), "represented-hash");
         when(hybridSearchService.searchDocumentationCitationsOutcomes(
@@ -282,7 +386,7 @@ class RetrievalServiceTest {
                 .thenReturn(List.of(java21Document, secondJava21Document));
 
         RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveOutcome(
-                "Compare Java 21 and Java 24 List.of", officialDocumentationConstraint);
+                "Compare Java 21 and Java 24 collections", officialDocumentationConstraint);
 
         assertEquals(
                 List.of("21", "24"),
@@ -505,7 +609,7 @@ class RetrievalServiceTest {
         when(rerankerService.rerank(anyString(), anyList(), eq(6), anyLong())).thenReturn(rerankedDocuments);
 
         RetrievalService.RetrievalOutcome limitedOutcome = retrievalService.retrieveWithLimitOutcome(
-                "Compare Java 21 and Java 24 List.of", 3, 1_000, officialDocumentationConstraint);
+                "Compare Java 21 and Java 24 collections", 3, 1_000, officialDocumentationConstraint);
 
         assertEquals(3, limitedOutcome.documents().size());
         assertEquals(
@@ -597,6 +701,28 @@ class RetrievalServiceTest {
                 .build();
     }
 
+    private static void assertGenericOfficialMemberQuery(String learnerQuery) {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        Document genericDocument = versionedDocument("generic-member", "", "generic-member-hash");
+        when(hybridSearchService.searchOutcome(eq(learnerQuery), anyInt(), eq(expectedScopedConstraint), anyLong()))
+                .thenReturn(new HybridSearchService.SearchOutcome(List.of(genericDocument), List.of()));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
+                .thenReturn(List.of(genericDocument));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome(learnerQuery, officialDocumentationConstraint);
+
+        assertEquals(List.of(genericDocument), retrievalOutcome.documents());
+        verify(hybridSearchService, never())
+                .searchDocumentationCitationsOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
+    }
+
     private static RetrievalConstraint currentJavaApiBroadOfficialConstraint() {
         return RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES.stream()
                 .filter(sourceIdentity -> !JAVA_API_DOCUMENTATION_SOURCE_IDENTITIES.contains(sourceIdentity)
@@ -676,6 +802,19 @@ class RetrievalServiceTest {
                 .metadata(QdrantPayloadFieldSchema.URL_FIELD, javaApiPageUrl(packageName, pageFilename))
                 .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
                 .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, packageName)
+                .build();
+    }
+
+    private static Document apiDocumentationMemberCitationCandidate(
+            String documentId, String documentText, String packageName, String pageFilename, String memberAnchor) {
+        return Document.builder()
+                .id(documentId)
+                .text(documentText)
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, javaApiPageUrl(packageName, pageFilename))
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, packageName)
+                .metadata(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, pageFilename)
+                .metadata(QdrantPayloadFieldSchema.ANCHOR_FIELD, memberAnchor)
                 .build();
     }
 
