@@ -78,21 +78,27 @@ class OpenAiRequestFactoryTest {
     }
 
     @Test
-    void sdkUpgradeDoesNotExpandConfiguredReasoningEffortContract() {
-        IllegalArgumentException configurationFailure =
-                assertThrows(IllegalArgumentException.class, () -> createRequestFactory("max"));
+    void maximumReasoningEffortUsesTheUniversalGatewayVocabulary() {
+        OpenAiRequestFactory requestFactory = createRequestFactory("max");
 
-        assertTrue(configurationFailure.getMessage().contains("Invalid app.llm.reasoning-effort value 'max'"));
-        assertTrue(configurationFailure.getMessage().contains("none, low, medium, high, xhigh"));
+        ResponseCreateParams reasoningRequestParams =
+                requestFactory.buildCompletionRequest("Explain Java streams", 0.4);
+
+        assertEquals(
+                ReasoningEffort.MAX,
+                reasoningRequestParams.reasoning().orElseThrow().effort().orElseThrow());
     }
 
     @Test
-    void sdkWideMinimalReasoningEffortIsRejectedForGpt54() {
-        IllegalArgumentException configurationFailure =
-                assertThrows(IllegalArgumentException.class, () -> createRequestFactory("minimal"));
+    void minimalReasoningEffortUsesTheUniversalGatewayVocabulary() {
+        OpenAiRequestFactory requestFactory = createRequestFactory("minimal");
 
-        assertTrue(configurationFailure.getMessage().contains("Invalid app.llm.reasoning-effort value 'minimal'"));
-        assertTrue(configurationFailure.getMessage().contains("none, low, medium, high, xhigh"));
+        ResponseCreateParams reasoningRequestParams =
+                requestFactory.buildCompletionRequest("Explain Java streams", 0.4);
+
+        assertEquals(
+                ReasoningEffort.MINIMAL,
+                reasoningRequestParams.reasoning().orElseThrow().effort().orElseThrow());
     }
 
     @Test
