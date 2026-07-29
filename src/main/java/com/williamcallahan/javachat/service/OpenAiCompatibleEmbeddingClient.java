@@ -186,7 +186,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
             long remainingCooldownNanos = providerCooldownDeadlineNanos - System.nanoTime();
             if (remainingCooldownNanos > 0) {
                 long retryAfterSeconds = Math.max(1L, TimeUnit.NANOSECONDS.toSeconds(remainingCooldownNanos));
-                throw new EmbeddingServiceTemporarilyUnavailableException(
+                throw new EmbeddingProviderCooldownRejectionException(
                         "Remote embedding provider is rate limited; retry after " + retryAfterSeconds + " seconds");
             }
         }
@@ -297,14 +297,23 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
      * admitted probe. Abandoned calls retain their concurrency permit until SDK completion, and each
      * admitted embedding request performs one SDK attempt without mixing live and batch limits.</p>
      *
-     * @throws EmbeddingProbeDeferredException when foreground embedding work is already active
+     * <p>A probe rejected by the locally recorded batch-tier Retry-After window is translated into
+     * {@link EmbeddingProbeDeferredException}: the provider was never contacted, so the rejection
+     * says nothing about provider health and must not be recorded as a probe failure.</p>
+     *
+     * @throws EmbeddingProbeDeferredException when foreground embedding work is already active or a
+     *     locally recorded batch-tier provider cooldown defers the probe without provider contact
      */
     @Override
     public void warmUp() {
         if (activeForegroundEmbeddingCount.get() > 0) {
-            throw new EmbeddingProbeDeferredException();
+            throw new EmbeddingProbeDeferredException("foreground embedding work is active");
         }
-        createEmbeddings(List.of(EMBEDDING_WARM_UP_PROBE_TEXT), LlmGatewayTier.BATCH, batchRequestTimeout);
+        try {
+            createEmbeddings(List.of(EMBEDDING_WARM_UP_PROBE_TEXT), LlmGatewayTier.BATCH, batchRequestTimeout);
+        } catch (EmbeddingProviderCooldownRejectionException cooldownRejection) {
+            throw new EmbeddingProbeDeferredException("the batch-tier provider cooldown is active");
+        }
     }
 
     @Override
@@ -771,12 +780,28 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         }
     }
 
-    /** Signals that a background probe yielded admission to active foreground embedding work. */
+    /**
+     * Signals that a background probe was deferred without contacting the provider, so the
+     * deferral carries no signal about provider health.
+     */
     static final class EmbeddingProbeDeferredException extends RuntimeException {
         private static final long serialVersionUID = 1L;
 
-        EmbeddingProbeDeferredException() {
-            super("Embedding probe deferred while foreground embedding work is active");
+        EmbeddingProbeDeferredException(String deferralReason) {
+            super("Embedding probe deferred while " + deferralReason);
+        }
+    }
+
+    /**
+     * Signals that a locally recorded Retry-After window rejected the request before any provider
+     * contact, distinguishing it from a transient failure the provider actually returned.
+     */
+    static final class EmbeddingProviderCooldownRejectionException
+            extends EmbeddingServiceTemporarilyUnavailableException {
+        private static final long serialVersionUID = 1L;
+
+        EmbeddingProviderCooldownRejectionException(String message) {
+            super(message);
         }
     }
 }

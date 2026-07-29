@@ -379,14 +379,8 @@ class HybridSearchServiceTest {
         for (QueryPoints citationQuery : capturedQueries) {
             assertEquals("bm25", citationQuery.getUsing());
             assertEquals(3, citationQuery.getLimit());
-            assertTrue(citationQuery
-                    .getWithPayload()
-                    .getInclude()
-                    .getFieldsList()
-                    .containsAll(List.of(
-                            QdrantPayloadFieldSchema.DOC_CONTENT_FIELD,
-                            QdrantPayloadFieldSchema.URL_FIELD,
-                            QdrantPayloadFieldSchema.TITLE_FIELD)));
+            assertFullRetrievalPayloadSelector(
+                    citationQuery.getWithPayload().getInclude().getFieldsList());
             assertEquals(0, citationQuery.getPrefetchCount());
             assertTrue(citationQuery.getQuery().hasNearest());
             assertFalse(citationQuery.getQuery().hasRrf());
@@ -437,14 +431,8 @@ class HybridSearchServiceTest {
         ScrollPoints exactCitationScroll = capturedScrolls.getFirst();
         assertEquals(appProperties.getQdrant().getCollections().getDocs(), exactCitationScroll.getCollectionName());
         assertEquals(3, exactCitationScroll.getLimit());
-        assertTrue(exactCitationScroll
-                .getWithPayload()
-                .getInclude()
-                .getFieldsList()
-                .containsAll(List.of(
-                        QdrantPayloadFieldSchema.DOC_CONTENT_FIELD,
-                        QdrantPayloadFieldSchema.URL_FIELD,
-                        QdrantPayloadFieldSchema.TITLE_FIELD)));
+        assertFullRetrievalPayloadSelector(
+                exactCitationScroll.getWithPayload().getInclude().getFieldsList());
         assertTrue(exactCitationScroll.hasFilter());
         String versionFilter = exactCitationScroll.getFilter().toString();
         assertTrue(versionFilter.contains(QdrantPayloadFieldSchema.DOC_VERSION_FIELD));
@@ -821,6 +809,18 @@ class HybridSearchServiceTest {
         assertEquals(Level.WARN, collectionFailureWarning.getLevel());
         assertEquals(COLLECTION_FAILURE_WARNING, collectionFailureWarning.getFormattedMessage());
         assertNull(collectionFailureWarning.getThrowableProxy());
+    }
+
+    /**
+     * Pins the full retrieval payload selector so a metadata field dropped from the include
+     * list fails loudly instead of passing a partial containment check.
+     */
+    private static void assertFullRetrievalPayloadSelector(List<String> includedFields) {
+        List<String> expectedPayloadFields = new ArrayList<>(QdrantPayloadFieldSchema.ALL_METADATA_FIELDS);
+        expectedPayloadFields.add(QdrantPayloadFieldSchema.DOC_CONTENT_FIELD);
+        assertEquals(
+                expectedPayloadFields.stream().sorted().toList(),
+                includedFields.stream().sorted().toList());
     }
 
     private static ScoredPoint scoredPoint() {

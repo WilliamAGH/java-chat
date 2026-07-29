@@ -2,8 +2,11 @@ package com.williamcallahan.javachat.service;
 
 /**
  * Signals that embedding work can be retried after a transient admission or provider failure.
+ *
+ * <p>Non-final so the embedding client can distinguish a locally recorded provider cooldown
+ * (no provider contact made) from a genuine transient provider failure through subtyping.</p>
  */
-public final class EmbeddingServiceTemporarilyUnavailableException extends EmbeddingServiceUnavailableException {
+public class EmbeddingServiceTemporarilyUnavailableException extends EmbeddingServiceUnavailableException {
 
     /**
      * Creates a retryable embedding failure with a human-readable explanation.

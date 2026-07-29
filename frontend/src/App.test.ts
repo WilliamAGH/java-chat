@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/svelte";
 import { tick } from "svelte";
+import { chatSession, resetChatSession } from "./lib/composables/chatSession.svelte";
 import { pageMetadataForPath } from "./lib/services/pageMetadata";
 
+type StreamChatFunction = typeof import("./lib/services/chat").streamChat;
+
 const refreshCsrfTokenMock = vi.fn(async () => true);
+const streamChatMock = vi.fn<StreamChatFunction>();
 const CHAT_CANONICAL_PATH = "/";
 const LEARN_CANONICAL_PATH = "/learn";
 
@@ -13,6 +17,15 @@ vi.mock("./lib/services/csrf", async () => {
   return {
     ...actualCsrfService,
     refreshCsrfToken: refreshCsrfTokenMock,
+  };
+});
+
+vi.mock("./lib/services/chat", async () => {
+  const actualChatService =
+    await vi.importActual<typeof import("./lib/services/chat")>("./lib/services/chat");
+  return {
+    ...actualChatService,
+    streamChat: streamChatMock,
   };
 });
 
@@ -58,6 +71,8 @@ function expectCurrentRouteMetadata(expectedCanonicalPath: string): void {
 
 beforeEach(() => {
   refreshCsrfTokenMock.mockClear();
+  streamChatMock.mockReset();
+  resetChatSession();
   globalThis.history.replaceState({}, "", "/");
   document.head
     .querySelectorAll(
@@ -175,6 +190,51 @@ describe("App route synchronization", () => {
     await fireEvent.click(application.getByRole("button", { name: "Chat" }));
     expect(globalThis.location.pathname).toBe("/");
     expectCurrentRouteMetadata(CHAT_CANONICAL_PATH);
+  });
+
+  it("rejects a late chat chunk in the native click-to-unmount gap", async () => {
+    let emitChatChunk: ((chatChunk: string) => void) | undefined;
+    let activeChatStreamSignal: AbortSignal | undefined;
+    streamChatMock.mockImplementation(async (_sessionId, _message, onChunk, options) => {
+      emitChatChunk = onChunk;
+      activeChatStreamSignal = options?.signal;
+      if (!activeChatStreamSignal) {
+        throw new Error("Expected ChatView to pass an AbortSignal for chat streaming");
+      }
+
+      return new Promise<void>((resolve) => {
+        activeChatStreamSignal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+    });
+
+    const App = (await import("./App.svelte")).default;
+    const application = render(App);
+    const messageInput = application.getByLabelText("Message input");
+    if (!(messageInput instanceof HTMLTextAreaElement)) {
+      throw new Error("Expected message input element to be a textarea");
+    }
+    await fireEvent.input(messageInput, {
+      target: { value: "Explain Java records" },
+    });
+    await fireEvent.click(application.getByRole("button", { name: "Send message" }));
+    await vi.waitFor(() => expect(streamChatMock).toHaveBeenCalledOnce());
+
+    if (!emitChatChunk) {
+      throw new Error("Expected the active chat stream chunk callback to be captured");
+    }
+    emitChatChunk("## Records");
+    await tick();
+
+    application.getByRole("button", { name: "Learn" }).click();
+    expect(application.container.querySelector(".chat-view")).not.toBeNull();
+    emitChatChunk("\n\n## Late heading");
+    await tick();
+
+    expect(activeChatStreamSignal?.aborted).toBe(true);
+    expect(
+      chatSession.messages.find((chatMessage) => chatMessage.role === "assistant")?.messageText,
+    ).toBe("## Records");
+    expect(await application.findByRole("heading", { name: "Learn Java" })).toBeInTheDocument();
   });
 
   it("restores the selected view and metadata when browser history changes", async () => {

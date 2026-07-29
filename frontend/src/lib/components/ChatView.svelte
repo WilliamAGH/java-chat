@@ -35,7 +35,8 @@
     // Streaming state from composable (with 800ms status persistence)
     const streaming = createStreamingState({ statusClearDelayMs: 800 });
 
-    function cancelInFlightChatStream(): void {
+    /** Cancels the active response before the parent removes this view. */
+    export function cancelActiveChatStream(): void {
         activeChatStreamController?.abort();
         activeChatStreamController = null;
     }
@@ -52,7 +53,7 @@
     // Cleanup the active stream and timers on unmount
     $effect(() => {
         return () => {
-            cancelInFlightChatStream();
+            cancelActiveChatStream();
             streaming.cleanup();
             scrollAnchor.cleanup();
         };
@@ -189,7 +190,7 @@
     }
 
     async function streamAssistantResponse(userQuery: string): Promise<void> {
-        cancelInFlightChatStream();
+        cancelActiveChatStream();
         const chatStreamController = new AbortController();
         activeChatStreamController = chatStreamController;
 

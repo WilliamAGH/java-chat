@@ -2,7 +2,6 @@ package com.williamcallahan.javachat.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.adapters.in.web.security.CsrfAccessDeniedHandler;
-import com.williamcallahan.javachat.adapters.in.web.security.CsrfTokenCookieFilter;
 import java.util.List;
 import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -12,7 +11,6 @@ import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
-import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -123,7 +121,6 @@ public class SecurityConfig {
                 .headers(h -> h.frameOptions(fo -> fo.sameOrigin()))
                 .httpBasic(b -> b.disable())
                 .formLogin(f -> f.disable());
-        http.addFilterAfter(new CsrfTokenCookieFilter(), CsrfFilter.class);
         return http.build();
     }
 }

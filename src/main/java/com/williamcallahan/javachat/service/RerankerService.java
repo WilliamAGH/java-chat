@@ -135,31 +135,45 @@ public class RerankerService {
             return cachedRerank.documents();
         }
 
-        CompletableFuture<CachedRerank> ownedRerank = new CompletableFuture<>();
-        CompletableFuture<CachedRerank> existingRerank = inFlightReranks.putIfAbsent(cacheKey, ownedRerank);
-        if (existingRerank != null) {
-            return awaitInFlightRerank(existingRerank, stageDeadlineNanos).documents();
-        }
-
-        try {
-            requireRemainingStageBudget(stageDeadlineNanos);
-            CachedRerank completedDuringAdmission = rerankerCache.get(cacheKey, CachedRerank.class);
-            if (completedDuringAdmission != null) {
-                ownedRerank.complete(completedDuringAdmission);
-                requireRemainingStageBudget(stageDeadlineNanos);
-                return completedDuringAdmission.documents();
+        while (true) {
+            CompletableFuture<CachedRerank> ownedRerank = new CompletableFuture<>();
+            CompletableFuture<CachedRerank> existingRerank = inFlightReranks.putIfAbsent(cacheKey, ownedRerank);
+            if (existingRerank != null) {
+                try {
+                    return awaitInFlightRerank(existingRerank, stageDeadlineNanos)
+                            .documents();
+                } catch (RerankingFailureException inFlightFailure) {
+                    if (!hasRemainingStageBudget(stageDeadlineNanos) || !causedByDeadlineTimeout(inFlightFailure)) {
+                        throw inFlightFailure;
+                    }
+                    // The coalesced attempt died on its owner's tighter stage deadline; this waiter
+                    // still owns budget, so it evicts the dead future and retries as the result owner
+                    // instead of inheriting a timeout caused by a deadline it never had.
+                    inFlightReranks.remove(cacheKey, existingRerank);
+                    continue;
+                }
             }
-            CachedRerank completedRerank =
-                    new CachedRerank(rerankUncached(query, documents, returnK, stageDeadlineNanos));
-            rerankerCache.put(cacheKey, completedRerank);
-            ownedRerank.complete(completedRerank);
-            requireRemainingStageBudget(stageDeadlineNanos);
-            return completedRerank.documents();
-        } catch (RuntimeException | Error rerankingFailure) {
-            ownedRerank.completeExceptionally(rerankingFailure);
-            throw rerankingFailure;
-        } finally {
-            inFlightReranks.remove(cacheKey, ownedRerank);
+
+            try {
+                requireRemainingStageBudget(stageDeadlineNanos);
+                CachedRerank completedDuringAdmission = rerankerCache.get(cacheKey, CachedRerank.class);
+                if (completedDuringAdmission != null) {
+                    ownedRerank.complete(completedDuringAdmission);
+                    requireRemainingStageBudget(stageDeadlineNanos);
+                    return completedDuringAdmission.documents();
+                }
+                CachedRerank completedRerank =
+                        new CachedRerank(rerankUncached(query, documents, returnK, stageDeadlineNanos));
+                rerankerCache.put(cacheKey, completedRerank);
+                ownedRerank.complete(completedRerank);
+                requireRemainingStageBudget(stageDeadlineNanos);
+                return completedRerank.documents();
+            } catch (RuntimeException | Error rerankingFailure) {
+                ownedRerank.completeExceptionally(rerankingFailure);
+                throw rerankingFailure;
+            } finally {
+                inFlightReranks.remove(cacheKey, ownedRerank);
+            }
         }
     }
 
@@ -231,6 +245,27 @@ public class RerankerService {
             throw new RerankingFailureException(failureMessage, new TimeoutException(failureMessage));
         }
         return Duration.ofNanos(remainingStageNanos);
+    }
+
+    private static boolean hasRemainingStageBudget(long stageDeadlineNanos) {
+        return stageDeadlineNanos - System.nanoTime() > 0;
+    }
+
+    /**
+     * Reports whether the failure chain contains a deadline timeout, the only failure a fresh
+     * attempt owned by a caller with remaining budget can outlive; permanent failures such as
+     * empty or unparsable rerank responses must keep propagating unchanged.
+     */
+    private static boolean causedByDeadlineTimeout(Throwable failure) {
+        Set<Throwable> inspectedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable failureInChain = failure;
+        while (failureInChain != null && inspectedFailures.add(failureInChain)) {
+            if (failureInChain instanceof TimeoutException) {
+                return true;
+            }
+            failureInChain = failureInChain.getCause();
+        }
+        return false;
     }
 
     private Duration tighterRerankTimeout(Duration remainingStageBudget) {

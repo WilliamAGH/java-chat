@@ -17,6 +17,7 @@
 
   let currentView = $state<ApplicationView>(applicationViewForPath(globalThis.location.pathname))
   let currentLessonSlug = $state<string | null>(lessonSlugForPath(globalThis.location.pathname))
+  let chatView = $state<ReturnType<typeof ChatView> | null>(null)
 
   $effect(() => {
     recoverUnimplementedLessonRoute()
@@ -40,9 +41,16 @@
 
   function synchronizeViewWithBrowserHistory(): void {
     recoverUnimplementedLessonRoute()
-    currentView = applicationViewForPath(globalThis.location.pathname)
+    selectApplicationView(applicationViewForPath(globalThis.location.pathname))
     currentLessonSlug = lessonSlugForPath(globalThis.location.pathname)
     synchronizeDocumentMetadata()
+  }
+
+  function selectApplicationView(selectedView: ApplicationView): void {
+    if (currentView === 'chat' && selectedView !== 'chat') {
+      chatView?.cancelActiveChatStream()
+    }
+    currentView = selectedView
   }
 
   function synchronizeLessonRouteWithSelection(): void {
@@ -65,11 +73,11 @@
 <svelte:window onpopstate={synchronizeViewWithBrowserHistory} />
 
 <div class="app-shell">
-  <Header bind:currentView />
+  <Header bind:currentView={() => currentView, selectApplicationView} />
 
   <main class="main-content">
     {#if currentView === 'chat'}
-      <ChatView />
+      <ChatView bind:this={chatView} />
     {:else}
       <LearnView bind:selectedSlug={currentLessonSlug} />
     {/if}
