@@ -118,7 +118,10 @@ final class MarkdownNormalizer {
                 return true;
             }
         }
-        return Character.isUpperCase(firstVisibleCharacter);
+        // A lone word after the marker is an info string, and per CommonMark an info-string
+        // fence only opens a block and can never close one, so it is never trailing prose
+        // regardless of letter case (```Java is an info string exactly like ```java).
+        return false;
     }
 
     private static boolean isBalancedParentheticalProse(String markdownText, int firstVisibleIndex, int lineEndIndex) {

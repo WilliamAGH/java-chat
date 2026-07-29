@@ -195,13 +195,22 @@ class MarkdownNormalizerTest {
     }
 
     @Test
-    void preNormalizeForListsAndFences_repairsAttachedClosingFenceWithCompactTitleCaseProse() {
+    void preNormalizeForListsAndFences_preservesCapitalizedSingleWordFenceSuffixAsInfoString() {
         String attachedFences = String.join("\n", "Before```java", "int answer = 42;", "```Done");
-        String expectedNormalizedMarkdown = String.join("\n", "Before", "```java", "int answer = 42;", "```", "Done");
 
         String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(attachedFences);
 
-        assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
+        assertEquals(attachedFences, normalizedMarkdown);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Java", "C", "JavaScript", "java", "c", "javascript"})
+    void preNormalizeForListsAndFences_treatsSingleWordFenceSuffixAsInfoStringRegardlessOfCase(String infoString) {
+        String attachedFences = String.join("\n", "Before```text", "literal content", "```" + infoString);
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(attachedFences);
+
+        assertEquals(attachedFences, normalizedMarkdown);
     }
 
     @Test
