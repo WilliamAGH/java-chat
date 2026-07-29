@@ -1,14 +1,24 @@
 package com.williamcallahan.javachat.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.williamcallahan.javachat.adapters.in.web.security.ClerkAuthorizedPartyValidator;
 import com.williamcallahan.javachat.adapters.in.web.security.CsrfAccessDeniedHandler;
 import java.util.List;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+import org.springframework.boot.autoconfigure.security.oauth2.resource.OAuth2ResourceServerProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
@@ -32,6 +42,8 @@ public class SecurityConfig {
     private static final String DEPENDENCIES_ENDPOINT = "/actuator/health/dependencies";
     private static final String PROMETHEUS_ENDPOINT = "/actuator/prometheus";
     private static final String INFO_ENDPOINT = "/actuator/info";
+    private static final String AUTHENTICATED_USER_ENDPOINT = "/api/me";
+    private static final String CLERK_JWKS_URI_PROPERTY = "spring.security.oauth2.resourceserver.jwt.jwk-set-uri";
 
     /**
      * CORS configuration source for Spring Security filter chain integration.
@@ -91,7 +103,10 @@ public class SecurityConfig {
     @Bean
     @Order(1)
     public SecurityFilterChain appSecurityFilterChain(
-            HttpSecurity http, CorsConfigurationSource corsConfigurationSource, ObjectMapper objectMapper)
+            HttpSecurity http,
+            CorsConfigurationSource corsConfigurationSource,
+            ObjectMapper objectMapper,
+            ObjectProvider<JwtDecoder> clerkJwtDecoder)
             throws Exception {
         CookieCsrfTokenRepository csrfTokenRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
         csrfTokenRepository.setCookieCustomizer(csrfCookie -> csrfCookie.sameSite("Lax"));
@@ -111,6 +126,8 @@ public class SecurityConfig {
                                 "/assets/**",
                                 "/static/**")
                         .permitAll()
+                        .requestMatchers(AUTHENTICATED_USER_ENDPOINT)
+                        .authenticated()
                         .requestMatchers("/api/**")
                         .permitAll()
                         .requestMatchers("/actuator/**")
@@ -121,6 +138,43 @@ public class SecurityConfig {
                 .headers(h -> h.frameOptions(fo -> fo.sameOrigin()))
                 .httpBasic(b -> b.disable())
                 .formLogin(f -> f.disable());
+        // Clerk is enabled per environment (dev profile only for now): without the
+        // decoder bean there is no resource server, and /api/me's authenticated()
+        // rule deterministically denies every request in that deployment.
+        JwtDecoder activeClerkJwtDecoder = clerkJwtDecoder.getIfAvailable();
+        if (activeClerkJwtDecoder != null) {
+            http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(activeClerkJwtDecoder)));
+        }
         return http.build();
+    }
+
+    /**
+     * Verifies Clerk session tokens against the instance JWKS with issuer and
+     * authorized-party validation.
+     *
+     * <p>Created only when the JWKS URI property exists — the dev profile today —
+     * so production, which has no Clerk configuration yet, runs without a
+     * resource server and rejects all {@code /api/me} traffic.
+     *
+     * <p>Built from the JWKS URI (not OIDC discovery) so application startup
+     * never performs a network call; keys are fetched lazily on the first
+     * bearer-token request. The extra {@code azp} check follows Clerk's manual
+     * JWT verification guide: a signature-valid token minted for another
+     * Clerk-backed origin must not authenticate here.
+     */
+    @Bean
+    @ConditionalOnProperty(CLERK_JWKS_URI_PROPERTY)
+    public JwtDecoder clerkJwtDecoder(
+            OAuth2ResourceServerProperties resourceServerProperties, AppProperties appProperties) {
+        OAuth2ResourceServerProperties.Jwt jwtProperties = resourceServerProperties.getJwt();
+        NimbusJwtDecoder clerkTokenDecoder =
+                NimbusJwtDecoder.withJwkSetUri(jwtProperties.getJwkSetUri()).build();
+        OAuth2TokenValidator<Jwt> issuerAndTimestampValidator =
+                JwtValidators.createDefaultWithIssuer(jwtProperties.getIssuerUri());
+        OAuth2TokenValidator<Jwt> authorizedPartyValidator =
+                new ClerkAuthorizedPartyValidator(appProperties.getClerk().getAuthorizedParties());
+        clerkTokenDecoder.setJwtValidator(
+                new DelegatingOAuth2TokenValidator<>(issuerAndTimestampValidator, authorizedPartyValidator));
+        return clerkTokenDecoder;
     }
 }
