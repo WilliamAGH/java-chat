@@ -9,6 +9,7 @@
  */
 
 import type { Clerk } from "@clerk/clerk-js";
+import type { Appearance } from "@clerk/ui";
 import { pushToast } from "../stores/toastStore";
 
 /** Signed-in Clerk user, derived from the SDK's own typing ([TY1]: no transitive `@clerk/shared` import). */
@@ -53,13 +54,14 @@ export async function loadClerkAuthentication(): Promise<void> {
   // auth controls appear once loaded, the chat itself never waits on them.
   // The npm ESM build of clerk-js ships without prebuilt components, so the
   // `ui` module from @clerk/ui must be passed explicitly (ClerkOptions.ui).
-  const [{ Clerk: ClerkConstructor }, { ui: clerkPrebuiltUi }] = await Promise.all([
-    import("@clerk/clerk-js"),
-    import("@clerk/ui"),
-  ]);
+  const [{ Clerk: ClerkConstructor }, { ui: clerkPrebuiltUi }, { dark: clerkDarkBaseTheme }] =
+    await Promise.all([import("@clerk/clerk-js"), import("@clerk/ui"), import("@clerk/ui/themes")]);
   const loadingClient = new ClerkConstructor(publishableKey);
   try {
-    await loadingClient.load({ ui: clerkPrebuiltUi });
+    await loadingClient.load({
+      ui: clerkPrebuiltUi,
+      appearance: warmPrecisionAppearance(clerkDarkBaseTheme),
+    });
   } catch (loadFailure) {
     pushToast("Sign-in is unavailable: Clerk failed to load.", {
       detail: loadFailure instanceof Error ? loadFailure.message : String(loadFailure),
@@ -95,6 +97,44 @@ export function attachUserButton(userButtonHost: HTMLDivElement): () => void {
   mountedClient.mountUserButton(userButtonHost);
   return () => {
     mountedClient.unmountUserButton(userButtonHost);
+  };
+}
+
+/**
+ * Renders Clerk's prebuilt auth surfaces (sign-in/sign-up modals, user button)
+ * in the app's "Warm Precision" design system on top of Clerk's dark base
+ * theme. Every color references the design token's CSS custom property, so
+ * global.css stays the sole owner of the palette — Clerk derives hover and
+ * alpha shades from these values with CSS color-mix at paint time.
+ */
+function warmPrecisionAppearance(darkBaseTheme: Appearance["theme"]): Appearance {
+  return {
+    theme: darkBaseTheme,
+    options: {
+      logoImageUrl: "/assets/javachat_cup_star_256.png",
+    },
+    variables: {
+      fontFamily: "var(--font-sans)",
+      borderRadius: "var(--radius-md)",
+      colorPrimary: "var(--color-accent)",
+      colorPrimaryForeground: "var(--color-text-primary)",
+      colorBackground: "var(--color-bg-secondary)",
+      colorForeground: "var(--color-text-primary)",
+      colorMutedForeground: "var(--color-text-tertiary)",
+      // Cream neutral: Clerk's derived alpha borders/hovers then land in the
+      // same rgba(255,252,247,…) family as the app's border tokens.
+      colorNeutral: "var(--color-text-primary)",
+      colorInput: "var(--color-bg-tertiary)",
+      colorInputForeground: "var(--color-text-primary)",
+      colorBorder: "var(--color-border-default)",
+      colorRing: "var(--color-accent)",
+      colorDanger: "var(--color-error)",
+      colorSuccess: "var(--color-success)",
+      colorWarning: "var(--color-warning)",
+      // Same overlay as MobileChatDrawer's ::backdrop; without it the backdrop
+      // derives from the cream colorNeutral and washes out the page.
+      colorModalBackdrop: "rgba(0, 0, 0, 0.5)",
+    },
   };
 }
 
