@@ -202,13 +202,12 @@ if [ -n "$DOCS_SETS_FILTER" ]; then
 fi
 
 source_app_jar="$(locate_app_jar)"
-if ! staged_app_jar_directory="$(mktemp -d "${TMPDIR:-/tmp}/java-chat-document-ingestion.XXXXXX")"; then
-    rm -f "$PID_FILE"
-    return 1
-fi
+staged_app_jar_directory=""
 cleanup_document_ingestion_resources() {
-    chmod u+w "$staged_app_jar_directory" "$staged_app_jar_directory/application.jar" 2>/dev/null || true
-    rm -rf "$staged_app_jar_directory"
+    if [ -n "$staged_app_jar_directory" ]; then
+        chmod u+w "$staged_app_jar_directory" "$staged_app_jar_directory/application.jar" 2>/dev/null || true
+        rm -rf "$staged_app_jar_directory"
+    fi
     rm -f "$PID_FILE"
 }
 shutdown_document_ingestion() {
@@ -216,8 +215,13 @@ shutdown_document_ingestion() {
     trap cleanup_document_ingestion_resources EXIT
     _common_cleanup "$received_signal"
 }
+# Traps are installed before staging so a signal during mktemp cannot leak the staging directory.
 trap 'shutdown_document_ingestion INT' INT
 trap 'shutdown_document_ingestion TERM' TERM
+if ! staged_app_jar_directory="$(mktemp -d "${TMPDIR:-/tmp}/java-chat-document-ingestion.XXXXXX")"; then
+    rm -f "$PID_FILE"
+    return 1
+fi
 if ! app_jar="$(stage_app_jar "$source_app_jar" "$staged_app_jar_directory")"; then
     cleanup_document_ingestion_resources
     return 1
