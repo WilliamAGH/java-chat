@@ -1,16 +1,19 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.config.RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT;
 import static com.williamcallahan.javachat.web.SseConstants.*;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
+import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
@@ -38,6 +41,8 @@ public class SseSupport {
 
     private static final String RESPONSE_PREPARATION_MESSAGE = "Preparing your response";
     private static final String RESPONSE_PREPARATION_DETAILS = "Finding relevant Java documentation.";
+    private static final String RESPONSE_PREPARATION_DEADLINE_ELAPSED_MESSAGE =
+            "Response preparation deadline elapsed before subscription";
     /** Fallback JSON payload when SSE error serialization fails. */
     private static final String ERROR_FALLBACK_JSON =
             "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
@@ -72,22 +77,33 @@ public class SseSupport {
     /** Partial citation conversion cannot succeed by retrying the same stream. */
     private static final boolean CITATION_PARTIAL_FAILURE_STATUS_RETRYABLE = false;
 
-    private static final Counter COALESCED_CHUNK_OVERFLOW_COUNTER =
-            Metrics.counter("javachat.sse.backpressure.overflowed_chunks");
-    private static final Counter DROPPED_HEARTBEAT_COUNTER =
-            Metrics.counter("javachat.sse.backpressure.dropped_heartbeats");
+    static final String RETRIEVAL_TIMEOUT_COUNTER_NAME = "javachat.sse.terminal.retrieval.timeouts";
 
     private final ObjectWriter jsonWriter;
+    private final Counter coalescedChunkOverflowCounter;
+    private final Counter droppedHeartbeatCounter;
+    private final Counter retrievalTimeoutCounter;
     private final AtomicLong coalescedChunkOverflowCount = new AtomicLong();
     private final AtomicLong droppedHeartbeatCount = new AtomicLong();
 
     /**
-     * Creates SSE support wired to the application's ObjectMapper.
+     * Creates SSE support wired to the application's JSON and metrics registries.
      *
      * @param objectMapper JSON mapper for safe SSE serialization
+     * @param meterRegistry metrics registry exported by the application
      */
-    public SseSupport(ObjectMapper objectMapper) {
-        this.jsonWriter = objectMapper.writer();
+    public SseSupport(ObjectMapper objectMapper, MeterRegistry meterRegistry) {
+        this.jsonWriter = Objects.requireNonNull(objectMapper, "objectMapper").writer();
+        MeterRegistry requiredMeterRegistry = Objects.requireNonNull(meterRegistry, "meterRegistry");
+        this.coalescedChunkOverflowCounter = Counter.builder("javachat.sse.backpressure.overflowed_chunks")
+                .description("Coalesced SSE text chunks rejected by the downstream buffer")
+                .register(requiredMeterRegistry);
+        this.droppedHeartbeatCounter = Counter.builder("javachat.sse.backpressure.dropped_heartbeats")
+                .description("SSE keepalive heartbeats dropped by downstream backpressure")
+                .register(requiredMeterRegistry);
+        this.retrievalTimeoutCounter = Counter.builder(RETRIEVAL_TIMEOUT_COUNTER_NAME)
+                .description("Retryable retrieval timeout terminal events emitted over SSE")
+                .register(requiredMeterRegistry);
     }
 
     /**
@@ -211,11 +227,12 @@ public class SseSupport {
      */
     public Flux<ServerSentEvent<String>> responsePreparationTimeoutError() {
         return sseError(SseEventPayload.builder("Response preparation timed out")
-                .details("Java documentation retrieval did not complete in time. Please retry.")
-                .code(STATUS_CODE_RETRIEVAL_TIMEOUT)
-                .stage(STATUS_STAGE_RETRIEVAL)
-                .retryable(true)
-                .build());
+                        .details("Java documentation retrieval did not complete in time. Please retry.")
+                        .code(STATUS_CODE_RETRIEVAL_TIMEOUT)
+                        .stage(STATUS_STAGE_RETRIEVAL)
+                        .retryable(true)
+                        .build())
+                .doOnNext(timeoutEvent -> retrievalTimeoutCounter.increment());
     }
 
     /**
@@ -225,16 +242,48 @@ public class SseSupport {
      * @return true when the failure or one of its causes is a timeout
      */
     public boolean isResponsePreparationTimeout(Throwable preparationFailure) {
-        Set<Throwable> inspectedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
-        return isResponsePreparationTimeout(preparationFailure, inspectedFailures);
+        Set<Throwable> inspectedAggregateFailures = Collections.newSetFromMap(new IdentityHashMap<>());
+        if (containsNonRetryableHybridSearchFailure(preparationFailure, inspectedAggregateFailures)) {
+            return false;
+        }
+        Set<Throwable> inspectedTimeoutFailures = Collections.newSetFromMap(new IdentityHashMap<>());
+        return containsTimeout(preparationFailure, inspectedTimeoutFailures);
     }
 
-    private boolean isResponsePreparationTimeout(Throwable preparationFailure, Set<Throwable> inspectedFailures) {
+    private boolean containsTimeout(Throwable preparationFailure, Set<Throwable> inspectedFailures) {
         if (preparationFailure == null || !inspectedFailures.add(preparationFailure)) {
             return false;
         }
-        return preparationFailure instanceof TimeoutException
-                || isResponsePreparationTimeout(preparationFailure.getCause(), inspectedFailures);
+        if (preparationFailure instanceof TimeoutException
+                || containsTimeout(preparationFailure.getCause(), inspectedFailures)) {
+            return true;
+        }
+        for (Throwable suppressedFailure : preparationFailure.getSuppressed()) {
+            if (containsTimeout(suppressedFailure, inspectedFailures)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsNonRetryableHybridSearchFailure(
+            Throwable preparationFailure, Set<Throwable> inspectedFailures) {
+        if (preparationFailure == null || !inspectedFailures.add(preparationFailure)) {
+            return false;
+        }
+        if (preparationFailure instanceof HybridSearchPartialFailureException hybridSearchFailure
+                && !hybridSearchFailure.isRetryable()) {
+            return true;
+        }
+        if (containsNonRetryableHybridSearchFailure(preparationFailure.getCause(), inspectedFailures)) {
+            return true;
+        }
+        for (Throwable suppressedFailure : preparationFailure.getSuppressed()) {
+            if (containsNonRetryableHybridSearchFailure(suppressedFailure, inspectedFailures)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -276,11 +325,31 @@ public class SseSupport {
      */
     public Flux<ServerSentEvent<String>> enforceResponsePreparationDeadline(
             Flux<ServerSentEvent<String>> operationEvents) {
-        return operationEvents.timeout(Mono.delay(RESPONSE_PREPARATION_TIMEOUT), ignoredOperationEvent -> Mono.never());
+        return enforceResponsePreparationDeadline(
+                operationEvents, System.nanoTime() + RESPONSE_PREPARATION_TIMEOUT.toNanos());
+    }
+
+    /**
+     * Bounds response preparation by the absolute deadline shared with retrieval dependencies.
+     *
+     * @param operationEvents operation that first emits provider metadata or a terminal error
+     * @param responsePreparationDeadlineNanos absolute {@link System#nanoTime()} deadline
+     * @return operation events with a first-event preparation deadline
+     */
+    public Flux<ServerSentEvent<String>> enforceResponsePreparationDeadline(
+            Flux<ServerSentEvent<String>> operationEvents, long responsePreparationDeadlineNanos) {
+        return Flux.defer(() -> {
+            long remainingPreparationNanos = responsePreparationDeadlineNanos - System.nanoTime();
+            if (remainingPreparationNanos <= 0L) {
+                return Flux.error(new TimeoutException(RESPONSE_PREPARATION_DEADLINE_ELAPSED_MESSAGE));
+            }
+            return operationEvents.timeout(
+                    Mono.delay(Duration.ofNanos(remainingPreparationNanos)), ignoredOperationEvent -> Mono.never());
+        });
     }
 
     private void recordCoalescedChunkOverflow(String overflowedChunk) {
-        COALESCED_CHUNK_OVERFLOW_COUNTER.increment();
+        coalescedChunkOverflowCounter.increment();
         long totalOverflowedChunks = coalescedChunkOverflowCount.incrementAndGet();
         if (totalOverflowedChunks % STREAM_BACKPRESSURE_DROP_LOG_INTERVAL == 0) {
             log.warn(
@@ -293,7 +362,7 @@ public class SseSupport {
     }
 
     private void recordDroppedHeartbeat() {
-        DROPPED_HEARTBEAT_COUNTER.increment();
+        droppedHeartbeatCounter.increment();
         long totalDroppedHeartbeats = droppedHeartbeatCount.incrementAndGet();
         if (totalDroppedHeartbeats % STREAM_BACKPRESSURE_DROP_LOG_INTERVAL == 0) {
             log.warn("Dropped {} SSE heartbeats due to downstream backpressure", totalDroppedHeartbeats);

@@ -75,22 +75,58 @@ class QdrantRetrievalConstraintBuilderTest {
     }
 
     @Test
-    void leavesUnparenthesizedJavaApiMethodAsARelevanceSignal() {
+    void constrainsUnparenthesizedJavaApiMethodToItsDeclaringType() {
         Optional<Filter> optionalFilter =
-                builder.buildCitationFilter(RetrievalConstraint.none(), "Explain List.of in Java");
+                builder.buildCitationFilter(RetrievalConstraint.none(), "Explain Java 25 List.of");
 
-        assertTrue(optionalFilter.isEmpty());
+        Filter qdrantFilter = optionalFilter.orElseThrow();
+        assertKeywordCondition(qdrantFilter, QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, "List.html");
+        assertFalse(qdrantFilter.toString().contains(QdrantPayloadFieldSchema.ANCHOR_FIELD));
     }
 
     @Test
-    void leavesRuntimeArgumentsAndMultipleSelectorsUnconstrained() {
+    void constrainsRuntimeArgumentsButLeavesMultipleSelectorsUnconstrained() {
         Optional<Filter> runtimeArguments =
-                builder.buildCitationFilter(RetrievalConstraint.none(), "Explain List.of(first, second)");
+                builder.buildCitationFilter(RetrievalConstraint.none(), "Explain Java 25 List.of(first, second)");
         Optional<Filter> comparison =
                 builder.buildCitationFilter(RetrievalConstraint.none(), "Compare List.of(E, E) with Set.of(E, E)");
 
-        assertTrue(runtimeArguments.isEmpty());
+        assertKeywordCondition(
+                runtimeArguments.orElseThrow(), QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, "List.html");
         assertTrue(comparison.isEmpty());
+    }
+
+    @Test
+    void constrainsQualifiedMethodReferencesWithoutInventingAnAnchor() {
+        Filter qdrantFilter = builder.buildCitationFilter(
+                        RetrievalConstraint.none(), "Show java.lang.String::formatted")
+                .orElseThrow();
+
+        assertKeywordCondition(qdrantFilter, QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, "String.html");
+        assertKeywordCondition(qdrantFilter, QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.lang");
+        assertFalse(qdrantFilter.toString().contains(QdrantPayloadFieldSchema.ANCHOR_FIELD));
+    }
+
+    @Test
+    void exactKnownChainsUseTheMappedDeclaringTypeAndAnchorTogether() {
+        Filter qdrantFilter = builder.buildCitationFilter(
+                        RetrievalConstraint.none(), "Explain Thread.ofVirtual().start(java.lang.Runnable)")
+                .orElseThrow();
+
+        assertKeywordCondition(qdrantFilter, QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, "Thread.Builder.html");
+        assertKeywordCondition(qdrantFilter, QdrantPayloadFieldSchema.ANCHOR_FIELD, "start(java.lang.Runnable)");
+        assertKeywordCondition(qdrantFilter, QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.lang");
+    }
+
+    @Test
+    void doesNotApplyJavaMetadataFiltersToOtherOfficialApis() {
+        Optional<Filter> optionalFilter =
+                builder.buildCitationFilter(RetrievalConstraint.none(), "Explain SpringApplication.run");
+        Optional<Filter> legacyJavaxFilter = builder.buildCitationFilter(
+                RetrievalConstraint.none(), "Explain javax.servlet.http.HttpServlet.service");
+
+        assertTrue(optionalFilter.isEmpty());
+        assertTrue(legacyJavaxFilter.isEmpty());
     }
 
     @Test

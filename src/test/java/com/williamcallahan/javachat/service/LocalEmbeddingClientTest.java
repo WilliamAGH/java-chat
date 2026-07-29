@@ -1,29 +1,39 @@
 package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import io.netty.channel.ConnectTimeoutException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.web.client.ResourceAccessException;
 
 /**
  * Verifies local embedding batching and dimension validation behavior.
  */
 class LocalEmbeddingClientTest {
+    private static final Duration MULTI_BATCH_OPERATION_BUDGET = Duration.ofMillis(250);
+    private static final long DELAYED_BATCH_RESPONSE_MILLIS = 150;
+    private static final Duration DEADLINE_TEST_LIMIT = Duration.ofSeconds(2);
 
     @Test
     void batchesRequestsAndPreservesEmbeddingOrderByIndex() throws IOException {
@@ -97,6 +107,118 @@ class LocalEmbeddingClientTest {
             httpServer.stop(0);
             serverExecutor.shutdownNow();
         }
+    }
+
+    @Test
+    void oneCallerDeadlineBoundsEveryLocalEmbeddingBatchTogether() throws IOException {
+        ExecutorService serverExecutor = Executors.newSingleThreadExecutor();
+        HttpServer httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        AtomicInteger requestCounter = new AtomicInteger();
+
+        httpServer.createContext("/v1/embeddings", exchange -> {
+            requestCounter.incrementAndGet();
+            try {
+                Thread.sleep(DELAYED_BATCH_RESPONSE_MILLIS);
+            } catch (InterruptedException interruptedException) {
+                Thread.currentThread().interrupt();
+                exchange.close();
+                return;
+            }
+            respondJson(exchange, 200, "{\"data\":[{\"index\":0,\"embedding\":[1.0,1.0,1.0]}]}");
+        });
+
+        httpServer.setExecutor(serverExecutor);
+        httpServer.start();
+        String baseUrl = "http://" + httpServer.getAddress().getHostString() + ":"
+                + httpServer.getAddress().getPort();
+
+        try {
+            LocalEmbeddingClient localEmbeddingClient =
+                    new LocalEmbeddingClient(baseUrl, "local-model", 3, 1, new RestTemplateBuilder());
+
+            EmbeddingServiceTemporarilyUnavailableException deadlineFailure = assertTimeout(
+                    DEADLINE_TEST_LIMIT,
+                    () -> assertThrows(
+                            EmbeddingServiceTemporarilyUnavailableException.class,
+                            () -> localEmbeddingClient.embed(
+                                    List.of("first", "second"), LlmGatewayTier.LIVE, MULTI_BATCH_OPERATION_BUDGET)));
+
+            assertTrue(deadlineFailure.getMessage().contains("Local embedding"));
+            TimeoutException socketDeadlineFailure =
+                    assertInstanceOf(TimeoutException.class, deadlineFailure.getCause());
+            assertInstanceOf(ResourceAccessException.class, socketDeadlineFailure.getCause());
+            assertEquals(2, requestCounter.get());
+        } finally {
+            httpServer.stop(0);
+            serverExecutor.shutdownNow();
+        }
+    }
+
+    @Test
+    void expiredCallerDeadlineDoesNotDispatchLocalEmbeddingRequest() throws IOException {
+        ExecutorService serverExecutor = Executors.newSingleThreadExecutor();
+        HttpServer httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        AtomicInteger requestCounter = new AtomicInteger();
+        httpServer.createContext("/v1/embeddings", exchange -> {
+            requestCounter.incrementAndGet();
+            respondJson(exchange, 200, "{\"data\":[{\"index\":0,\"embedding\":[1.0,1.0,1.0]}]}");
+        });
+        httpServer.setExecutor(serverExecutor);
+        httpServer.start();
+        String baseUrl = "http://" + httpServer.getAddress().getHostString() + ":"
+                + httpServer.getAddress().getPort();
+
+        try {
+            LocalEmbeddingClient localEmbeddingClient =
+                    new LocalEmbeddingClient(baseUrl, "local-model", 3, 1, new RestTemplateBuilder());
+
+            EmbeddingServiceTemporarilyUnavailableException deadlineFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
+                    () -> localEmbeddingClient.embed(List.of("expired"), LlmGatewayTier.LIVE, Duration.ZERO));
+
+            assertInstanceOf(TimeoutException.class, deadlineFailure.getCause());
+            assertEquals(0, requestCounter.get());
+        } finally {
+            httpServer.stop(0);
+            serverExecutor.shutdownNow();
+        }
+    }
+
+    @Test
+    void preservesNonTimeoutLocalTransportFailuresWithoutDeadlineCause() {
+        RestTemplateBuilder failingRestTemplateBuilder = new RestTemplateBuilder()
+                .additionalCustomizers(restTemplate -> restTemplate.setRequestFactory((requestUri, requestMethod) -> {
+                    throw new SocketException();
+                }));
+        LocalEmbeddingClient localEmbeddingClient = new LocalEmbeddingClient(
+                "http://local-embedding.test", "local-model", 3, 1, failingRestTemplateBuilder);
+
+        EmbeddingServiceTemporarilyUnavailableException transportFailure = assertThrows(
+                EmbeddingServiceTemporarilyUnavailableException.class,
+                () -> localEmbeddingClient.embed(List.of("transport failure"), LlmGatewayTier.LIVE));
+
+        ResourceAccessException typedTransportFailure =
+                assertInstanceOf(ResourceAccessException.class, transportFailure.getCause());
+        assertInstanceOf(SocketException.class, typedTransportFailure.getCause());
+    }
+
+    @Test
+    void reactorConnectTimeoutPreservesRetrievalTimeoutCause() {
+        RestTemplateBuilder timeoutRestTemplateBuilder = new RestTemplateBuilder()
+                .additionalCustomizers(restTemplate -> restTemplate.setRequestFactory((requestUri, requestMethod) -> {
+                    throw new ConnectTimeoutException("connection timed out");
+                }));
+        LocalEmbeddingClient localEmbeddingClient = new LocalEmbeddingClient(
+                "http://local-embedding.test", "local-model", 3, 1, timeoutRestTemplateBuilder);
+
+        EmbeddingServiceTemporarilyUnavailableException transportTimeout = assertThrows(
+                EmbeddingServiceTemporarilyUnavailableException.class,
+                () -> localEmbeddingClient.embed(List.of("transport timeout"), LlmGatewayTier.LIVE));
+
+        TimeoutException timeoutFailure = assertInstanceOf(TimeoutException.class, transportTimeout.getCause());
+        ResourceAccessException typedTransportFailure =
+                assertInstanceOf(ResourceAccessException.class, timeoutFailure.getCause());
+        assertInstanceOf(ConnectTimeoutException.class, typedTransportFailure.getCause());
     }
 
     private static void respondJson(HttpExchange exchange, int statusCode, String responseJson) throws IOException {

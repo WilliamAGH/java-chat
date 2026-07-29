@@ -1,7 +1,11 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_RETRIEVAL_TIMEOUT;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
+
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.RetrievalAugmentationConfig;
 import com.williamcallahan.javachat.domain.errors.ApiResponse;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
@@ -19,6 +23,7 @@ import jakarta.validation.Valid;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -35,6 +40,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
 /**
@@ -54,6 +60,7 @@ public class GuidedLearningController extends BaseController {
             "Guided lesson is listed in the TOC but has no packaged markdown";
     private static final String UNKNOWN_LESSON_SLUG_MESSAGE = "Unknown lesson slug: ";
     private static final Logger log = LoggerFactory.getLogger(GuidedLearningController.class);
+    private static final AtomicLong GUIDED_REQUEST_SEQUENCE = new AtomicLong();
 
     /** Timeout for synchronous curated lesson content reads. */
     private static final Duration LESSON_CONTENT_TIMEOUT = Duration.ofSeconds(25);
@@ -251,6 +258,9 @@ public class GuidedLearningController extends BaseController {
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> stream(
             @Valid @RequestBody GuidedStreamRequest request, HttpServletResponse response) {
+        long requestToken = GUIDED_REQUEST_SEQUENCE.incrementAndGet();
+        long responsePreparationDeadlineNanos =
+                System.nanoTime() + RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.toNanos();
         String sessionId = request.resolvedSessionId();
         GuidedLesson listedLesson = requireListedLesson(request.slug());
         String userQuery =
@@ -258,6 +268,12 @@ public class GuidedLearningController extends BaseController {
         String canonicalLessonSlug = listedLesson.getSlug();
 
         sseSupport.configureStreamingHeaders(response);
+
+        // Retrieval progress events stream live from the blocking retrieval work so the client can
+        // show which step (library search, rerank) is running during response preparation.
+        Sinks.Many<ServerSentEvent<String>> retrievalProgressEvents =
+                Sinks.many().multicast().onBackpressureBuffer();
+
         Flux<ServerSentEvent<String>> operationEvents = Flux.defer(() -> {
             if (!openAIStreamingService.isAvailable()) {
                 log.warn("OpenAI streaming service unavailable for guided session");
@@ -267,30 +283,58 @@ public class GuidedLearningController extends BaseController {
                 log.warn("Configured provider temporarily unavailable for guided session");
                 return sseSupport.configuredProviderUnavailableError();
             }
-            return streamGuidedResponse(sessionId, userQuery, canonicalLessonSlug);
+            return streamGuidedResponse(
+                    requestToken,
+                    sessionId,
+                    userQuery,
+                    canonicalLessonSlug,
+                    retrievalProgressEvents,
+                    responsePreparationDeadlineNanos);
         });
         Flux<ServerSentEvent<String>> deadlineBoundOperationEvents =
-                sseSupport.enforceResponsePreparationDeadline(operationEvents);
+                sseSupport.enforceResponsePreparationDeadline(operationEvents, responsePreparationDeadlineNanos);
+        Flux<ServerSentEvent<String>> operationEventsWithProgress = Flux.merge(
+                retrievalProgressEvents.asFlux(),
+                deadlineBoundOperationEvents.doFinally(terminationSignal -> retrievalProgressEvents.tryEmitComplete()));
         return Flux.concat(
-                        sseSupport.responsePreparationStatus(), sseSupport.withHeartbeats(deadlineBoundOperationEvents))
-                .onErrorResume(error -> guidedStreamError(error, sessionId, canonicalLessonSlug));
+                        sseSupport.responsePreparationStatus(), sseSupport.withHeartbeats(operationEventsWithProgress))
+                .onErrorResume(error -> guidedStreamError(error, requestToken, sessionId, canonicalLessonSlug));
     }
 
     /**
      * Builds and streams the guided lesson response via OpenAI.
      *
+     * @param requestToken request correlation token
      * @param sessionId chat session identifier
      * @param userQuery user's question
      * @param lessonSlug lesson context identifier
+     * @param retrievalProgressEvents sink receiving live retrieval progress status events
+     * @param responsePreparationDeadlineNanos absolute response-preparation deadline
      * @return SSE stream of response chunks with heartbeats
      */
-    private Flux<ServerSentEvent<String>> streamGuidedResponse(String sessionId, String userQuery, String lessonSlug) {
+    private Flux<ServerSentEvent<String>> streamGuidedResponse(
+            long requestToken,
+            String sessionId,
+            String userQuery,
+            String lessonSlug,
+            Sinks.Many<ServerSentEvent<String>> retrievalProgressEvents,
+            long responsePreparationDeadlineNanos) {
         return Flux.defer(() -> {
                     List<org.springframework.ai.chat.messages.Message> history = chatMemory.getHistory(sessionId);
                     StringBuilder fullResponse = new StringBuilder();
 
                     GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
-                            guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
+                            guidedService.buildStructuredGuidedPromptWithContext(
+                                    history,
+                                    lessonSlug,
+                                    userQuery,
+                                    retrievalNotice -> {
+                                        // A failed emission only means the client went away; progress
+                                        // notices are diagnostics and must not fail retrieval.
+                                        retrievalProgressEvents.tryEmitNext(sseSupport.statusEvent(
+                                                retrievalNotice.summary(), retrievalNotice.details()));
+                                    },
+                                    responsePreparationDeadlineNanos);
 
                     // Stream with provider transparency - surfaces which LLM is responding
                     return openAIStreamingService
@@ -323,10 +367,11 @@ public class GuidedLearningController extends BaseController {
                             .doOnComplete(() -> chatMemory.addExchange(sessionId, userQuery, fullResponse.toString()));
                 })
                 .subscribeOn(Schedulers.boundedElastic())
-                .onErrorResume(error -> guidedStreamError(error, sessionId, lessonSlug));
+                .onErrorResume(error -> guidedStreamError(error, requestToken, sessionId, lessonSlug));
     }
 
-    private Flux<ServerSentEvent<String>> guidedStreamError(Throwable error, String sessionId, String lessonSlug) {
+    private Flux<ServerSentEvent<String>> guidedStreamError(
+            Throwable error, long requestToken, String sessionId, String lessonSlug) {
         Optional<ReportedStreamingFailure> terminalFailureContext = ReportedStreamingFailure.findInCauseChain(error);
         Throwable upstreamError = terminalFailureContext
                 .map(ReportedStreamingFailure::upstreamFailure)
@@ -343,6 +388,21 @@ public class GuidedLearningController extends BaseController {
             return sseSupport.configuredProviderUnavailableError();
         }
         if (terminalFailureContext.isEmpty() && sseSupport.isResponsePreparationTimeout(upstreamError)) {
+            log.atWarn()
+                    .setMessage("Guided response preparation timeout")
+                    .addKeyValue("requestToken", requestToken)
+                    .addKeyValue(
+                            "sessionId",
+                            StructuredLogValue.bounded(sessionId, MAX_GUIDED_LOG_FIELD_LENGTH)
+                                    .text())
+                    .addKeyValue(
+                            "lessonSlug",
+                            StructuredLogValue.bounded(lessonSlug, MAX_GUIDED_LOG_FIELD_LENGTH)
+                                    .text())
+                    .addKeyValue("code", STATUS_CODE_RETRIEVAL_TIMEOUT)
+                    .addKeyValue("stage", STATUS_STAGE_RETRIEVAL)
+                    .addKeyValue("exceptionType", upstreamError.getClass().getSimpleName())
+                    .log();
             return sseSupport.responsePreparationTimeoutError();
         }
         if (terminalFailureContext.isEmpty()) {

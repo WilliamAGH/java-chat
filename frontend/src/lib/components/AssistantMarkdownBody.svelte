@@ -63,20 +63,27 @@
     margin-top: 0;
   }
 
+  /* WebKit derives auto optical sizing in points (0.75x px), so opsz is pinned
+     to each heading's px font size to keep Safari aligned with Chromium
+     (see Header.svelte .brand-text). */
   .assistant-content :global(h2) {
     font-size: var(--text-xl);
+    font-variation-settings: "opsz" 23;
   }
 
   .assistant-content :global(h1) {
     font-size: var(--text-2xl);
+    font-variation-settings: "opsz" 28;
   }
 
   .assistant-content :global(h3) {
     font-size: var(--text-lg);
+    font-variation-settings: "opsz" 19;
   }
 
   .assistant-content :global(h4) {
     font-size: var(--text-base);
+    font-variation-settings: "opsz" 16;
   }
 
   .assistant-content :global(ul),
@@ -141,6 +148,7 @@
     width: 2px;
     height: 1.2em;
     background: var(--color-accent);
+    border-radius: 1px;
     margin-left: 2px;
     vertical-align: text-bottom;
     opacity: 0;
@@ -149,12 +157,13 @@
 
   .cursor.visible {
     opacity: 1;
-    animation: typing-cursor 0.8s ease-in-out infinite;
+    animation: typing-cursor 1s ease-in-out infinite;
   }
 
-  @keyframes typing-cursor {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    .cursor.visible {
+      animation: none;
+    }
   }
 
   @media (max-width: 640px) {

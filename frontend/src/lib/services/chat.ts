@@ -26,6 +26,10 @@ export interface ChatMessage {
   timestamp: number;
   isError?: boolean;
   streamErrorMessage?: string;
+  /** Secondary explanation from the SSE error event, shown under the error message. */
+  errorDetails?: string;
+  /** Whether the server flagged the failure as retryable; drives the retry action. */
+  errorRetryable?: boolean;
 }
 
 const INVISIBLE_CHAT_FORMAT_CHARACTERS = new Set([

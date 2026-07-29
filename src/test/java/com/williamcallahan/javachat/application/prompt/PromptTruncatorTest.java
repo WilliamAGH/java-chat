@@ -232,6 +232,34 @@ class PromptTruncatorTest {
     }
 
     @Test
+    void returnsMinimalPromptWhenReservedSegmentsExceedLimitWithAuthoritativeContext() {
+        StructuredPrompt prompt = new StructuredPrompt(
+                new SystemSegment("Critical system instructions", 200),
+                List.of(new ContextDocumentSegment(
+                                1, "curated-lesson:records", "curated", "canonical records lesson", 100)
+                        .withPriority(PromptSegmentPriority.HIGH)),
+                List.of(new ConversationTurnSegment("user", "history", 100)),
+                new CurrentQuerySegment("Important question", 200));
+
+        PromptTruncator.TruncatedPrompt truncationOutcome;
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROMPT_TRUNCATOR_LOGGER)) {
+            truncationOutcome = truncator.truncate(prompt, 350);
+
+            assertEquals(1, expectedLogEvents.events().size());
+            assertEquals(Level.WARN, expectedLogEvents.events().getFirst().getLevel());
+        }
+
+        assertTrue(truncationOutcome.wasTruncated());
+        assertEquals(0, truncationOutcome.contextDocumentCount());
+        assertEquals(0, truncationOutcome.conversationTurnCount());
+        assertEquals(
+                "Critical system instructions",
+                truncationOutcome.prompt().system().content());
+        assertEquals(
+                "Important question", truncationOutcome.prompt().currentQuery().content());
+    }
+
+    @Test
     void prependsTruncationNotice() {
         StructuredPrompt prompt = new StructuredPrompt(
                 new SystemSegment("System", 100),

@@ -41,20 +41,46 @@ final class CitationCandidateRanker {
     static List<Document> orderForCitationQuery(String citationQuery, List<Document> citationCandidates) {
         Objects.requireNonNull(citationQuery, "citationQuery");
         Objects.requireNonNull(citationCandidates, "citationCandidates");
-        return JavaApiMethodSelector.uniqueExactOverloadFromQuery(citationQuery)
+        return JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery(citationQuery)
+                .filter(selector -> selector.exactOverloadAnchor().isPresent())
                 .map(selector -> exactOverloadCandidates(selector, citationCandidates))
                 .orElseGet(() -> JavaApiMethodSelector.fromQuery(citationQuery)
                         .map(selector -> reorderForSelector(selector, citationCandidates))
                         .orElseGet(() -> List.copyOf(citationCandidates)));
     }
 
-    /** Narrows prompt context to authoritative source-anchor matches for a sole exact overload query. */
+    /**
+     * Narrows prompt context to authoritative source-anchor matches for one Java member query.
+     *
+     * <p>Exact signatures retain one stored anchor. Bare member selectors retain every overload
+     * whose stored anchor has the requested method name. Both paths reject sibling members and
+     * non-Java documents rather than substituting semantically related evidence.</p>
+     */
     static List<Document> selectPromptContextForCitationQuery(String citationQuery, List<Document> promptDocuments) {
         Objects.requireNonNull(citationQuery, "citationQuery");
         Objects.requireNonNull(promptDocuments, "promptDocuments");
-        return JavaApiMethodSelector.uniqueExactOverloadFromQuery(citationQuery)
+        return JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery(citationQuery)
+                .filter(selector -> selector.exactOverloadAnchor().isPresent())
                 .map(selector -> exactOverloadCandidates(selector, promptDocuments))
-                .orElseGet(() -> List.copyOf(promptDocuments));
+                .orElseGet(() -> JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery(citationQuery)
+                        .map(selector -> memberFamilyCandidates(selector, promptDocuments))
+                        .orElseGet(() -> List.copyOf(promptDocuments)));
+    }
+
+    private static List<Document> memberFamilyCandidates(
+            JavaApiMethodSelector selector, List<Document> citationCandidates) {
+        List<Document> matchingMemberCandidates = new ArrayList<>(citationCandidates.size());
+        for (int candidatePosition = 0; candidatePosition < citationCandidates.size(); candidatePosition++) {
+            Document citationCandidate = Objects.requireNonNull(
+                    citationCandidates.get(candidatePosition), "citationCandidates[" + candidatePosition + "]");
+            Object rawAnchor = citationCandidate.getMetadata().get(QdrantPayloadFieldSchema.ANCHOR_FIELD);
+            if (matchesSelectorTypePageMetadata(selector, citationCandidate)
+                    && rawAnchor instanceof String candidateAnchor
+                    && selector.matchesMethodAnchor(candidateAnchor)) {
+                matchingMemberCandidates.add(citationCandidate);
+            }
+        }
+        return List.copyOf(matchingMemberCandidates);
     }
 
     private static List<Document> exactOverloadCandidates(

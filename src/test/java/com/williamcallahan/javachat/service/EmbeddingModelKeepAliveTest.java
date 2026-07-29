@@ -67,6 +67,28 @@ class EmbeddingModelKeepAliveTest {
         assertEquals(2, embeddingClient.warmUpInvocationCount);
         assertEquals(Status.UP, keepAlive.health().getStatus());
         assertEquals(100L, keepAlive.health().getDetails().get("lastProbeDurationMs"));
+        assertEquals(0, keepAlive.health().getDetails().get("consecutiveFailures"));
+        assertEquals(0, eventCount(Level.WARN, "event=embedding_model_probe_failed"));
+    }
+
+    @Test
+    void deferredProbeBetweenSuccessAndFailureCountsOnlyTheProviderFailure() {
+        SequencedEmbeddingClient embeddingClient =
+                new SequencedEmbeddingClient(ProbeOutcome.SUCCESS, ProbeOutcome.DEFERRED, ProbeOutcome.UNAVAILABLE);
+        EmbeddingModelKeepAlive keepAlive =
+                new EmbeddingModelKeepAlive(embeddingClient, new SequencedNanoTime(100, 5, 10));
+
+        keepAlive.keepEmbeddingModelWarm();
+        keepAlive.keepEmbeddingModelWarm();
+
+        assertEquals(Status.UP, keepAlive.health().getStatus());
+        assertEquals(0, keepAlive.health().getDetails().get("consecutiveFailures"));
+
+        keepAlive.keepEmbeddingModelWarm();
+
+        assertEquals(Status.DOWN, keepAlive.health().getStatus());
+        assertEquals(1, keepAlive.health().getDetails().get("consecutiveFailures"));
+        assertEquals(1, eventCount(Level.WARN, "event=embedding_model_probe_failed"));
     }
 
     @Test
@@ -157,6 +179,11 @@ class EmbeddingModelKeepAliveTest {
         }
 
         @Override
+        public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier, java.time.Duration requestTimeout) {
+            throw new AssertionError("keep-alive probes must not call embed(List, LlmGatewayTier, Duration)");
+        }
+
+        @Override
         public String modelName() {
             return "test-embedding-model";
         }
@@ -166,7 +193,9 @@ class EmbeddingModelKeepAliveTest {
             warmUpInvocationCount++;
             switch (probeOutcome.remove()) {
                 case SUCCESS -> {}
-                case DEFERRED -> throw new OpenAiCompatibleEmbeddingClient.EmbeddingProbeDeferredException();
+                case DEFERRED ->
+                    throw new OpenAiCompatibleEmbeddingClient.EmbeddingProbeDeferredException(
+                            "test deferral without provider contact");
                 case UNAVAILABLE -> throw new EmbeddingServiceUnavailableException("provider offline for test");
                 case UNEXPECTED -> throw new IllegalStateException("unexpected provider defect");
             }

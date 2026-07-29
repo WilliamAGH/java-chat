@@ -12,6 +12,7 @@ type GuidedCitationFetchResult = Awaited<
 type GuidedCitationFetchOptions = Parameters<
   typeof import("../services/guided").fetchGuidedLessonCitations
 >[1];
+type GuidedStreamCallbacks = import("../services/guided").GuidedStreamCallbacks;
 
 const fetchTocMock = vi.fn<FetchTocFunction>();
 const streamLessonContentMock = vi.fn();
@@ -20,7 +21,9 @@ const streamGuidedChatMock = vi.fn();
 const TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE = "The guided provider ended the stream";
 const TEST_GUIDED_LESSON = createGuidedLessonFixture("intro", "Test Lesson", "Lesson summary");
 const OFFSCREEN_MESSAGES_SCROLL_HEIGHT = 1_000;
+const STREAMED_MESSAGES_SCROLL_HEIGHT = 3_657;
 const VISIBLE_MESSAGES_CONTAINER_HEIGHT = 200;
+const SCROLLED_AWAY_SCROLL_TOP = 600;
 const NEW_UPDATES_INDICATOR_NAME = "1 new updates, jump to bottom";
 const ANY_NEW_UPDATES_INDICATOR_NAME = /jump to/i;
 
@@ -83,7 +86,7 @@ async function submitMobileGuidedMessage(
     target: { value: "Explain records" },
   });
   await fireEvent.click(mobileSendButton);
-  await vi.waitFor(() => expect(mobileMessageInput).toBeDisabled());
+  await vi.waitFor(() => expect(mobileMessageInput).toHaveAttribute("readonly"));
 }
 
 function configureLessonCatalog(...guidedLessons: GuidedLesson[]): void {
@@ -123,6 +126,19 @@ function makeDesktopMessagesContainerAppearScrolledAway(messagesContainer: HTMLE
 async function openLessonWithPendingNewUpdatesIndicator(initialLessonName: RegExp) {
   configureGuidedChatWithPendingStream();
 
+  let guidedStreamCallbacks: GuidedStreamCallbacks | undefined;
+  streamGuidedChatMock.mockImplementation(
+    async (
+      _sessionId: string,
+      _lessonSlug: string,
+      _guidedQuestion: string,
+      activeStreamCallbacks: GuidedStreamCallbacks,
+    ) => {
+      guidedStreamCallbacks = activeStreamCallbacks;
+      return new Promise<void>(() => {});
+    },
+  );
+
   const learnView = await renderLearnView();
   const initialLessonButton = await learnView.findByRole("button", {
     name: initialLessonName,
@@ -145,6 +161,19 @@ async function openLessonWithPendingNewUpdatesIndicator(initialLessonName: RegEx
   }
   await fireEvent.input(messageInput, { target: { value: "Hi" } });
   await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
+  await tick();
+  await vi.waitFor(() => expect(guidedStreamCallbacks).toBeDefined());
+
+  // Only a genuine scroll-away disengages follow; content growth alone never
+  // surfaces the indicator.
+  await fireEvent.wheel(messagesContainer);
+  await fireEvent.scroll(messagesContainer);
+
+  const activeGuidedStreamCallbacks = guidedStreamCallbacks;
+  if (!activeGuidedStreamCallbacks) {
+    throw new Error("Expected guided stream callbacks to be captured");
+  }
+  activeGuidedStreamCallbacks.onChunk("Off-screen chunk");
   await tick();
 
   return learnView;
@@ -251,7 +280,7 @@ describe("LearnView guided chat streaming stability", () => {
     expect(mobileChatDialog).toHaveAttribute("open");
   });
 
-  it("restores mobile drawer input focus after a submitted stream completes with focus in the form", async () => {
+  it("preserves mobile drawer input focus when it remains in the form during streaming", async () => {
     let completeStream: () => void = () => {
       throw new Error("Expected guided stream completion callback to be set");
     };
@@ -272,12 +301,12 @@ describe("LearnView guided chat streaming stability", () => {
     completeStream();
 
     await vi.waitFor(() => {
-      expect(mobileMessageInput).toBeEnabled();
+      expect(mobileMessageInput).not.toHaveAttribute("readonly");
       expect(mobileMessageInput).toHaveFocus();
     });
   });
 
-  it("restores mobile drawer input focus after a submitted stream completes with focus on the document body", async () => {
+  it("does not restore mobile drawer input focus after a send button stream completes", async () => {
     let completeStream: () => void = () => {
       throw new Error("Expected guided stream completion callback to be set");
     };
@@ -301,8 +330,8 @@ describe("LearnView guided chat streaming stability", () => {
     completeStream();
 
     await vi.waitFor(() => {
-      expect(mobileMessageInput).toBeEnabled();
-      expect(mobileMessageInput).toHaveFocus();
+      expect(mobileMessageInput).not.toHaveAttribute("readonly");
+      expect(document.activeElement).toBe(document.body);
     });
   });
 
@@ -327,7 +356,7 @@ describe("LearnView guided chat streaming stability", () => {
 
     completeStream();
 
-    await vi.waitFor(() => expect(mobileMessageInput).toBeEnabled());
+    await vi.waitFor(() => expect(mobileMessageInput).not.toHaveAttribute("readonly"));
     expect(mobileChatTrigger).toHaveFocus();
   });
 
@@ -449,6 +478,119 @@ describe("LearnView guided chat streaming stability", () => {
     expect(errorMessage.closest(".message.assistant.error")).not.toBeNull();
   });
 
+  it("reveals a terminal guided error above the composer after prior content scrolls the list", async () => {
+    streamGuidedChatMock.mockRejectedValue(new Error(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE));
+
+    const learnView = await renderLearnView();
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+
+    const messagesContainer = learnView.container.querySelector<HTMLElement>(
+      ".chat-panel--desktop .messages-container",
+    );
+    if (!messagesContainer) {
+      throw new Error("Expected the desktop messages container to be rendered");
+    }
+    // scrollHeight grows once the terminal error bubble renders, modeling the
+    // real DOM growth the final reveal must scroll to. At send time only the
+    // user message is present, so the send-time scrollOnce targets the shorter
+    // height; the final reveal after the error must target the taller one.
+    Object.defineProperties(messagesContainer, {
+      scrollTop: { configurable: true, value: 0, writable: true },
+      scrollHeight: {
+        configurable: true,
+        get() {
+          return messagesContainer.querySelector(".message.assistant.error")
+            ? OFFSCREEN_MESSAGES_SCROLL_HEIGHT + 400
+            : OFFSCREEN_MESSAGES_SCROLL_HEIGHT;
+        },
+      },
+      clientHeight: {
+        configurable: true,
+        value: VISIBLE_MESSAGES_CONTAINER_HEIGHT,
+      },
+    });
+    const scrollToSpy = vi.spyOn(messagesContainer, "scrollTo");
+
+    await fireEvent.input(learnView.getByLabelText("Message input"), {
+      target: { value: "Explain records" },
+    });
+    await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
+
+    const errorMessage = await learnView.findByText(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE);
+    expect(errorMessage.closest(".message.assistant.error")).not.toBeNull();
+
+    const grownScrollHeight = OFFSCREEN_MESSAGES_SCROLL_HEIGHT + 400;
+    await vi.waitFor(() => {
+      const finalRevealCall = scrollToSpy.mock.calls
+        .map((scrollArguments) => scrollArguments[0])
+        .find(
+          (scrollOptions) =>
+            typeof scrollOptions === "object" &&
+            scrollOptions !== null &&
+            "top" in scrollOptions &&
+            (scrollOptions as { top: number }).top === grownScrollHeight,
+        );
+      expect(finalRevealCall).toBeDefined();
+    });
+  });
+
+  it("retries a retryable guided failure with the original question", async () => {
+    const { StreamFailureError } = await import("../services/sse");
+    const retryableStreamFailure = new StreamFailureError({
+      message: "Response preparation timed out",
+      details: "Java documentation retrieval did not complete in time. Please retry.",
+      code: "retrieval.timeout",
+      retryable: true,
+      stage: "retrieval",
+    });
+    streamGuidedChatMock
+      .mockRejectedValueOnce(retryableStreamFailure)
+      .mockImplementation(async (_sessionId, _lessonSlug, _message, streamCallbacks) => {
+        streamCallbacks.onChunk("Recovered guided answer");
+      });
+
+    const learnView = await renderLearnView();
+    await openLessonAndSendMessage(learnView, /test lesson/i, "Explain records");
+
+    const retryButton = await learnView.findByRole("button", { name: "Retry" });
+    await fireEvent.click(retryButton);
+
+    expect(await learnView.findByText("Recovered guided answer")).toBeInTheDocument();
+    expect(streamGuidedChatMock).toHaveBeenCalledTimes(2);
+    expect(streamGuidedChatMock.mock.calls[1][2]).toBe("Explain records");
+    expect(learnView.queryByText("Response preparation timed out")).toBeNull();
+    expect(learnView.container.querySelectorAll(".message.user")).toHaveLength(1);
+  });
+
+  it("offers no retry control for a non-retryable guided failure", async () => {
+    streamGuidedChatMock.mockRejectedValue(new Error(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE));
+
+    const learnView = await renderLearnView();
+    await openLessonAndSendMessage(learnView, /test lesson/i, "Explain records");
+
+    await learnView.findByText(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE);
+    expect(learnView.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("opens the lesson named by the slug route prop", async () => {
+    const LearnViewComponent = (await import("./LearnView.svelte")).default;
+    const learnView = render(LearnViewComponent, { props: { selectedSlug: "intro" } });
+
+    expect(await learnView.findByRole("button", { name: "All Lessons" })).toBeInTheDocument();
+    expect(streamLessonContentMock).toHaveBeenCalledWith(
+      "intro",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("falls back to the lesson list for an unknown slug route", async () => {
+    const LearnViewComponent = (await import("./LearnView.svelte")).default;
+    const learnView = render(LearnViewComponent, { props: { selectedSlug: "missing-lesson" } });
+
+    expect(await learnView.findByRole("button", { name: /test lesson/i })).toBeInTheDocument();
+    expect(streamLessonContentMock).not.toHaveBeenCalled();
+  });
+
   it("treats invisible guided chunks as an empty failed response", async () => {
     streamGuidedChatMock.mockImplementation(
       async (_sessionId, _lessonSlug, _message, callbacks) => {
@@ -521,6 +663,76 @@ describe("LearnView guided chat streaming stability", () => {
     await tick();
 
     expect(learnView.queryByRole("button", { name: ANY_NEW_UPDATES_INDICATOR_NAME })).toBeNull();
+  });
+
+  it("shows one new update when an active stream grows off-screen", async () => {
+    let activeGuidedStreamCallbacks: GuidedStreamCallbacks | undefined;
+    streamGuidedChatMock.mockImplementation(
+      async (
+        _sessionId: string,
+        _lessonSlug: string,
+        _guidedQuestion: string,
+        guidedStreamCallbacks: GuidedStreamCallbacks,
+      ) => {
+        activeGuidedStreamCallbacks = guidedStreamCallbacks;
+        return new Promise<void>(() => {});
+      },
+    );
+
+    const learnView = await renderLearnView();
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+
+    const messagesContainer = learnView.container.querySelector<HTMLElement>(
+      ".chat-panel--desktop .messages-container",
+    );
+    if (!messagesContainer) {
+      throw new Error("Expected the desktop messages container to be rendered");
+    }
+    Object.defineProperties(messagesContainer, {
+      scrollTop: { configurable: true, value: 800 },
+      scrollHeight: { configurable: true, value: OFFSCREEN_MESSAGES_SCROLL_HEIGHT },
+      clientHeight: {
+        configurable: true,
+        value: VISIBLE_MESSAGES_CONTAINER_HEIGHT,
+      },
+    });
+
+    await fireEvent.input(learnView.getByLabelText("Message input"), {
+      target: { value: "Explain the lesson" },
+    });
+    await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
+    await vi.waitFor(() => expect(activeGuidedStreamCallbacks).toBeDefined());
+
+    const guidedStreamCallbacks = activeGuidedStreamCallbacks;
+    if (!guidedStreamCallbacks) {
+      throw new Error("Expected guided stream callbacks to be captured");
+    }
+    expect(learnView.queryByRole("button", { name: ANY_NEW_UPDATES_INDICATOR_NAME })).toBeNull();
+
+    // Disengage follow with a genuine scroll-away before the stream grows.
+    await fireEvent.wheel(messagesContainer);
+    Object.defineProperties(messagesContainer, {
+      scrollTop: { configurable: true, value: SCROLLED_AWAY_SCROLL_TOP },
+    });
+    await fireEvent.scroll(messagesContainer);
+
+    vi.useFakeTimers();
+    guidedStreamCallbacks.onChunk("First off-screen chunk");
+    Object.defineProperties(messagesContainer, {
+      scrollHeight: {
+        configurable: true,
+        value: STREAMED_MESSAGES_SCROLL_HEIGHT,
+      },
+    });
+    await tick();
+    await vi.advanceTimersByTimeAsync(100);
+
+    guidedStreamCallbacks.onChunk("Second off-screen chunk");
+    await tick();
+    await vi.advanceTimersByTimeAsync(50);
+    await tick();
+
+    expect(learnView.getByRole("button", { name: NEW_UPDATES_INDICATOR_NAME })).toBeInTheDocument();
   });
 
   it("clears the new-updates indicator when switching lessons", async () => {

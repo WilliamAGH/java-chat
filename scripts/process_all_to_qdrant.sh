@@ -170,6 +170,8 @@ for writable_state_directory in "$DOCS_SNAPSHOT_DIR" "$DOCS_PARSED_DIR" "$DOCS_I
     fi
 done
 
+setup_pid_and_cleanup "$PID_FILE"
+
 echo "[$(date)] Starting document processing" > "$LOG_FILE"
 echo "=============================================="
 echo "Document Processor"
@@ -182,15 +184,15 @@ echo ""
 
 if ! check_qdrant_connection "log"; then
     log "${RED}Cannot proceed without Qdrant connectivity${NC}"
+    rm -f "$PID_FILE"
     exit 1
 fi
 
 if ! check_embedding_server "log"; then
     log "${RED}Embedding provider check failed${NC}"
+    rm -f "$PID_FILE"
     exit 1
 fi
-
-setup_pid_and_cleanup "$PID_FILE"
 
 log "${YELLOW}Building application...${NC}"
 build_application "$LOG_FILE"
@@ -199,7 +201,31 @@ if [ -n "$DOCS_SETS_FILTER" ]; then
     export DOCS_SETS="$DOCS_SETS_FILTER"
 fi
 
-app_jar=$(locate_app_jar)
+source_app_jar="$(locate_app_jar)"
+staged_app_jar_directory=""
+cleanup_document_ingestion_resources() {
+    if [ -n "$staged_app_jar_directory" ]; then
+        chmod u+w "$staged_app_jar_directory" "$staged_app_jar_directory/application.jar" 2>/dev/null || true
+        rm -rf "$staged_app_jar_directory"
+    fi
+    rm -f "$PID_FILE"
+}
+shutdown_document_ingestion() {
+    local received_signal="$1"
+    trap cleanup_document_ingestion_resources EXIT
+    _common_cleanup "$received_signal"
+}
+# Traps are installed before staging so a signal during mktemp cannot leak the staging directory.
+trap 'shutdown_document_ingestion INT' INT
+trap 'shutdown_document_ingestion TERM' TERM
+if ! staged_app_jar_directory="$(mktemp -d "${TMPDIR:-/tmp}/java-chat-document-ingestion.XXXXXX")"; then
+    rm -f "$PID_FILE"
+    return 1
+fi
+if ! app_jar="$(stage_app_jar "$source_app_jar" "$staged_app_jar_directory")"; then
+    cleanup_document_ingestion_resources
+    return 1
+fi
 
 log "${YELLOW}Starting document processor...${NC}"
 java -Dspring.profiles.active=cli \
@@ -212,11 +238,14 @@ echo "$APP_PID" > "$PID_FILE"
 
 log "${BLUE}Application started with PID: $APP_PID${NC}"
 
-monitor_java_process "$APP_PID" "$LOG_FILE" "$PID_FILE"
+if ! monitor_java_process "$APP_PID" "$LOG_FILE" "$PID_FILE"; then
+    cleanup_document_ingestion_resources
+    return 1
+fi
+cleanup_document_ingestion_resources
 verify_doc_set_postconditions "$LOG_FILE"
 
 echo ""
-rm -f "$PID_FILE"
 log "${GREEN}Pipeline completed successfully${NC} ($(corpus_indexed_summary))"
 log "Log file: $LOG_FILE"
 }

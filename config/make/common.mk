@@ -5,7 +5,7 @@
 # Shell and Build Tools
 # ============================================================================
 SHELL := /bin/bash
-GRADLEW := ./gradlew
+GRADLEW := ./gradlew -Dorg.gradle.vfs.watch=false  # override global ~/.gradle/gradle.properties and stale daemon
 LOCKED_GRADLEW := ./scripts/with_build_state_lock.sh $(GRADLEW)
 
 # ============================================================================

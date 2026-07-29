@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -33,6 +34,7 @@ import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -86,7 +88,7 @@ class GuidedLearningControllerBackpressureOverflowTest {
                 streamingService,
                 new ExceptionResponseBuilder(),
                 mock(MarkdownService.class),
-                new SseSupport(objectMapper),
+                new SseSupport(objectMapper, new SimpleMeterRegistry()),
                 new AppProperties());
         Throwable streamBufferOverflowFailure = Exceptions.failWithOverflow();
         Flux<String> partialAnswerThenOverflow = Flux.range(0, STREAM_CHUNK_COALESCE_MAX_ITEMS)
@@ -97,7 +99,8 @@ class GuidedLearningControllerBackpressureOverflowTest {
         when(streamingService.canAttemptRequest()).thenReturn(true);
         when(guidedLearningService.getLesson(LESSON_SLUG)).thenReturn(Optional.of(listedLesson()));
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
+        when(guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         when(guidedLearningService.citationOutcomeForRetainedContext(

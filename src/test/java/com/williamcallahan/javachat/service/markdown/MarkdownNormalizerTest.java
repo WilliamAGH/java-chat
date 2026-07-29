@@ -204,6 +204,17 @@ class MarkdownNormalizerTest {
         assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"Java", "C", "JavaScript", "java", "c", "javascript"})
+    void preNormalizeForListsAndFences_preservesSingleWordInfoStringOnAttachedOpeningFence(String infoString) {
+        String attachedFences = String.join("\n", "Before```" + infoString, "literal content", "```");
+        String expectedNormalizedMarkdown = String.join("\n", "Before", "```" + infoString, "literal content", "```");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(attachedFences);
+
+        assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
+    }
+
     @Test
     void preNormalizeForListsAndFences_repairsAttachedClosingFenceWithParentheticalProse() {
         String attachedFences = String.join("\n", "Before```java", "int answer = 42;", "```(note)  ");

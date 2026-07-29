@@ -71,6 +71,12 @@
         onJumpToBottom,
     }: Props = $props();
 
+    /**
+     * Minimum gap between layout and visual viewport height that indicates a
+     * virtual keyboard is open (toolbar show/hide deltas stay well below it).
+     */
+    const KEYBOARD_VIEWPORT_GAP_PX = 150;
+
     let messagesContainer: HTMLElement | null = $state(null);
     let chatDialog: HTMLDialogElement | null = $state(null);
     let chatTrigger: HTMLButtonElement | null = $state(null);
@@ -92,11 +98,57 @@
         }
 
         chatDialog.showModal();
-        chatDialog
-            .querySelector<HTMLTextAreaElement>(
-                "textarea[aria-label='Message input']",
-            )
-            ?.focus();
+    });
+
+    // iOS Safari resizes only the visual viewport when the software keyboard
+    // opens, leaving fixed bottom-anchored overlays behind the keyboard. Pin
+    // the drawer to the visual viewport while the keyboard covers the layout.
+    $effect(() => {
+        if (!isOpen || !chatDialog) {
+            return;
+        }
+        const visualViewport = window.visualViewport;
+        if (!visualViewport) {
+            return;
+        }
+
+        function pinDrawerAboveVirtualKeyboard(): void {
+            if (!chatDialog || !visualViewport) {
+                return;
+            }
+            const keyboardObscuredLayoutHeightPx =
+                window.innerHeight -
+                visualViewport.height * visualViewport.scale;
+            const keyboardCoversLayout =
+                keyboardObscuredLayoutHeightPx >
+                KEYBOARD_VIEWPORT_GAP_PX;
+            if (keyboardCoversLayout) {
+                const visualViewportBottomOffsetPx =
+                    visualViewport.offsetTop +
+                    visualViewport.height -
+                    window.innerHeight;
+                chatDialog.style.height = `${visualViewport.height}px`;
+                chatDialog.style.transform = `translateY(${visualViewportBottomOffsetPx}px)`;
+            } else {
+                chatDialog.style.height = "";
+                chatDialog.style.transform = "";
+            }
+        }
+
+        visualViewport.addEventListener("resize", pinDrawerAboveVirtualKeyboard);
+        visualViewport.addEventListener("scroll", pinDrawerAboveVirtualKeyboard);
+        pinDrawerAboveVirtualKeyboard();
+
+        return () => {
+            visualViewport.removeEventListener(
+                "resize",
+                pinDrawerAboveVirtualKeyboard,
+            );
+            visualViewport.removeEventListener(
+                "scroll",
+                pinDrawerAboveVirtualKeyboard,
+            );
+        };
     });
 
     /** Exposes the messages container element for external scroll management. */
@@ -352,8 +404,13 @@
         position: fixed;
         inset: auto 0 0;
         width: 100%;
+        /* Reset the UA dialog default (calc(100% - 2em - 6px)) so the drawer
+           spans the full viewport width on phones. */
+        max-width: 100%;
         height: 85vh;
+        height: 85dvh;
         max-height: 85vh;
+        max-height: 85dvh;
         margin: 0;
         padding: 0;
         background: var(--color-bg-primary);
@@ -418,8 +475,8 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 36px;
-        height: 36px;
+        width: 44px;
+        height: 44px;
         padding: 0;
         background: transparent;
         border: none;
@@ -457,7 +514,7 @@
     .chat-drawer-input {
         flex-shrink: 0;
         border-top: 1px solid var(--color-border-subtle);
-        padding-bottom: env(safe-area-inset-bottom, 0);
+        padding-bottom: max(var(--space-3), env(safe-area-inset-bottom));
     }
 
     .chat-empty {
@@ -509,7 +566,9 @@
 
         .chat-drawer {
             height: 90vh;
+            height: 90dvh;
             max-height: 90vh;
+            max-height: 90dvh;
         }
     }
 </style>

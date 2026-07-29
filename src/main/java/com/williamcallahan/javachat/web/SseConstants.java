@@ -1,7 +1,5 @@
 package com.williamcallahan.javachat.web;
 
-import java.time.Duration;
-
 /**
  * Canonical SSE event types and streaming configuration constants.
  *
@@ -51,9 +49,6 @@ public final class SseConstants {
 
     /** Heartbeat interval in seconds to keep SSE connections alive through proxies. */
     public static final int HEARTBEAT_INTERVAL_SECONDS = 20;
-
-    /** Maximum time from preparation status to the first provider or terminal event. */
-    public static final Duration RESPONSE_PREPARATION_TIMEOUT = Duration.ofSeconds(20);
 
     /** Max number of raw model chunks to coalesce into one SSE text event. */
     public static final int STREAM_CHUNK_COALESCE_MAX_ITEMS = 24;

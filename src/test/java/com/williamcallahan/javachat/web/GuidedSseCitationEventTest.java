@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -37,6 +38,7 @@ import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -61,7 +63,7 @@ import reactor.core.publisher.Mono;
  * {@code [1]} instead of emitting structured citation payloads.</p>
  */
 @WebMvcTest(controllers = GuidedLearningController.class)
-@Import({AppProperties.class, WebMvcConfig.class, SseSupport.class})
+@Import({AppProperties.class, WebMvcConfig.class, SseSupport.class, SimpleMeterRegistry.class})
 @org.springframework.security.test.context.support.WithMockUser
 class GuidedSseCitationEventTest {
 
@@ -116,7 +118,8 @@ class GuidedSseCitationEventTest {
                         Flux.just("Hello"),
                         RateLimitService.ApiProvider.OPENAI,
                         List.of(lessonContextDocument.getId()))));
-        given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
+        given(guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        anyList(), anyString(), anyString(), any(), anyLong()))
                 .willReturn(promptOutcome);
         given(guidedLearningService.citationOutcomeForRetainedContext(
                         eq(promptOutcome), eq(List.of(lessonContextDocument.getId()))))
@@ -164,7 +167,8 @@ class GuidedSseCitationEventTest {
                         Flux.just("Hello"),
                         RateLimitService.ApiProvider.OPENAI,
                         List.of(lessonContextDocument.getId()))));
-        given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
+        given(guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        anyList(), anyString(), anyString(), any(), anyLong()))
                 .willReturn(promptOutcome);
         given(guidedLearningService.citationOutcomeForRetainedContext(
                         eq(promptOutcome), eq(List.of(lessonContextDocument.getId()))))

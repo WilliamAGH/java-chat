@@ -27,10 +27,12 @@ public record QueryEncodingServices(
     }
 
     boolean hasExactJavaApiOverload(String query) {
-        return JavaApiMethodSelector.uniqueExactOverloadFromQuery(query).isPresent();
+        return JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery(query)
+                .flatMap(JavaApiMethodSelector::exactOverloadAnchor)
+                .isPresent();
     }
 
-    String expandSparseCitationQuery(String query) {
-        return JavaApiMethodSelector.expandForSparseCitationQuery(query);
+    String sparseCitationQuery(String query) {
+        return JavaApiMethodSelector.sparseCitationQuery(query);
     }
 }

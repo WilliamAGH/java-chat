@@ -1,4 +1,11 @@
 <script lang="ts">
+  import {
+    attachUserButton,
+    clerkAuthentication,
+    openSignIn,
+    openSignUp,
+  } from '../composables/clerkAuthentication.svelte'
+
   interface Props {
     currentView: 'chat' | 'learn'
   }
@@ -18,14 +25,13 @@
       <span class="brand-text">Java Chat</span>
     </a>
 
-    <div class="nav-tabs" role="tablist" aria-label="Main navigation">
+    <nav class="nav-tabs" aria-label="Main navigation">
       <button
         type="button"
-        role="tab"
         class="nav-tab"
         class:active={currentView === 'chat'}
         aria-label="Chat"
-        aria-selected={currentView === 'chat'}
+        aria-current={currentView === 'chat' ? 'page' : undefined}
         onclick={() => currentView = 'chat'}
       >
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -36,11 +42,10 @@
 
       <button
         type="button"
-        role="tab"
         class="nav-tab"
         class:active={currentView === 'learn'}
         aria-label="Learn"
-        aria-selected={currentView === 'learn'}
+        aria-current={currentView === 'learn' ? 'page' : undefined}
         onclick={() => currentView = 'learn'}
       >
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -48,8 +53,22 @@
         </svg>
         <span>Learn</span>
       </button>
-    </div>
+      </nav>
 
+    {#if clerkAuthentication.isLoaded}
+      <div class="auth-controls">
+        {#if clerkAuthentication.signedInUser}
+          <div class="user-button-host" {@attach attachUserButton}></div>
+        {:else}
+          <button type="button" class="auth-button" onclick={() => openSignIn()}>
+            Sign in
+          </button>
+          <button type="button" class="auth-button auth-button-primary" onclick={() => openSignUp()}>
+            Sign up
+          </button>
+        {/if}
+      </div>
+    {/if}
   </div>
 </header>
 
@@ -94,8 +113,11 @@
   }
 
   .brand-text {
-    font-family: var(--font-serif);
-    font-size: var(--text-lg);
+    /* Times New Roman: Fraunces renders its small-optical-size J design (stub
+       hook) at this size in Safari, and the vendored font's STAT table blocks
+       any CSS correction there. */
+    font-family: "Times New Roman", Times, serif;
+    font-size: var(--text-xl);
     font-weight: 500;
     letter-spacing: var(--tracking-tight);
   }
@@ -148,6 +170,43 @@
     opacity: 1;
   }
 
+  /* Authentication */
+  .auth-controls {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .auth-button {
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-out);
+  }
+
+  .auth-button:hover {
+    color: var(--color-text-primary);
+    background: var(--color-surface-hover);
+  }
+
+  .auth-button-primary {
+    color: var(--color-text-primary);
+    background: var(--color-bg-elevated);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .user-button-host {
+    display: flex;
+    align-items: center;
+    min-width: 28px;
+    min-height: 28px;
+  }
+
 
   /* Tablet */
   @media (max-width: 768px) {
@@ -184,6 +243,11 @@
     .nav-icon {
       width: 20px;
       height: 20px;
+    }
+
+    .auth-button {
+      padding: var(--space-2) var(--space-3);
+      min-height: 44px; /* Touch target */
     }
   }
 

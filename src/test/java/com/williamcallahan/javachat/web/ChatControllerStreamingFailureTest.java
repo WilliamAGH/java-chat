@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -40,7 +41,6 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
-import com.williamcallahan.javachat.service.EmbeddingServiceTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
@@ -48,6 +48,8 @@ import com.williamcallahan.javachat.service.RerankingFailureException;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
+import io.grpc.Status;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
@@ -93,9 +95,11 @@ class ChatControllerStreamingFailureTest {
     private ExpectedLogEvents pipelineLogEvents;
     private ExpectedLogEvents reactorHookLogEvents;
     private ExpectedLogEvents reactorOperatorLogEvents;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void capturePipelineLogs() {
+        meterRegistry = new SimpleMeterRegistry();
         pipelineLogEvents = ExpectedLogEvents.capture(pipelineLogger);
         reactorHookLogEvents = ExpectedLogEvents.capture(reactorHooksLogger);
         reactorOperatorLogEvents = ExpectedLogEvents.capture(reactorOperatorsLogger);
@@ -223,7 +227,7 @@ class ChatControllerStreamingFailureTest {
     }
 
     @Test
-    void wrappedEmbeddingDeadlineUsesTheRetrievalTimeoutContract() throws JsonProcessingException {
+    void wrappedQdrantDeadlineUsesTheRetrievalTimeoutContract() throws JsonProcessingException {
         ChatService chatService = mock(ChatService.class);
         ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
@@ -236,14 +240,21 @@ class ChatControllerStreamingFailureTest {
                 createSseSupport(),
                 new ExceptionResponseBuilder(),
                 new AppProperties());
-        EmbeddingServiceTemporarilyUnavailableException embeddingDeadlineFailure =
-                new EmbeddingServiceTemporarilyUnavailableException(
-                        UPSTREAM_SECRET_MESSAGE, new TimeoutException("embedding request deadline"));
+        TimeoutException qdrantDeadlineFailure = new TimeoutException("Qdrant query deadline");
+        qdrantDeadlineFailure.initCause(Status.DEADLINE_EXCEEDED.asRuntimeException());
+        HybridSearchPartialFailureException.CollectionSearchFailure collectionSearchFailure =
+                new HybridSearchPartialFailureException.CollectionSearchFailure(
+                        "java-docs",
+                        "Timeout",
+                        UPSTREAM_SECRET_MESSAGE,
+                        HybridSearchPartialFailureException.FailureDisposition.TRANSIENT);
+        HybridSearchPartialFailureException hybridDeadlineFailure = new HybridSearchPartialFailureException(
+                "Qdrant retrieval failed", List.of(collectionSearchFailure), List.of(qdrantDeadlineFailure));
         when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
-                .thenThrow(embeddingDeadlineFailure);
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any(), anyLong()))
+                .thenThrow(hybridDeadlineFailure);
 
         List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
                 chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
@@ -265,6 +276,26 @@ class ChatControllerStreamingFailureTest {
         assertEquals(STATUS_STAGE_RETRIEVAL, timeoutError.stage());
         assertFalse(serializedTimeoutError.contains(UPSTREAM_SECRET_MESSAGE));
         verify(streamingService, never()).streamResponse(any(StructuredPrompt.class), anyDouble());
+        List<ILoggingEvent> retrievalTimeoutWarnings = pipelineLogEvents.events().stream()
+                .filter(logEvent -> logEvent.getLevel() == Level.WARN
+                        && "Response preparation timeout".equals(logEvent.getFormattedMessage()))
+                .toList();
+        assertEquals(1, retrievalTimeoutWarnings.size());
+        ILoggingEvent retrievalTimeoutWarning = retrievalTimeoutWarnings.getFirst();
+        assertLogFieldPresent(retrievalTimeoutWarning, "requestToken");
+        assertLogField(retrievalTimeoutWarning, "sessionId", "session?id");
+        assertLogField(retrievalTimeoutWarning, "code", STATUS_CODE_RETRIEVAL_TIMEOUT);
+        assertLogField(retrievalTimeoutWarning, "stage", STATUS_STAGE_RETRIEVAL);
+        assertLogField(
+                retrievalTimeoutWarning, "exceptionType", HybridSearchPartialFailureException.class.getSimpleName());
+        assertNull(retrievalTimeoutWarning.getThrowableProxy());
+        assertFalse(retrievalTimeoutWarning.toString().contains(UPSTREAM_SECRET_MESSAGE));
+        assertEquals(
+                1.0,
+                meterRegistry
+                        .get(SseSupport.RETRIEVAL_TIMEOUT_COUNTER_NAME)
+                        .counter()
+                        .count());
         assertEquals(
                 0,
                 pipelineLogEvents.events().stream()
@@ -343,7 +374,7 @@ class ChatControllerStreamingFailureTest {
                 retrievalFinished.countDown();
             }
         });
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
@@ -526,7 +557,7 @@ class ChatControllerStreamingFailureTest {
                 StructuredPrompt.fromRawPrompt("test", 1),
                 List.of(),
                 List.of(officialPromptDocument, truncatedPromptDocument));
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(promptOutcome);
         when(chatService.citationOutcomeForRetainedContext(
                         USER_QUERY, promptOutcome, List.of(officialPromptDocument.getId())))
@@ -584,7 +615,7 @@ class ChatControllerStreamingFailureTest {
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         ChatService.StructuredPromptOutcome promptOutcome = new ChatService.StructuredPromptOutcome(
                 StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of(broadPromptDocument));
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(exactOverloadQuery)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(exactOverloadQuery), any(), anyLong()))
                 .thenReturn(promptOutcome);
         when(chatService.citationOutcomeForRetainedContext(
                         exactOverloadQuery, promptOutcome, List.of(broadPromptDocument.getId())))
@@ -645,11 +676,11 @@ class ChatControllerStreamingFailureTest {
                 chatMemoryService,
                 streamingService,
                 retrievalService,
-                new SseSupport(objectMapper),
+                createSseSupport(),
                 new ExceptionResponseBuilder(),
                 new AppProperties());
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(streamingService.canAttemptRequest()).thenReturn(true);
@@ -712,7 +743,7 @@ class ChatControllerStreamingFailureTest {
                 .concatWith(Flux.error(streamBufferOverflowFailure));
 
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(streamingService.canAttemptRequest()).thenReturn(true);
@@ -759,7 +790,7 @@ class ChatControllerStreamingFailureTest {
                 new AppProperties());
 
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(streamingService.canAttemptRequest()).thenReturn(true);
@@ -783,8 +814,13 @@ class ChatControllerStreamingFailureTest {
                         structuredField.key.equals(fieldName) && structuredField.value.equals(expectedField)));
     }
 
+    private void assertLogFieldPresent(ILoggingEvent controllerAlert, String fieldName) {
+        assertTrue(controllerAlert.getKeyValuePairs().stream()
+                .anyMatch(structuredField -> structuredField.key.equals(fieldName)));
+    }
+
     private SseSupport createSseSupport() {
-        return new SseSupport(objectMapper);
+        return new SseSupport(objectMapper, meterRegistry);
     }
 }
 

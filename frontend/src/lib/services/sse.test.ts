@@ -2,9 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { streamSse, streamSseGet } from "./sse";
 
 const SSE_STREAM_RESPONSE_STATUS = 200;
+const HTTP_BAD_REQUEST_STATUS = 400;
+const HTTP_TOO_MANY_REQUESTS_STATUS = 429;
 const HTTP_SERVICE_UNAVAILABLE_STATUS = 503;
 const FETCH_FAILURE_MESSAGE = "Network request failed";
 const STREAM_READ_FAILURE_MESSAGE = "Unable to read the SSE stream";
+const NETWORK_FAILURE_MESSAGE = "Couldn't reach the server";
+const NETWORK_FAILURE_DETAILS = "Check your connection and try again.";
 const SERVER_EVENT_ERROR_MESSAGE = "The provider ended the stream";
 const CITATION_WARNING_MESSAGE = "Some citations could not be loaded";
 const CITATION_WARNING_DETAILS = "Citations could not be loaded";
@@ -54,43 +58,69 @@ describe("streamSse transport handling", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
-  it("reports and rejects a non-abort fetch failure exactly once", async () => {
+  it("reports and rejects a non-abort fetch failure as a retryable network failure", async () => {
     const fetchFailure = new Error(FETCH_FAILURE_MESSAGE);
     const fetchMock = vi.fn().mockRejectedValue(fetchFailure);
     vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const onText = vi.fn();
+    const onError = vi.fn();
+
+    const rejection = await streamSse(
+      "/api/test/stream",
+      { hello: "world" },
+      { onText, onError },
+      "sse.test.ts",
+    ).catch((caughtFailure: unknown) => caughtFailure);
+
+    expect(rejection).toMatchObject({
+      name: "StreamFailureError",
+      message: NETWORK_FAILURE_MESSAGE,
+      details: NETWORK_FAILURE_DETAILS,
+      retryable: true,
+    });
+    expect((rejection as { cause?: unknown }).cause).toBe(fetchFailure);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(onText).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith({
+      message: NETWORK_FAILURE_MESSAGE,
+      details: NETWORK_FAILURE_DETAILS,
+      retryable: true,
+    });
+  });
+
+  it("reports and rejects a non-abort GET fetch failure as a retryable network failure", async () => {
+    const fetchFailure = new Error(FETCH_FAILURE_MESSAGE);
+    const fetchMock = vi.fn().mockRejectedValue(fetchFailure);
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const onText = vi.fn();
     const onError = vi.fn();
 
     await expect(
-      streamSse("/api/test/stream", { hello: "world" }, { onText, onError }, "sse.test.ts"),
-    ).rejects.toBe(fetchFailure);
+      streamSseGet("/api/test/stream", { onText, onError }, "sse.test.ts"),
+    ).rejects.toMatchObject({
+      name: "StreamFailureError",
+      message: NETWORK_FAILURE_MESSAGE,
+      details: NETWORK_FAILURE_DETAILS,
+      retryable: true,
+    });
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(onText).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledOnce();
-    expect(onError).toHaveBeenCalledWith({ message: FETCH_FAILURE_MESSAGE });
+    expect(onError).toHaveBeenCalledWith({
+      message: NETWORK_FAILURE_MESSAGE,
+      details: NETWORK_FAILURE_DETAILS,
+      retryable: true,
+    });
   });
 
-  it("reports and rejects a non-abort GET fetch failure exactly once", async () => {
-    const fetchFailure = new Error(FETCH_FAILURE_MESSAGE);
-    const fetchMock = vi.fn().mockRejectedValue(fetchFailure);
-    vi.stubGlobal("fetch", fetchMock);
-
-    const onText = vi.fn();
-    const onError = vi.fn();
-
-    await expect(streamSseGet("/api/test/stream", { onText, onError }, "sse.test.ts")).rejects.toBe(
-      fetchFailure,
-    );
-
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(onText).not.toHaveBeenCalled();
-    expect(onError).toHaveBeenCalledOnce();
-    expect(onError).toHaveBeenCalledWith({ message: FETCH_FAILURE_MESSAGE });
-  });
-
-  it("reports a non-OK GET response exactly once", async () => {
+  it("reports a 5xx response as a retryable stream failure", async () => {
     const serviceUnavailableMessage = `HTTP ${HTTP_SERVICE_UNAVAILABLE_STATUS}: Service Unavailable`;
     vi.stubGlobal(
       "fetch",
@@ -107,11 +137,110 @@ describe("streamSse transport handling", () => {
 
     await expect(
       streamSseGet("/api/test/stream", { onText, onError }, "sse.test.ts"),
-    ).rejects.toThrow(serviceUnavailableMessage);
+    ).rejects.toMatchObject({
+      name: "StreamFailureError",
+      message: serviceUnavailableMessage,
+      retryable: true,
+    });
 
     expect(onText).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledOnce();
-    expect(onError).toHaveBeenCalledWith({ message: serviceUnavailableMessage });
+    expect(onError).toHaveBeenCalledWith({
+      message: serviceUnavailableMessage,
+      retryable: true,
+    });
+  });
+
+  it("reports a 429 response as a retryable stream failure", async () => {
+    const rateLimitedMessage = `HTTP ${HTTP_TOO_MANY_REQUESTS_STATUS}: Too Many Requests`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: HTTP_TOO_MANY_REQUESTS_STATUS,
+          statusText: "Too Many Requests",
+        }),
+      ),
+    );
+
+    const onText = vi.fn();
+    const onError = vi.fn();
+
+    await expect(
+      streamSseGet("/api/test/stream", { onText, onError }, "sse.test.ts"),
+    ).rejects.toMatchObject({
+      name: "StreamFailureError",
+      message: rateLimitedMessage,
+      retryable: true,
+    });
+
+    expect(onError).toHaveBeenCalledWith({
+      message: rateLimitedMessage,
+      retryable: true,
+    });
+  });
+
+  it("reports a 4xx client error as a non-retryable stream failure", async () => {
+    const badRequestMessage = `HTTP ${HTTP_BAD_REQUEST_STATUS}: Bad Request`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: HTTP_BAD_REQUEST_STATUS,
+          statusText: "Bad Request",
+        }),
+      ),
+    );
+
+    const onText = vi.fn();
+    const onError = vi.fn();
+
+    await expect(
+      streamSseGet("/api/test/stream", { onText, onError }, "sse.test.ts"),
+    ).rejects.toMatchObject({
+      name: "StreamFailureError",
+      message: badRequestMessage,
+      retryable: false,
+    });
+
+    expect(onText).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith({
+      message: badRequestMessage,
+      retryable: false,
+    });
+  });
+
+  it("attaches the HTTP status as details when the server returns an API error message", async () => {
+    const apiErrorMessage = "The model is overloaded";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ status: "error", message: apiErrorMessage }), {
+          status: HTTP_SERVICE_UNAVAILABLE_STATUS,
+          statusText: "Service Unavailable",
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const onText = vi.fn();
+    const onError = vi.fn();
+
+    await expect(
+      streamSseGet("/api/test/stream", { onText, onError }, "sse.test.ts"),
+    ).rejects.toMatchObject({
+      name: "StreamFailureError",
+      message: apiErrorMessage,
+      details: `HTTP ${HTTP_SERVICE_UNAVAILABLE_STATUS}: Service Unavailable`,
+      retryable: true,
+    });
+
+    expect(onError).toHaveBeenCalledWith({
+      message: apiErrorMessage,
+      details: `HTTP ${HTTP_SERVICE_UNAVAILABLE_STATUS}: Service Unavailable`,
+      retryable: true,
+    });
   });
 
   it("reports a missing GET response body exactly once", async () => {
@@ -130,11 +259,18 @@ describe("streamSse transport handling", () => {
 
     await expect(
       streamSseGet("/api/test/stream", { onText, onError }, "sse.test.ts"),
-    ).rejects.toThrow(MISSING_STREAM_BODY_MESSAGE);
+    ).rejects.toMatchObject({
+      name: "StreamFailureError",
+      message: MISSING_STREAM_BODY_MESSAGE,
+      retryable: true,
+    });
 
     expect(onText).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledOnce();
-    expect(onError).toHaveBeenCalledWith({ message: MISSING_STREAM_BODY_MESSAGE });
+    expect(onError).toHaveBeenCalledWith({
+      message: MISSING_STREAM_BODY_MESSAGE,
+      retryable: true,
+    });
   });
 
   it("reports a valid server error event exactly once", async () => {
@@ -191,7 +327,7 @@ describe("streamSse transport handling", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
-  it("reports and rejects a stream-read failure exactly once", async () => {
+  it("reports and rejects a stream-read failure as a retryable network failure", async () => {
     const streamReadFailure = new Error(STREAM_READ_FAILURE_MESSAGE);
     const sseStreamBody = new ReadableStream<Uint8Array>({
       start(streamController) {
@@ -205,18 +341,34 @@ describe("streamSse transport handling", () => {
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const onText = vi.fn();
     const onError = vi.fn();
 
-    await expect(
-      streamSse("/api/test/stream", { hello: "world" }, { onText, onError }, "sse.test.ts"),
-    ).rejects.toBe(streamReadFailure);
+    const rejection = await streamSse(
+      "/api/test/stream",
+      { hello: "world" },
+      { onText, onError },
+      "sse.test.ts",
+    ).catch((caughtFailure: unknown) => caughtFailure);
+
+    expect(rejection).toMatchObject({
+      name: "StreamFailureError",
+      message: NETWORK_FAILURE_MESSAGE,
+      details: NETWORK_FAILURE_DETAILS,
+      retryable: true,
+    });
+    expect((rejection as { cause?: unknown }).cause).toBe(streamReadFailure);
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(onText).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledOnce();
-    expect(onError).toHaveBeenCalledWith({ message: STREAM_READ_FAILURE_MESSAGE });
+    expect(onError).toHaveBeenCalledWith({
+      message: NETWORK_FAILURE_MESSAGE,
+      details: NETWORK_FAILURE_DETAILS,
+      retryable: true,
+    });
   });
 });
 

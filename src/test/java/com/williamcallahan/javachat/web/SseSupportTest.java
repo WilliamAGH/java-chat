@@ -1,18 +1,21 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.config.RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
 import static com.williamcallahan.javachat.web.SseConstants.HEARTBEAT_INTERVAL_SECONDS;
-import static com.williamcallahan.javachat.web.SseConstants.RESPONSE_PREPARATION_TIMEOUT;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_RETRIEVAL_TIMEOUT;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
 import static com.williamcallahan.javachat.web.SseConstants.STREAM_BACKPRESSURE_BUFFER_CAPACITY;
 import static com.williamcallahan.javachat.web.SseConstants.STREAM_CHUNK_COALESCE_MAX_ITEMS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -38,6 +41,9 @@ class SseSupportTest {
     private static final int BACKPRESSURE_OVERFLOW_BUFFER_MULTIPLIER = 2;
     private static final int DEADLINE_TEST_MULTIPLIER = 2;
     private static final Duration BACKPRESSURE_TEST_COMPLETION_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration DELAYED_SUBSCRIPTION_BUDGET = Duration.ofSeconds(1);
+    private static final Duration DELAYED_SUBSCRIPTION_DELAY = Duration.ofMillis(1_250);
+    private static final Duration DELAYED_SUBSCRIPTION_VERIFICATION_TIMEOUT = Duration.ofMillis(1_750);
 
     @Autowired
     ObjectMapper objectMapper;
@@ -149,11 +155,39 @@ class SseSupportTest {
     }
 
     @Test
-    void responsePreparationTimeoutErrorUsesTheStableRetryableContract() throws JsonProcessingException {
+    void responsePreparationDeadlineUsesTheRemainingBudgetAtSubscription() {
         SseSupport sseSupport = createSseSupport();
+        AtomicInteger operationSubscriptionCount = new AtomicInteger();
+        Flux<ServerSentEvent<String>> stalledOperationEvents = Flux.defer(() -> {
+            operationSubscriptionCount.incrementAndGet();
+            return Flux.never();
+        });
+        long responsePreparationDeadlineNanos = System.nanoTime() + DELAYED_SUBSCRIPTION_BUDGET.toNanos();
+        Flux<ServerSentEvent<String>> deadlineBoundEvents =
+                sseSupport.enforceResponsePreparationDeadline(stalledOperationEvents, responsePreparationDeadlineNanos);
 
-        ServerSentEvent<String> timeoutEvent = Objects.requireNonNull(
-                sseSupport.responsePreparationTimeoutError().blockFirst(), "response preparation timeout event");
+        StepVerifier.create(deadlineBoundEvents.delaySubscription(DELAYED_SUBSCRIPTION_DELAY))
+                .expectError(TimeoutException.class)
+                .verify(DELAYED_SUBSCRIPTION_VERIFICATION_TIMEOUT);
+
+        assertEquals(0, operationSubscriptionCount.get());
+    }
+
+    @Test
+    void responsePreparationTimeoutErrorUsesTheStableRetryableContract() throws JsonProcessingException {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        SseSupport sseSupport = new SseSupport(objectMapper, meterRegistry);
+        Flux<ServerSentEvent<String>> timeoutEvents = sseSupport.responsePreparationTimeoutError();
+        StepVerifier.create(timeoutEvents, 0).thenCancel().verify();
+        assertEquals(
+                0.0,
+                meterRegistry
+                        .get(SseSupport.RETRIEVAL_TIMEOUT_COUNTER_NAME)
+                        .counter()
+                        .count());
+
+        ServerSentEvent<String> timeoutEvent =
+                Objects.requireNonNull(timeoutEvents.blockFirst(), "response preparation timeout event");
         SseSupport.SseEventPayload timeoutEventPayload = objectMapper.readValue(
                 Objects.requireNonNull(timeoutEvent.data(), "response preparation timeout event data"),
                 SseSupport.SseEventPayload.class);
@@ -162,6 +196,12 @@ class SseSupportTest {
         assertEquals(STATUS_CODE_RETRIEVAL_TIMEOUT, timeoutEventPayload.code());
         assertEquals(STATUS_STAGE_RETRIEVAL, timeoutEventPayload.stage());
         assertEquals(Boolean.TRUE, timeoutEventPayload.retryable());
+        assertEquals(
+                1.0,
+                meterRegistry
+                        .get(SseSupport.RETRIEVAL_TIMEOUT_COUNTER_NAME)
+                        .counter()
+                        .count());
     }
 
     @Test
@@ -171,6 +211,37 @@ class SseSupportTest {
                 new RuntimeException("retrieval failed", new TimeoutException("embedding deadline"));
 
         assertTrue(sseSupport.isResponsePreparationTimeout(wrappedTimeout));
+    }
+
+    @Test
+    void responsePreparationTimeoutDetectionTraversesSuppressedDependencyFailures() {
+        SseSupport sseSupport = createSseSupport();
+        RuntimeException fanOutFailure = new RuntimeException("retrieval fan-out failed");
+        fanOutFailure.addSuppressed(
+                new IllegalStateException("later collection failed", new TimeoutException("Qdrant deadline")));
+
+        assertTrue(sseSupport.isResponsePreparationTimeout(fanOutFailure));
+    }
+
+    @Test
+    void responsePreparationTimeoutDoesNotHidePermanentFanOutFailure() {
+        SseSupport sseSupport = createSseSupport();
+        HybridSearchPartialFailureException mixedFanOutFailure = new HybridSearchPartialFailureException(
+                "retrieval fan-out failed",
+                List.of(
+                        new HybridSearchPartialFailureException.CollectionSearchFailure(
+                                "docs",
+                                "InvalidArgument",
+                                "invalid filter",
+                                HybridSearchPartialFailureException.FailureDisposition.PERMANENT),
+                        new HybridSearchPartialFailureException.CollectionSearchFailure(
+                                "pdfs",
+                                "Timeout",
+                                "deadline exceeded",
+                                HybridSearchPartialFailureException.FailureDisposition.TRANSIENT)),
+                List.of(new IllegalArgumentException("invalid filter"), new TimeoutException("Qdrant deadline")));
+
+        assertFalse(sseSupport.isResponsePreparationTimeout(mixedFanOutFailure));
     }
 
     @Test
@@ -201,6 +272,6 @@ class SseSupportTest {
     }
 
     private SseSupport createSseSupport() {
-        return new SseSupport(objectMapper);
+        return new SseSupport(objectMapper, new SimpleMeterRegistry());
     }
 }

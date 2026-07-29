@@ -27,6 +27,8 @@
         unseenCount?: number;
         onClear: () => void;
         onSend: (message: string) => void;
+        /** Re-runs the question behind a failed, retryable assistant message. */
+        onRetry?: (message: ChatMessage) => void;
         onScroll: () => void;
         onJumpToBottom?: () => void;
     }
@@ -44,6 +46,7 @@
         unseenCount = 0,
         onClear,
         onSend,
+        onRetry,
         onScroll,
         onJumpToBottom,
     }: Props = $props();
@@ -123,6 +126,7 @@
                                 message={typedMessage}
                                 {index}
                                 {isStreaming}
+                                {onRetry}
                             />
                             {#if typedMessage.role === "assistant" && typedMessage.citations && typedMessage.citations.length > 0 && !typedMessage.isError}
                                 <CitationPanel

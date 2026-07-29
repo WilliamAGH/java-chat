@@ -40,6 +40,13 @@ The first event for `POST /api/chat/stream` and `POST /api/guided/stream` is a `
 before history and retrieval work begin; a later dependency failure still emits a terminal `error`
 event.
 
+While retrieval runs, the stream emits live `status` events for each retrieval step so clients can
+show which step is in progress: first `message: "Searching the Java documentation index"` (embedding
+and hybrid search across the indexed JDK documentation, books, and GitHub repositories), then
+`message: "Reviewing the top matches"` (reranking) when the query path reranks. These progress
+events carry `message`/`details` only (`code`, `retryable`, and `stage` are `null`) and always
+arrive before the `provider` event.
+
 Chat uses the shared OpenAI-compatible gateway with GPT-5.4. An unavailable, rate-limited,
 or failed gateway request terminates the stream with an `error` event; no alternate provider exists.
 

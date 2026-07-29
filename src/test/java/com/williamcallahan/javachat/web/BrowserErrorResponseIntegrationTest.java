@@ -102,6 +102,37 @@ class BrowserErrorResponseIntegrationTest {
                 .value(apiErrorDetails -> assertNull(apiErrorDetails));
     }
 
+    @Test
+    void unknownExtensionlessPathReturnsRealNotFound() {
+        webTestClient
+                .get()
+                .uri("/definitely-not-a-page")
+                .accept(MediaType.TEXT_HTML)
+                .exchange()
+                .expectStatus()
+                .isNotFound()
+                .expectHeader()
+                .contentTypeCompatibleWith(MediaType.TEXT_HTML)
+                .expectBody(String.class)
+                .value(this::assertJavaChatNotFoundPage);
+    }
+
+    @Test
+    void publishedSpaRoutesForwardToIndexShell() {
+        List<String> publishedSpaPaths = List.of(
+                "/", "/chat", "/guided", "/learn", "/learn/records", "/learn/records/fields", "/guided/records/fields");
+
+        for (String publishedSpaPath : publishedSpaPaths) {
+            webTestClient
+                    .get()
+                    .uri(publishedSpaPath)
+                    .accept(MediaType.TEXT_HTML)
+                    .exchange()
+                    .expectStatus()
+                    .isOk();
+        }
+    }
+
     private void assertJavaChatNotFoundPage(String pageHtml) {
         assertTrue(pageHtml.contains("Java Chat"));
         assertTrue(pageHtml.contains("<h1 class=\"error-type\">Java Chat could not find that page</h1>"));

@@ -96,7 +96,7 @@ class MarkdownPreprocessingTest {
 
     @Test
     void testCompactAttachedClosingFenceSuffixesRemainProse() {
-        for (String trailingText : java.util.List.of("Done", "(note)")) {
+        for (String trailingText : java.util.List.of("Done", "(note)", "two words")) {
             String input = "Here's an example:```java\nint x = 10 % 3;\n```" + trailingText;
             String html = markdownService.processStructured(input).html();
 
@@ -104,6 +104,18 @@ class MarkdownPreprocessingTest {
             int trailingProse = html.indexOf(trailingText, codeClose + 1);
             assertTrue(codeClose >= 0, "Code block should close before " + trailingText);
             assertTrue(trailingProse > codeClose, trailingText + " must remain outside the repaired code block");
+        }
+    }
+
+    @Test
+    void testCapitalizedInfoStringOnAttachedOpeningFenceRemainsTheCodeLanguage() {
+        for (String infoString : java.util.List.of("Java", "JavaScript")) {
+            String input = "Here's an example:```" + infoString + "\nint x = 10 % 3;\n```";
+            String html = markdownService.processStructured(input).html();
+
+            assertTrue(
+                    html.contains("<code class=\"language-" + infoString + "\">"),
+                    infoString + " must remain the attached opening fence's info string");
         }
     }
 

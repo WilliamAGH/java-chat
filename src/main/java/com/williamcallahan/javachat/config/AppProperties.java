@@ -28,6 +28,7 @@ public class AppProperties {
     private static final String DIAG_KEY = "app.diagnostics";
     private static final String QDRANT_KEY = "app.qdrant";
     private static final String CORS_KEY = "app.cors";
+    private static final String CLERK_KEY = "app.clerk";
     private static final String PUBLIC_BASE_URL_KEY = "app.public-base-url";
     private static final String CLICKY_KEY = "app.clicky";
     private static final String EMBEDDINGS_KEY = "app.embeddings";
@@ -47,6 +48,7 @@ public class AppProperties {
     private Diagnostics diagnostics = new Diagnostics();
     private QdrantProperties qdrant = new QdrantProperties();
     private CorsConfig cors = new CorsConfig();
+    private ClerkConfig clerk = new ClerkConfig();
     private Embeddings embeddings = new Embeddings();
     private Llm llm = new Llm();
     private Clicky clicky = new Clicky();
@@ -70,6 +72,7 @@ public class AppProperties {
         requireConfiguredSection(diagnostics, DIAG_KEY).validateConfiguration();
         requireConfiguredSection(qdrant, QDRANT_KEY).validateConfiguration();
         requireConfiguredSection(cors, CORS_KEY).validateConfiguration();
+        requireConfiguredSection(clerk, CLERK_KEY).validateConfiguration();
         requireConfiguredSection(embeddings, EMBEDDINGS_KEY).validateConfiguration();
         requireConfiguredSection(llm, LLM_KEY).validateConfiguration();
         requireConfiguredSection(clicky, CLICKY_KEY).validateConfiguration();
@@ -219,6 +222,14 @@ public class AppProperties {
 
     public void setCors(CorsConfig cors) {
         this.cors = requireConfiguredSection(cors, CORS_KEY);
+    }
+
+    public ClerkConfig getClerk() {
+        return clerk;
+    }
+
+    public void setClerk(ClerkConfig clerk) {
+        this.clerk = requireConfiguredSection(clerk, CLERK_KEY);
     }
 
     public Embeddings getEmbeddings() {

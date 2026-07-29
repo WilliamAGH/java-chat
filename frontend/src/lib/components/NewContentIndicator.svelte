@@ -4,7 +4,7 @@
    *
    * Appears when the user has scrolled up during streaming, showing
    * them that new content is available. Clicking jumps to bottom
-   * and re-enables auto-scroll.
+   * and follows the active stream until the user scrolls away again.
    *
    * Design: A refined pill that floats above the input area, using
    * the terracotta accent with subtle glow. Respects reduced motion.

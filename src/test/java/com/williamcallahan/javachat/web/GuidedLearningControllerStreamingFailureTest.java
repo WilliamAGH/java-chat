@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -41,6 +42,8 @@ import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.net.SocketTimeoutException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -74,10 +77,12 @@ class GuidedLearningControllerStreamingFailureTest {
     private ChatMemoryService chatMemoryService;
     private OpenAIStreamingService streamingService;
     private GuidedLearningController guidedController;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUpController() {
         controllerLogEvents = ExpectedLogEvents.capture(controllerLogger);
+        meterRegistry = new SimpleMeterRegistry();
         guidedLearningService = mock(GuidedLearningService.class);
         chatMemoryService = mock(ChatMemoryService.class);
         streamingService = mock(OpenAIStreamingService.class);
@@ -87,7 +92,7 @@ class GuidedLearningControllerStreamingFailureTest {
                 streamingService,
                 new ExceptionResponseBuilder(),
                 mock(MarkdownService.class),
-                new SseSupport(objectMapper),
+                new SseSupport(objectMapper, meterRegistry),
                 new AppProperties());
         when(guidedLearningService.getLesson(LESSON_SLUG)).thenReturn(Optional.of(listedLesson()));
     }
@@ -103,7 +108,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
+        when(guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         when(guidedLearningService.citationOutcomeForRetainedContext(
@@ -143,7 +149,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
+        when(guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         when(guidedLearningService.citationOutcomeForRetainedContext(
@@ -232,14 +239,16 @@ class GuidedLearningControllerStreamingFailureTest {
     }
 
     @Test
-    void wrappedEmbeddingDeadlineUsesTheRetrievalTimeoutContract() throws JsonProcessingException {
+    void wrappedLocalEmbeddingSocketDeadlineUsesTheRetrievalTimeoutContract() throws JsonProcessingException {
+        TimeoutException embeddingTimeout = new TimeoutException("embedding request deadline");
+        embeddingTimeout.initCause(new SocketTimeoutException("read timed out"));
         EmbeddingServiceTemporarilyUnavailableException embeddingDeadlineFailure =
-                new EmbeddingServiceTemporarilyUnavailableException(
-                        UPSTREAM_SECRET_MESSAGE, new TimeoutException("embedding request deadline"));
+                new EmbeddingServiceTemporarilyUnavailableException(UPSTREAM_SECRET_MESSAGE, embeddingTimeout);
         when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
+        when(guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any(), anyLong()))
                 .thenThrow(embeddingDeadlineFailure);
 
         List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
@@ -263,6 +272,29 @@ class GuidedLearningControllerStreamingFailureTest {
         assertEquals(Boolean.TRUE, timeoutError.retryable());
         assertEquals(STATUS_STAGE_RETRIEVAL, timeoutError.stage());
         assertFalse(serializedTimeoutError.contains(UPSTREAM_SECRET_MESSAGE));
+        List<ILoggingEvent> retrievalTimeoutWarnings = controllerLogEvents.events().stream()
+                .filter(logEvent -> logEvent.getLevel() == Level.WARN
+                        && "Guided response preparation timeout".equals(logEvent.getFormattedMessage()))
+                .toList();
+        assertEquals(1, retrievalTimeoutWarnings.size());
+        ILoggingEvent retrievalTimeoutWarning = retrievalTimeoutWarnings.getFirst();
+        assertPositiveRequestToken(retrievalTimeoutWarning);
+        assertLogField(retrievalTimeoutWarning, "sessionId", SESSION_ID);
+        assertLogField(retrievalTimeoutWarning, "lessonSlug", LESSON_SLUG);
+        assertLogField(retrievalTimeoutWarning, "code", STATUS_CODE_RETRIEVAL_TIMEOUT);
+        assertLogField(retrievalTimeoutWarning, "stage", STATUS_STAGE_RETRIEVAL);
+        assertLogField(
+                retrievalTimeoutWarning,
+                "exceptionType",
+                EmbeddingServiceTemporarilyUnavailableException.class.getSimpleName());
+        assertNull(retrievalTimeoutWarning.getThrowableProxy());
+        assertFalse(retrievalTimeoutWarning.toString().contains(UPSTREAM_SECRET_MESSAGE));
+        assertEquals(
+                1.0,
+                meterRegistry
+                        .get(SseSupport.RETRIEVAL_TIMEOUT_COUNTER_NAME)
+                        .counter()
+                        .count());
         assertEquals(0, controllerErrorCount());
         verify(streamingService, never()).streamResponse(any(StructuredPrompt.class), anyDouble());
     }
@@ -274,7 +306,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
+        when(guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any(), anyLong()))
                 .thenThrow(new GuidedLearningService.UnsupportedJavaDocumentationReleaseException(
                         "22", List.of("21", "24", "25")));
 
@@ -302,7 +335,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
+        when(guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         when(guidedLearningService.citationOutcomeForRetainedContext(
@@ -367,5 +401,14 @@ class GuidedLearningControllerStreamingFailureTest {
         assertTrue(controllerAlert.getKeyValuePairs().stream()
                 .anyMatch(structuredField ->
                         structuredField.key.equals(fieldName) && structuredField.value.equals(expectedField)));
+    }
+
+    private void assertPositiveRequestToken(ILoggingEvent controllerAlert) {
+        Object requestToken = controllerAlert.getKeyValuePairs().stream()
+                .filter(structuredField -> structuredField.key.equals("requestToken"))
+                .map(structuredField -> structuredField.value)
+                .findFirst()
+                .orElseThrow();
+        assertTrue(requestToken instanceof Long requestTokenNumber && requestTokenNumber > 0);
     }
 }

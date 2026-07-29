@@ -8,6 +8,10 @@
 # Required:
 #   private static final int MAX_RETRIES = 5;
 #   if (count > MAX_RETRIES) { ... }
+#
+# The allowlist matches the literal's source text, which for a long comparison
+# carries Java's width suffix (`0L`, `1l`). Those denote the same permitted
+# 0/1 values, so the suffix is optional rather than a second magic literal.
 
 id: java-no-magic-literals-comparison
 message: "[CS1g] Magic literal in comparison. Use a named constant (except 0/1/-1)."
@@ -25,7 +29,7 @@ rule:
   has:
     kind: decimal_integer_literal
     not:
-      regex: ^(0|1)$
+      regex: ^(0|1)[lL]?$
 files:
   - "src/main/java/**/*.java"
   - "!src/main/java/**/generated/**"

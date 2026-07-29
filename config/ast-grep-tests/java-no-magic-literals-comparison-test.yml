@@ -1,0 +1,53 @@
+id: java-no-magic-literals-comparison
+valid:
+  - |
+      class ZeroComparison {
+          boolean expired(long remainingNanos) {
+              return remainingNanos <= 0;
+          }
+      }
+  - |
+      class LongSuffixedZeroComparison {
+          boolean expired(long remainingNanos) {
+              return remainingNanos <= 0L;
+          }
+      }
+  - |
+      class LongSuffixedOneComparison {
+          boolean singleAttempt(long attemptCount) {
+              return attemptCount == 1L;
+          }
+      }
+  - |
+      class LowercaseLongSuffixedZeroComparison {
+          boolean expired(long remainingNanos) {
+              return remainingNanos <= 0l;
+          }
+      }
+  - |
+      class NamedConstantComparison {
+          private static final int MAX_RETRIEVAL_RESULTS = 5;
+
+          boolean exhausted(int retrievalCount) {
+              return retrievalCount > MAX_RETRIEVAL_RESULTS;
+          }
+      }
+invalid:
+  - |
+      class MagicRetryComparison {
+          boolean exhausted(int retryCount) {
+              return retryCount > 5;
+          }
+      }
+  - |
+      class MagicStatusComparison {
+          boolean created(int statusCode) {
+              return statusCode == 200;
+          }
+      }
+  - |
+      class MagicLongSuffixedComparison {
+          boolean slow(long elapsedNanos) {
+              return elapsedNanos >= 5L;
+          }
+      }

@@ -57,6 +57,10 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
      * <p>A failed probe is a monitoring signal, not a request failure: it is logged at WARN
      * and the next tick retries. Unexpected runtime failures propagate to the scheduler's
      * error handler rather than being swallowed here.</p>
+     *
+     * <p>A probe deferred before any provider contact (foreground work active, or a locally
+     * recorded provider cooldown) is not a failure: the last completed health observation is
+     * kept unchanged, because the deferral carries no signal about provider health.</p>
      */
     public void keepEmbeddingModelWarm() {
         probeEmbeddingModel();
@@ -73,8 +77,8 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
         long probeStartNanos = nanoTime.getAsLong();
         try {
             embeddingClient.warmUp();
-        } catch (OpenAiCompatibleEmbeddingClient.EmbeddingProbeDeferredException exception) {
-            recordDeferred(elapsedMillis(probeStartNanos));
+        } catch (OpenAiCompatibleEmbeddingClient.EmbeddingProbeDeferredException deferredProbe) {
+            recordDeferred(elapsedMillis(probeStartNanos), deferredProbe);
             return;
         } catch (EmbeddingServiceUnavailableException embeddingUnavailableException) {
             recordFailure(elapsedMillis(probeStartNanos), embeddingUnavailableException);
@@ -83,10 +87,13 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
         recordSuccess(elapsedMillis(probeStartNanos));
     }
 
-    private void recordDeferred(long probeDurationMillis) {
+    private void recordDeferred(
+            long probeDurationMillis, OpenAiCompatibleEmbeddingClient.EmbeddingProbeDeferredException deferredProbe) {
         String logSafeModelName = modelName.replace("\r", "\\r").replace("\n", "\\n");
+        String logSafeDeferralReason =
+                deferredProbe.getMessage().replace("\r", "\\r").replace("\n", "\\n");
         log.atDebug().log(() -> "event=embedding_model_probe_deferred outcome=deferred model=" + logSafeModelName
-                + " durationMs=" + probeDurationMillis + " reason=foreground_embedding_active");
+                + " durationMs=" + probeDurationMillis + " reason=" + logSafeDeferralReason);
     }
 
     /**

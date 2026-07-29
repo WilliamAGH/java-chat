@@ -182,6 +182,56 @@ class CitationCandidateRankerTest {
     }
 
     @Test
+    void bareMemberSelectionRetainsOnlyMatchingPersistedAnchors() {
+        JavadocPage stringJavadocPage = javadocPage("java.lang", "String.html");
+        Document staticFormatCandidate = javaApiJavadocExactOverloadCandidate(
+                "static-format",
+                "Formats a string using the specified format string.",
+                stringJavadocPage,
+                "String.html",
+                "format(java.lang.String,java.lang.Object...)");
+        Document formattedCandidate = javaApiJavadocExactOverloadCandidate(
+                "formatted",
+                "Formats this string using the supplied arguments.",
+                stringJavadocPage,
+                "String.html",
+                "formatted(java.lang.Object...)");
+        Document specificationPdfCandidate = Document.builder()
+                .id("specification-pdf")
+                .text("The Java Virtual Machine Specification")
+                .metadata(
+                        QdrantPayloadFieldSchema.URL_FIELD, "https://docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf")
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, "pdf")
+                .build();
+
+        List<Document> selectedCandidates = CitationCandidateRanker.selectPromptContextForCitationQuery(
+                "Explain Java 25 String.formatted",
+                List.of(staticFormatCandidate, specificationPdfCandidate, formattedCandidate));
+
+        assertEquals(
+                List.of("formatted"),
+                selectedCandidates.stream().map(Document::getId).toList());
+    }
+
+    @Test
+    void methodReferenceSelectionPreservesEveryMatchingOverloadInQdrantOrder() {
+        JavadocPage listJavadocPage = javaUtilJavadocPage("List.html");
+        Document twoArgumentCandidate = javaApiJavadocExactOverloadCandidate(
+                "two-argument", "Returns two elements.", listJavadocPage, "List.html", "of(E,E)");
+        Document copyCandidate = javaApiJavadocExactOverloadCandidate(
+                "copy", "Returns an immutable copy.", listJavadocPage, "List.html", "copyOf(java.util.Collection)");
+        Document oneArgumentCandidate = javaApiJavadocExactOverloadCandidate(
+                "one-argument", "Returns one element.", listJavadocPage, "List.html", "of(E)");
+
+        List<Document> selectedCandidates = CitationCandidateRanker.selectPromptContextForCitationQuery(
+                "Show Java 25 List::of", List.of(twoArgumentCandidate, copyCandidate, oneArgumentCandidate));
+
+        assertEquals(
+                List.of("two-argument", "one-argument"),
+                selectedCandidates.stream().map(Document::getId).toList());
+    }
+
+    @Test
     void prioritizesExactJavadocTypePagesOverHigherRankedMethodOnlyMatches() {
         Document classFileCandidate = javaApiJavadocCandidate(
                 "class-file",

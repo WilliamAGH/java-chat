@@ -554,9 +554,7 @@ public class LocalDocsFileIngestionProcessor {
         try {
             storage.hybridVector().upsert(collectionKind, combinedDocuments);
         } catch (EmbeddingServiceUnavailableException embeddingException) {
-            log.error(
-                    "Embedding service unavailable during combined upsert (exception type: {})",
-                    embeddingException.getClass().getSimpleName());
+            log.error("Embedding service unavailable during combined upsert", embeddingException);
             preparedFiles.stream()
                     .map(DocumentProcessingRequest::markerContext)
                     .map(MarkerContext::file)
@@ -596,9 +594,7 @@ public class LocalDocsFileIngestionProcessor {
                     documents,
                     processingRequest.requiresFullReindex());
         } catch (EmbeddingServiceUnavailableException embeddingException) {
-            log.error(
-                    "Embedding service unavailable during upsert (exception type: {})",
-                    embeddingException.getClass().getSimpleName());
+            log.error("Embedding service unavailable during upsert", embeddingException);
             return LocalDocsFileOutcome.failedFile(
                     failureFactory.failure(markerContext.file(), "embedding-unavailable", embeddingException));
         } catch (RuntimeException vectorStorageException) {

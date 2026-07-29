@@ -6,8 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -17,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.MockMvc;
@@ -28,7 +31,8 @@ import org.springframework.web.bind.annotation.RestController;
  * Verifies that the browser-readable CSRF cookie remains valid across stateless requests.
  */
 @WebMvcTest(controllers = CsrfController.class)
-@Import({AppProperties.class, SecurityConfig.class, SecurityConfigTest.ProtectedPostController.class})
+@Import({AppProperties.class, SecurityConfig.class, WebMvcConfig.class, SecurityConfigTest.ProtectedPostController.class
+})
 class SecurityConfigTest {
     private static final String CSRF_REFRESH_ENDPOINT = "/api/security/csrf";
     private static final String CSRF_PROTECTED_ENDPOINT = "/api/security/csrf-test";
@@ -41,6 +45,14 @@ class SecurityConfigTest {
     private static final int CSRF_COOKIE_DELETION_MAX_AGE_SECONDS = 0;
     private static final String CSRF_INVALID_MESSAGE =
             "CSRF token missing or invalid. Refresh the page and retry the request.";
+    private static final String CONTENT_HASHED_ASSET_PATH = "/assets/application-a1b2c3d4.js";
+    private static final String CONTENT_HASHED_ASSET_CACHE_CONTROL = "max-age=31536000, public, immutable";
+    private static final String FONT_ASSET_PATH = "/fonts/Fraunces-Variable.ttf";
+    private static final String SITE_MANIFEST_PATH = "/site.webmanifest";
+    private static final String UNVERSIONED_STATIC_RESOURCE_CACHE_CONTROL = "max-age=3600, public";
+    private static final String HTML_SHELL_PATH = "/index.html";
+    private static final String NON_CACHEABLE_RESOURCE_CACHE_CONTROL = "no-store";
+    private static final String CSRF_REFRESH_CACHE_CONTROL = "no-store, must-revalidate";
 
     @Autowired
     MockMvc mockMvc;
@@ -118,9 +130,35 @@ class SecurityConfigTest {
         assertEquals(CSRF_COOKIE_DELETION_MAX_AGE_SECONDS, deletedCsrfCookie.getMaxAge());
     }
 
+    @Test
+    void servesContentHashedAssetsWithImmutablePublicCachingWithoutCsrfCookie() throws Exception {
+        mockMvc.perform(get(CONTENT_HASHED_ASSET_PATH))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, CONTENT_HASHED_ASSET_CACHE_CONTROL))
+                .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+    }
+
+    @Test
+    void servesUnversionedStaticResourcesWithBoundedPublicCachingWithoutCsrfCookie() throws Exception {
+        mockMvc.perform(head(FONT_ASSET_PATH))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, UNVERSIONED_STATIC_RESOURCE_CACHE_CONTROL))
+                .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+        assertBoundedPublicStaticResource(SITE_MANIFEST_PATH);
+    }
+
+    @Test
+    void keepsHtmlShellUncacheableWithoutIssuingCsrfCookie() throws Exception {
+        mockMvc.perform(get(HTML_SHELL_PATH))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, NON_CACHEABLE_RESOURCE_CACHE_CONTROL))
+                .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+    }
+
     private MvcResult requestCsrfCookie() throws Exception {
         return mockMvc.perform(get(CSRF_REFRESH_ENDPOINT))
                 .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, CSRF_REFRESH_CACHE_CONTROL))
                 .andReturn();
     }
 
@@ -130,7 +168,15 @@ class SecurityConfigTest {
     private MvcResult requestSecureCsrfCookie() throws Exception {
         return mockMvc.perform(get(CSRF_REFRESH_ENDPOINT).secure(true))
                 .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, CSRF_REFRESH_CACHE_CONTROL))
                 .andReturn();
+    }
+
+    private void assertBoundedPublicStaticResource(String staticResourcePath) throws Exception {
+        mockMvc.perform(get(staticResourcePath))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, UNVERSIONED_STATIC_RESOURCE_CACHE_CONTROL))
+                .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
     }
 
     /**

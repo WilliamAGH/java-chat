@@ -52,7 +52,6 @@ public class OpenAIStreamingService {
 
     private static final String PROVIDER_UNAVAILABLE_MESSAGE =
             "LLM providers unavailable - active provider is rate limited or misconfigured";
-    private static final Duration STREAM_OUTPUT_TIMEOUT = Duration.ofSeconds(20);
     /** OpenAI-compatible client when configured. */
     private OpenAIClient openAiClient;
 
@@ -339,11 +338,20 @@ public class OpenAIStreamingService {
         });
     }
 
+    /**
+     * Errors the stream when no visible text arrives within the streaming request budget.
+     *
+     * <p>The watchdog shares {@link #streamingRequestTimeout()} instead of owning a tighter
+     * hardcoded budget: a healthy response whose first visible token lands late inside the
+     * request budget (for example with non-{@code none} reasoning effort) must survive, while a
+     * hung connection that never yields visible text still fails once the budget elapses.</p>
+     */
     Flux<String> enforceVisibleOutputDeadline(Flux<String> responseTextChunks) {
         return responseTextChunks.publish(sharedTextChunks -> {
             Flux<String> visibleOutputWatchdog = sharedTextChunks
                     .filter(UnicodeVisibleContent::hasVisibleContent)
-                    .timeout(STREAM_OUTPUT_TIMEOUT)
+                    .next()
+                    .timeout(streamingRequestTimeout())
                     .thenMany(Flux.empty());
             return Flux.merge(sharedTextChunks, visibleOutputWatchdog);
         });
@@ -414,9 +422,15 @@ public class OpenAIStreamingService {
     }
 
     private Timeout streamingTimeout() {
-        return Timeout.builder()
-                .request(Duration.ofSeconds(Math.max(1, streamingRequestTimeoutSeconds)))
-                .build();
+        return Timeout.builder().request(streamingRequestTimeout()).build();
+    }
+
+    /**
+     * Resolves the whole-request streaming budget shared by the SDK request timeout and the
+     * visible-output watchdog, so the watchdog can never be tighter than the request budget.
+     */
+    private Duration streamingRequestTimeout() {
+        return Duration.ofSeconds(Math.max(1, streamingRequestTimeoutSeconds));
     }
 
     private Timeout completeTimeout(Duration requestTimeout) {

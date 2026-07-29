@@ -118,6 +118,10 @@ final class MarkdownNormalizer {
                 return true;
             }
         }
+        // A capitalized lone word is the compact-prose repair case only when this candidate
+        // terminates an attached fence. A real opening fence still owns its info string, while
+        // appendAttachedClosingFenceWithProse preserves this line as literal code whenever a
+        // later structural closing fence proves that the active block continues.
         return Character.isUpperCase(firstVisibleCharacter);
     }
 
