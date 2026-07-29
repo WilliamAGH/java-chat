@@ -11,6 +11,7 @@ import com.openai.models.responses.ResponseInputItem;
 import com.openai.models.responses.ResponseTextConfig;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
@@ -37,39 +38,19 @@ public final class OpenAiRequestFactory {
     private static final Logger log = LoggerFactory.getLogger(OpenAiRequestFactory.class);
 
     private static final String REASONING_EFFORT_PROPERTY = "app.llm.reasoning-effort";
-    private static final Set<String> SUPPORTED_REASONING_EFFORTS =
-            Set.of("none", "minimal", "low", "medium", "high", "xhigh");
-    private static final String SUPPORTED_REASONING_EFFORT_DESCRIPTION = "none, minimal, low, medium, high, xhigh";
+    private static final Set<String> SUPPORTED_REASONING_EFFORTS = Set.of("none", "low", "medium", "high", "xhigh");
+    private static final String SUPPORTED_REASONING_EFFORT_DESCRIPTION = "none, low, medium, high, xhigh";
 
-    /** Prefix matching gpt-5, gpt-5.2, gpt-5.2-pro, etc. */
-    private static final String GPT_5_MODEL_PREFIX = "gpt-5";
+    private static final int GPT54_INPUT_TOKEN_BUDGET = 100_000;
 
-    private static final String GITHUB_MODEL_PROVIDER_PREFIX = "openai/";
-    private static final String DEFAULT_OPENAI_MODEL = "gpt-5.2";
-    private static final String DEFAULT_GITHUB_MODELS_MODEL = "openai/gpt-5";
-
-    /**
-     * Safe token budget under GitHub Models' 8K input tier for its GPT-5 catalog entry.
-     * The constraint belongs to that provider tier, not the GPT-5 family: the same family
-     * served by OpenAI direct or the LLM gateway accepts far larger inputs and uses
-     * {@link #MAX_TOKENS_DEFAULT_INPUT}.
-     */
-    private static final int MAX_TOKENS_GITHUB_MODELS_GPT5_INPUT = 7000;
-
-    /** Generous token budget for high-context models. */
-    private static final int MAX_TOKENS_DEFAULT_INPUT = 100_000;
-
-    /** Truncation notice for GPT-5 family models with 8K input limit. */
-    private static final String TRUNCATION_NOTICE_GPT5 = "[Context truncated due to GPT-5 8K input limit]\n\n";
-
-    /** Truncation notice for other models with larger limits. */
+    /** Truncation notice for requests exceeding the application-owned prompt limit. */
     private static final String TRUNCATION_NOTICE_GENERIC = "[Context truncated due to model input limit]\n\n";
 
     private final Chunker chunker;
     private final PromptTruncator promptTruncator;
     private final String openaiModel;
-    private final String githubModelsChatModel;
     private final int completionOutputTokenBudget;
+    private final int promptContentTokenBudget;
     private final Optional<ReasoningEffort> reasoningEffort;
 
     /**
@@ -78,20 +59,18 @@ public final class OpenAiRequestFactory {
      * @param chunker token-aware chunking service used for completion prompt truncation
      * @param promptTruncator structured prompt truncator for streaming requests
      * @param openaiModel configured OpenAI model id
-     * @param githubModelsChatModel configured GitHub Models model id
      * @param appProperties typed application configuration for LLM generation policy
-     * @throws IllegalArgumentException if the reasoning effort is not recognized by the OpenAI SDK
+     * @throws IllegalArgumentException if the OpenAI model or reasoning effort is invalid
      */
     public OpenAiRequestFactory(
             Chunker chunker,
             PromptTruncator promptTruncator,
-            @Value("${OPENAI_MODEL:" + DEFAULT_OPENAI_MODEL + "}") String openaiModel,
-            @Value("${GITHUB_MODELS_CHAT_MODEL:" + DEFAULT_GITHUB_MODELS_MODEL + "}") String githubModelsChatModel,
+            @Value("${OPENAI_MODEL:" + ModelConfiguration.DEFAULT_MODEL + "}") String openaiModel,
             AppProperties appProperties) {
         this.chunker = chunker;
         this.promptTruncator = promptTruncator;
-        this.openaiModel = openaiModel;
-        this.githubModelsChatModel = githubModelsChatModel;
+        this.openaiModel = requireUniversalChatModel(openaiModel);
+        this.promptContentTokenBudget = GPT54_INPUT_TOKEN_BUDGET - chunker.countTokens(TRUNCATION_NOTICE_GENERIC);
         AppProperties.Llm llmConfiguration = appProperties.getLlm();
         this.completionOutputTokenBudget = llmConfiguration.getCompletionOutputTokenBudget();
         this.reasoningEffort = resolveReasoningEffort(llmConfiguration.getReasoningEffort());
@@ -102,29 +81,22 @@ public final class OpenAiRequestFactory {
      *
      * @param structuredPrompt typed prompt segments to stream
      * @param temperature response temperature
-     * @param provider provider chosen for this request attempt
      * @return request parameters with resolved model id
      */
-    public OpenAiPreparedRequest prepareStreamingRequest(
-            StructuredPrompt structuredPrompt, double temperature, RateLimitService.ApiProvider provider) {
-        boolean useGitHubModels = provider == RateLimitService.ApiProvider.GITHUB_MODELS;
-        String modelId = normalizedModelId(useGitHubModels);
-        boolean githubModelsGpt5Constrained = useGitHubModels && isGpt5Family(modelId);
-        int tokenLimit = githubModelsGpt5Constrained ? MAX_TOKENS_GITHUB_MODELS_GPT5_INPUT : MAX_TOKENS_DEFAULT_INPUT;
+    public OpenAiPreparedRequest prepareStreamingRequest(StructuredPrompt structuredPrompt, double temperature) {
+        String modelId = configuredModelId();
 
         PromptTruncator.TruncatedPrompt truncatedPrompt =
-                promptTruncator.truncate(structuredPrompt, tokenLimit, githubModelsGpt5Constrained);
+                promptTruncator.truncate(structuredPrompt, promptContentTokenBudget);
         if (truncatedPrompt.wasTruncated()) {
             log.info(
-                    "[LLM] Prompt truncated for streaming (providerId={}, model={}, contextDocs={}, conversationTurns={})",
-                    provider.ordinal(),
+                    "[LLM] Prompt truncated for streaming (model={}, contextDocs={}, conversationTurns={})",
                     modelId,
                     truncatedPrompt.contextDocumentCount(),
                     truncatedPrompt.conversationTurnCount());
         }
 
-        List<ResponseInputItem> responseInputItems =
-                buildResponseInputItems(truncatedPrompt, githubModelsGpt5Constrained);
+        List<ResponseInputItem> responseInputItems = buildResponseInputItems(truncatedPrompt);
         ResponseCreateParams responseParams = buildResponseParams(responseInputItems, temperature, modelId).toBuilder()
                 .instructions(truncatedPrompt.prompt().system().content())
                 .build();
@@ -134,19 +106,18 @@ public final class OpenAiRequestFactory {
     /**
      * Preserves each structured prompt segment's native Responses API role.
      *
-     * <p>Retrieved context remains developer-owned, prior conversation turns retain their
-     * user or assistant identity, and the active question is always the final user message.</p>
+     * <p>Retrieved reference text remains unprivileged user input, prior conversation turns retain
+     * their user or assistant identity, and the active question is always the final user message.
+     * Only application-owned instructions and truncation guidance receive developer authority.</p>
      */
-    private static List<ResponseInputItem> buildResponseInputItems(
-            PromptTruncator.TruncatedPrompt truncatedPrompt, boolean githubModelsGpt5Constrained) {
+    private static List<ResponseInputItem> buildResponseInputItems(PromptTruncator.TruncatedPrompt truncatedPrompt) {
         StructuredPrompt prompt = truncatedPrompt.prompt();
         List<ResponseInputItem> responseInputItems = new ArrayList<>();
         if (truncatedPrompt.wasTruncated()) {
-            String truncationNotice = githubModelsGpt5Constrained ? TRUNCATION_NOTICE_GPT5 : TRUNCATION_NOTICE_GENERIC;
-            responseInputItems.add(textInputItem(EasyInputMessage.Role.DEVELOPER, truncationNotice.strip()));
+            responseInputItems.add(textInputItem(EasyInputMessage.Role.DEVELOPER, TRUNCATION_NOTICE_GENERIC.strip()));
         }
         for (ContextDocumentSegment contextDocument : prompt.contextDocuments()) {
-            responseInputItems.add(textInputItem(EasyInputMessage.Role.DEVELOPER, contextDocument.content()));
+            responseInputItems.add(textInputItem(EasyInputMessage.Role.USER, contextDocument.content()));
         }
         for (ConversationTurnSegment conversationTurn : prompt.conversationHistory()) {
             EasyInputMessage.Role role =
@@ -169,12 +140,10 @@ public final class OpenAiRequestFactory {
      *
      * @param prompt completion prompt
      * @param temperature response temperature
-     * @param provider provider chosen for this request attempt
      * @return request payload ready for SDK execution
      */
-    public ResponseCreateParams buildCompletionRequest(
-            String prompt, double temperature, RateLimitService.ApiProvider provider) {
-        return buildCompletionRequest(prompt, temperature, provider, null, false);
+    public ResponseCreateParams buildCompletionRequest(String prompt, double temperature) {
+        return buildCompletionRequest(prompt, temperature, null, false);
     }
 
     /**
@@ -182,16 +151,14 @@ public final class OpenAiRequestFactory {
      *
      * @param prompt completion prompt
      * @param temperature response temperature
-     * @param provider provider chosen for this request attempt
      * @param maximumOutputTokens maximum output tokens needed by this caller
      * @return request payload ready for SDK execution
      */
-    public ResponseCreateParams buildCompletionRequest(
-            String prompt, double temperature, RateLimitService.ApiProvider provider, int maximumOutputTokens) {
+    public ResponseCreateParams buildCompletionRequest(String prompt, double temperature, int maximumOutputTokens) {
         if (maximumOutputTokens <= 0) {
             throw new IllegalArgumentException("maximumOutputTokens must be positive");
         }
-        return buildCompletionRequest(prompt, temperature, provider, Integer.valueOf(maximumOutputTokens), false);
+        return buildCompletionRequest(prompt, temperature, Integer.valueOf(maximumOutputTokens), false);
     }
 
     /**
@@ -199,46 +166,32 @@ public final class OpenAiRequestFactory {
      *
      * @param prompt completion prompt
      * @param temperature response temperature
-     * @param provider provider chosen for this request attempt
      * @param maximumOutputTokens maximum output tokens needed by this caller
      * @return request payload with a declared JSON-object output contract
      */
-    public ResponseCreateParams buildJsonCompletionRequest(
-            String prompt, double temperature, RateLimitService.ApiProvider provider, int maximumOutputTokens) {
+    public ResponseCreateParams buildJsonCompletionRequest(String prompt, double temperature, int maximumOutputTokens) {
         if (maximumOutputTokens <= 0) {
             throw new IllegalArgumentException("maximumOutputTokens must be positive");
         }
-        return buildCompletionRequest(prompt, temperature, provider, Integer.valueOf(maximumOutputTokens), true);
+        return buildCompletionRequest(prompt, temperature, Integer.valueOf(maximumOutputTokens), true);
     }
 
     private ResponseCreateParams buildCompletionRequest(
-            String prompt,
-            double temperature,
-            RateLimitService.ApiProvider provider,
-            Integer maximumOutputTokens,
-            boolean requireJsonObject) {
-        boolean useGitHubModels = provider == RateLimitService.ApiProvider.GITHUB_MODELS;
-        String modelId = normalizedModelId(useGitHubModels);
-        String truncatedPrompt = truncatePromptForCompletion(prompt, modelId, useGitHubModels);
+            String prompt, double temperature, Integer maximumOutputTokens, boolean requireJsonObject) {
+        String modelId = configuredModelId();
+        String truncatedPrompt = truncatePromptForCompletion(prompt);
         return buildResponseParams(truncatedPrompt, temperature, modelId, maximumOutputTokens, requireJsonObject);
     }
 
-    private String truncatePromptForCompletion(String prompt, String modelId, boolean useGitHubModels) {
+    private String truncatePromptForCompletion(String prompt) {
         if (prompt == null || prompt.isEmpty()) {
             return prompt;
         }
 
-        // The 7K cap accommodates GitHub Models' 8K input tier for its GPT-5 entry.
-        // GPT-5 family on OpenAI direct/the gateway and o-series reasoning models
-        // accept >=128K input tokens, so both take the default cap (PR #49 review
-        // finding; gateway gpt-5.4 over-truncation).
-        boolean githubModelsGpt5Constrained = useGitHubModels && isGpt5Family(modelId);
-        int tokenLimit = githubModelsGpt5Constrained ? MAX_TOKENS_GITHUB_MODELS_GPT5_INPUT : MAX_TOKENS_DEFAULT_INPUT;
-        String truncatedPrompt = chunker.keepLastTokens(prompt, tokenLimit);
+        String truncatedPrompt = chunker.keepLastTokens(prompt, promptContentTokenBudget);
 
         if (truncatedPrompt.length() < prompt.length()) {
-            String truncationNotice = githubModelsGpt5Constrained ? TRUNCATION_NOTICE_GPT5 : TRUNCATION_NOTICE_GENERIC;
-            return truncationNotice + truncatedPrompt;
+            return TRUNCATION_NOTICE_GENERIC + truncatedPrompt;
         }
 
         return prompt;
@@ -269,7 +222,7 @@ public final class OpenAiRequestFactory {
             String normalizedModelId,
             Integer maximumOutputTokens,
             boolean requireJsonObject) {
-        boolean gpt5Family = isGpt5Family(normalizedModelId);
+        boolean gpt5Family = ModelConfiguration.isGpt5Family(normalizedModelId);
         boolean reasoningModel =
                 gpt5Family || canonicalModelName(normalizedModelId).startsWith("o");
         if (requireJsonObject) {
@@ -296,21 +249,16 @@ public final class OpenAiRequestFactory {
         return builder.build();
     }
 
-    private String normalizedModelId(boolean useGitHubModels) {
-        String configuredModel = useGitHubModels ? githubModelsChatModel : openaiModel;
-        String normalizedConfiguredModel =
-                configuredModel == null ? "" : AsciiTextNormalizer.toLowerAscii(configuredModel.trim());
-        if (normalizedConfiguredModel.isEmpty()) {
-            return useGitHubModels ? DEFAULT_GITHUB_MODELS_MODEL : DEFAULT_OPENAI_MODEL;
-        }
-        if (!useGitHubModels || normalizedConfiguredModel.contains("/")) {
-            return normalizedConfiguredModel;
-        }
-        return GITHUB_MODEL_PROVIDER_PREFIX + normalizedConfiguredModel;
+    String configuredModelId() {
+        return openaiModel;
     }
 
-    private boolean isGpt5Family(String modelId) {
-        return canonicalModelName(modelId).startsWith(GPT_5_MODEL_PREFIX);
+    private static String requireUniversalChatModel(String configuredModel) {
+        if (!ModelConfiguration.DEFAULT_MODEL.equals(configuredModel)) {
+            throw new IllegalArgumentException(
+                    "OPENAI_MODEL must be " + ModelConfiguration.DEFAULT_MODEL + " for every Java Chat LLM request");
+        }
+        return configuredModel;
     }
 
     private String canonicalModelName(String modelId) {

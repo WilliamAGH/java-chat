@@ -222,26 +222,27 @@ public class HtmlContentExtractor {
                 || text.startsWith("show");
     }
 
-    private void appendListItems(Element listElement, StringBuilder sb, int depth) {
+    private void appendListItems(Element listElement, StringBuilder extractedTextBuilder, int listNestingDepth) {
         if (listElement == null) {
             return;
         }
-        for (Element li : listElement.children()) {
-            if (!"li".equals(li.tagName())) {
+        for (Element listItemElement : listElement.children()) {
+            if (!"li".equals(listItemElement.tagName())) {
                 continue;
             }
-            String itemText = li.ownText().trim();
-            if (!itemText.isEmpty()) {
-                sb.append("\n");
-                if (depth > 0) {
-                    sb.append("  ".repeat(depth));
+            String listItemOwnText = listItemElement.ownText().trim();
+            if (!listItemOwnText.isEmpty()) {
+                extractedTextBuilder.append("\n");
+                if (listNestingDepth > 0) {
+                    extractedTextBuilder.append("  ".repeat(listNestingDepth));
                 }
-                sb.append("• ").append(itemText);
+                extractedTextBuilder.append("• ").append(listItemOwnText);
             }
-            Elements nestedLists = li.select("> ul, > ol");
-            if (!nestedLists.isEmpty()) {
-                for (Element nestedList : nestedLists) {
-                    appendListItems(nestedList, sb, depth + 1);
+            for (Element listItemChild : listItemElement.children()) {
+                if ("ul".equals(listItemChild.tagName()) || "ol".equals(listItemChild.tagName())) {
+                    appendListItems(listItemChild, extractedTextBuilder, listNestingDepth + 1);
+                } else {
+                    appendFormattedChild(listItemChild, extractedTextBuilder);
                 }
             }
         }

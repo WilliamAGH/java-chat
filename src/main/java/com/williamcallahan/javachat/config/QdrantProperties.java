@@ -15,7 +15,7 @@ public class QdrantProperties {
     private boolean ensureCollections;
     private int prefetchLimit = 20;
     private int rrfK = 60;
-    private boolean failOnPartialSearchError = true;
+    private int densePrefetchHnswEf = 24;
     private Duration queryTimeout = Duration.ofSeconds(5);
 
     /**
@@ -172,21 +172,21 @@ public class QdrantProperties {
     }
 
     /**
-     * Indicates whether one failed collection query fails the entire retrieval.
+     * Returns the measured HNSW candidate breadth for dense hybrid prefetch.
      *
-     * @return true when partial search failures are fatal
+     * @return positive dense prefetch HNSW candidate count
      */
-    public boolean isFailOnPartialSearchError() {
-        return failOnPartialSearchError;
+    public int getDensePrefetchHnswEf() {
+        return densePrefetchHnswEf;
     }
 
     /**
-     * Selects whether one failed collection query fails the entire retrieval.
+     * Sets the measured HNSW candidate breadth for dense hybrid prefetch.
      *
-     * @param failOnPartialSearchError true when partial search failures are fatal
+     * @param densePrefetchHnswEf positive dense prefetch HNSW candidate count
      */
-    public void setFailOnPartialSearchError(boolean failOnPartialSearchError) {
-        this.failOnPartialSearchError = failOnPartialSearchError;
+    public void setDensePrefetchHnswEf(int densePrefetchHnswEf) {
+        this.densePrefetchHnswEf = densePrefetchHnswEf;
     }
 
     QdrantProperties validateConfiguration() {
@@ -206,6 +206,10 @@ public class QdrantProperties {
         }
         if (rrfK <= 0) {
             throw new IllegalArgumentException("app.qdrant.rrf-k must be positive, got: " + rrfK);
+        }
+        if (densePrefetchHnswEf <= 0) {
+            throw new IllegalArgumentException(
+                    "app.qdrant.dense-prefetch-hnsw-ef must be positive, got: " + densePrefetchHnswEf);
         }
         if (queryTimeout == null || queryTimeout.isNegative() || queryTimeout.isZero()) {
             throw new IllegalArgumentException("app.qdrant.query-timeout must be positive");

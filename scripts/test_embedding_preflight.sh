@@ -157,10 +157,10 @@ if ! jq -e -s '
     length == 3
     and all(.[]; .batchTier == true)
     and any(.[]; .url == "https://gateway.test/v1/models")
-    and ([.[] | select(.url | endswith("/embeddings")) | .body.input | length] == [1, 32])
+    and ([.[] | select(.url | endswith("/embeddings")) | .body.input | length] == [1, 4])
     and all(.[] | select(.url | endswith("/embeddings")); .body.model == "qwen/qwen3-embedding-4b")
 ' "$EMBEDDING_TEST_CAPTURE" >/dev/null; then
-    fail_embedding_preflight_test "gateway probes did not use the batch tier, model list, and batches 1 and 32"
+    fail_embedding_preflight_test "gateway probes did not use the batch tier, model list, and batches 1 and 4"
 fi
 if [ "$(cat "$EMBEDDING_TEST_SLEEP_CAPTURE")" != "1" ]; then
     fail_embedding_preflight_test "gateway probes were not paced at one request per second"
@@ -310,4 +310,4 @@ for rejected_mode in count order null nonnumeric dimension; do
     fi
 done
 
-printf 'PASS: gateway preflight requires the canonical model/dimensions, batch tier, paced batches 1/32, Retry-After, ordering, and numeric values.\n'
+printf 'PASS: gateway preflight requires the canonical model/dimensions, batch tier, paced batches 1/4, Retry-After, ordering, and numeric values.\n'

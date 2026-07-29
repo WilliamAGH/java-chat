@@ -82,18 +82,29 @@ class MarkdownPreprocessingTest {
     }
 
     @Test
-    void testClosingFenceSeparatesProse() {
+    void testAttachedClosingFenceSeparatesProse() {
         String input = "Here's an example:```java\nint x = 10 % 3;\n```The result is 1.";
         String html = markdownService.processStructured(input).html();
 
-        // The prose after the closing fence must be outside the code block
         assertTrue(html.contains("<pre>"), "Should contain code block");
         assertTrue(html.contains("</code></pre>"), "Should close code block");
-        assertFalse(html.contains("```The"), "Closing fence must be on its own line, not inside code");
+        assertFalse(html.contains("```The"), "Attached closing fence must be repaired");
         int codeClose = html.indexOf("</code></pre>");
-        int theIdx = html.indexOf("The", codeClose + 1);
-        int restIdx = html.indexOf("result is 1.", codeClose + 1);
-        assertTrue(theIdx > codeClose && restIdx > codeClose, "Prose must appear after the closed code block");
+        int trailingProse = html.indexOf("The result is 1.", codeClose + 1);
+        assertTrue(trailingProse > codeClose, "Trailing prose must remain outside the repaired code block");
+    }
+
+    @Test
+    void testCompactAttachedClosingFenceSuffixesRemainProse() {
+        for (String trailingText : java.util.List.of("Done", "(note)")) {
+            String input = "Here's an example:```java\nint x = 10 % 3;\n```" + trailingText;
+            String html = markdownService.processStructured(input).html();
+
+            int codeClose = html.indexOf("</code></pre>");
+            int trailingProse = html.indexOf(trailingText, codeClose + 1);
+            assertTrue(codeClose >= 0, "Code block should close before " + trailingText);
+            assertTrue(trailingProse > codeClose, trailingText + " must remain outside the repaired code block");
+        }
     }
 
     @Test

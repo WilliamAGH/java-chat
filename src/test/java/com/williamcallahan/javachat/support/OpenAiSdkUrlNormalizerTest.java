@@ -15,32 +15,23 @@ class OpenAiSdkUrlNormalizerTest {
 
     @ParameterizedTest(name = "normalize(\"{0}\") = \"{1}\"")
     @CsvSource({
-        // GitHub Models: /inference → /inference/v1
-        "https://models.github.ai/inference, https://models.github.ai/inference/v1",
-
-        // OpenAI URL: already has /v1, unchanged
-        "https://api.openai.com/v1, https://api.openai.com/v1",
+        // Gateway URL: already has /v1, unchanged
+        "https://api.llm-gateway.iocloudhost.net/v1, https://api.llm-gateway.iocloudhost.net/v1",
 
         // Trailing slash stripped
-        "https://api.openai.com/v1/, https://api.openai.com/v1",
+        "https://api.llm-gateway.iocloudhost.net/v1/, https://api.llm-gateway.iocloudhost.net/v1",
 
-        // Embeddings suffix stripped from /v1/embeddings
-        "https://example.com/v1/embeddings, https://example.com/v1",
-
-        // Embeddings suffix stripped, /v1 appended
-        "https://example.com/embeddings, https://example.com/v1",
-
-        // No /v1 suffix: appends /v1
-        "https://example.com, https://example.com/v1"
+        // Version suffix appended for the canonical gateway host
+        "https://api.llm-gateway.iocloudhost.net, https://api.llm-gateway.iocloudhost.net/v1"
     })
     void normalizeHandlesVariousFormats(String input, String expected) {
         assertEquals(expected, OpenAiSdkUrlNormalizer.normalize(input));
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"  https://api.openai.com/v1  "})
+    @ValueSource(strings = {"  https://api.llm-gateway.iocloudhost.net/v1  "})
     void normalizeTrimsWhitespace(String input) {
-        assertEquals("https://api.openai.com/v1", OpenAiSdkUrlNormalizer.normalize(input));
+        assertEquals("https://api.llm-gateway.iocloudhost.net/v1", OpenAiSdkUrlNormalizer.normalize(input));
     }
 
     @ParameterizedTest
@@ -50,5 +41,16 @@ class OpenAiSdkUrlNormalizerTest {
         IllegalStateException ex =
                 assertThrows(IllegalStateException.class, () -> OpenAiSdkUrlNormalizer.normalize(input));
         assertEquals("OpenAI SDK base URL is not configured", ex.getMessage());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://api.openai.com", "https://api.openai.com/v1", "https://gateway.example/v1"})
+    void normalizeRejectsAnyEndpointOtherThanTheSharedGateway(String input) {
+        IllegalStateException configurationFailure =
+                assertThrows(IllegalStateException.class, () -> OpenAiSdkUrlNormalizer.normalize(input));
+
+        assertEquals(
+                "OPENAI_BASE_URL must be https://api.llm-gateway.iocloudhost.net/v1",
+                configurationFailure.getMessage());
     }
 }

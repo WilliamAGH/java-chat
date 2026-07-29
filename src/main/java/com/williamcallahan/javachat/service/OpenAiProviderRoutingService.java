@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import com.openai.client.OpenAIClient;
 import com.openai.errors.OpenAIIoException;
+import com.openai.errors.OpenAIRetryableException;
 import com.openai.errors.OpenAIServiceException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.SseException;
@@ -18,34 +19,32 @@ import java.util.IdentityHashMap;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import reactor.core.Exceptions;
 
 /**
- * Selects the configured provider and classifies its failures for OpenAI-compatible calls.
+ * Owns OpenAI admission and classifies provider failures for OpenAI-compatible calls.
  *
  * <p>This service owns provider availability checks, transient failure classification,
- * and configured-provider backoff timing so routing behavior is consistent across
- * streaming and completion code paths. It validates the configured provider during
- * application startup so an explicit invalid selection cannot change routing behavior.</p>
+ * and configured-provider backoff timing so behavior is consistent across streaming
+ * and completion code paths.</p>
  */
 @Service
 @Lazy(false)
 public final class OpenAiProviderRoutingService {
     private static final Logger log = LoggerFactory.getLogger(OpenAiProviderRoutingService.class);
-
-    private static final String PROVIDER_SETTING_OPENAI = "openai";
-    private static final String PROVIDER_SETTING_GITHUB_MODELS = "github_models";
+    private static final RateLimitService.ApiProvider CONFIGURED_PROVIDER = RateLimitService.ApiProvider.OPENAI;
     /**
      * Identifies the whole-call timeout message emitted by OkHttp 4.12 {@code RealCall.timeoutExit}.
      *
-     * <p>OpenAI Java 4.16 wraps the corresponding {@link InterruptedIOException} in an
-     * {@link OpenAIIoException}, which is a provider failure rather than caller cancellation.</p>
+     * <p>OpenAI Java 4.43.0 wraps the corresponding {@link InterruptedIOException} in an
+     * {@link OpenAIIoException}. The timeout belongs to the caller-owned request budget, so it
+     * remains a request-local retryable failure without disabling the provider for other requests.</p>
      */
     private static final String OK_HTTP_CALL_TIMEOUT_MESSAGE = "timeout";
 
@@ -59,37 +58,28 @@ public final class OpenAiProviderRoutingService {
 
     private final RateLimitService rateLimitService;
     private final ConfiguredProviderBackoff configuredProviderBackoff;
-    private final RateLimitService.ApiProvider configuredProvider;
     private final InstantSource instantSource;
 
     /** Instant until which the configured provider is temporarily disabled after failure. */
     private volatile Instant configuredProviderBackoffUntil;
 
     /**
-     * Creates provider routing state using the configured provider and backoff values.
+     * Creates provider admission state using the configured provider and backoff policy.
      *
      * @param rateLimitService provider rate-limit state tracker
      * @param appProperties typed source of configured-provider backoff policy
-     * @param configuredProviderSetting configured provider name
-     * @throws IllegalArgumentException when the configured provider or its backoff configuration is invalid
+     * @throws IllegalArgumentException when the backoff configuration is invalid
      */
     @Autowired
-    public OpenAiProviderRoutingService(
-            RateLimitService rateLimitService,
-            AppProperties appProperties,
-            @Value("${LLM_PRIMARY_PROVIDER:github_models}") String configuredProviderSetting) {
-        this(rateLimitService, appProperties, configuredProviderSetting, InstantSource.system());
+    public OpenAiProviderRoutingService(RateLimitService rateLimitService, AppProperties appProperties) {
+        this(rateLimitService, appProperties, InstantSource.system());
     }
 
     OpenAiProviderRoutingService(
-            RateLimitService rateLimitService,
-            AppProperties appProperties,
-            String configuredProviderSetting,
-            InstantSource instantSource) {
+            RateLimitService rateLimitService, AppProperties appProperties, InstantSource instantSource) {
         this.rateLimitService = Objects.requireNonNull(rateLimitService, "rateLimitService");
         this.configuredProviderBackoff =
                 Objects.requireNonNull(appProperties, "appProperties").getLlm().configuredProviderBackoff();
-        this.configuredProvider = resolveConfiguredProvider(configuredProviderSetting);
         this.instantSource = Objects.requireNonNull(instantSource, "instantSource");
         this.configuredProviderBackoffUntil = Instant.MIN;
     }
@@ -100,18 +90,33 @@ public final class OpenAiProviderRoutingService {
      * @return configured chat provider
      */
     public RateLimitService.ApiProvider configuredProvider() {
-        return configuredProvider;
+        return CONFIGURED_PROVIDER;
     }
 
     /**
      * Returns whether the configured provider has a client available for dispatch.
      *
-     * @param githubModelsClient GitHub Models client when configured
-     * @param openAiClient OpenAI client when configured
-     * @return true when the client matching the configured provider is present
+     * @param openAiClient OpenAI client
+     * @return true when the configured provider client is present
      */
-    public boolean hasConfiguredProviderClient(OpenAIClient githubModelsClient, OpenAIClient openAiClient) {
-        return configuredProviderClient(githubModelsClient, openAiClient) != null;
+    public boolean hasConfiguredProviderClient(OpenAIClient openAiClient) {
+        return openAiClient != null;
+    }
+
+    /**
+     * Returns whether the configured provider can accept work before retrieval begins.
+     *
+     * <p>This non-reserving check prevents expensive prompt preparation during a known cooldown
+     * or rate-limit window. Dispatch still performs the atomic reservation because availability
+     * can change between preparation and the SDK call.</p>
+     *
+     * @param openAiClient OpenAI client
+     * @return true when the configured provider client is present and currently eligible
+     */
+    public synchronized boolean canAttemptConfiguredProviderRequest(OpenAIClient openAiClient) {
+        return openAiClient != null
+                && !isConfiguredProviderInBackoff()
+                && rateLimitService.isProviderAvailable(CONFIGURED_PROVIDER);
     }
 
     /**
@@ -120,19 +125,16 @@ public final class OpenAiProviderRoutingService {
      * <p>The synchronized cooldown check and rate-limit reservation form the single admission
      * boundary for both streaming and completion requests.</p>
      *
-     * @param githubModelsClient GitHub Models client when configured
-     * @param openAiClient OpenAI client when configured
+     * @param openAiClient OpenAI client
      * @return the admitted configured-provider candidate, or empty when its client is missing
      * @throws ConfiguredProviderTemporarilyUnavailableException when cooldown or rate limiting denies admission
      */
-    public synchronized Optional<OpenAiProviderCandidate> admitConfiguredProviderRequest(
-            OpenAIClient githubModelsClient, OpenAIClient openAiClient) {
-        OpenAIClient configuredClient = configuredProviderClient(githubModelsClient, openAiClient);
-        if (configuredClient == null) {
-            log.warn("Configured provider client is unavailable (providerId={})", configuredProvider.ordinal());
+    public synchronized Optional<OpenAiProviderCandidate> admitConfiguredProviderRequest(OpenAIClient openAiClient) {
+        if (openAiClient == null) {
+            log.warn("Configured provider client is unavailable (providerId={})", CONFIGURED_PROVIDER.ordinal());
             return Optional.empty();
         }
-        OpenAiProviderCandidate providerCandidate = new OpenAiProviderCandidate(configuredClient, configuredProvider);
+        OpenAiProviderCandidate providerCandidate = new OpenAiProviderCandidate(openAiClient, CONFIGURED_PROVIDER);
         requireConfiguredProviderAdmission();
         return Optional.of(providerCandidate);
     }
@@ -145,14 +147,36 @@ public final class OpenAiProviderRoutingService {
      * @throws RateLimitDecisionException when rate-limit timing headers are missing or invalid
      */
     public synchronized void recordProviderFailure(RateLimitService.ApiProvider provider, Throwable throwable) {
-        if (provider == configuredProvider && shouldBackoffConfiguredProvider(throwable)) {
+        if (provider == CONFIGURED_PROVIDER && shouldBackoffConfiguredProvider(throwable)) {
             markConfiguredProviderBackoff();
         }
 
         if (throwable instanceof OpenAIServiceException serviceException
                 && serviceException.statusCode() == HTTP_TOO_MANY_REQUESTS) {
-            rateLimitService.recordRateLimitFromOpenAiServiceException(provider, serviceException);
+            try {
+                rateLimitService.recordRateLimitFromOpenAiServiceException(provider, serviceException);
+            } catch (RateLimitDecisionException rateLimitDecisionFailure) {
+                if (provider == CONFIGURED_PROVIDER) {
+                    markConfiguredProviderBackoff();
+                }
+                throw rateLimitDecisionFailure;
+            }
         }
+    }
+
+    /**
+     * Records a successful configured-provider request without erasing a newer cooldown.
+     *
+     * <p>A success observed during an active cooldown belongs to a request admitted before the
+     * failure that opened it. Only an expired local deadline is stale.</p>
+     *
+     * @param provider provider that completed successfully
+     */
+    public synchronized void recordProviderSuccess(RateLimitService.ApiProvider provider) {
+        if (provider == CONFIGURED_PROVIDER && !instantSource.instant().isBefore(configuredProviderBackoffUntil)) {
+            configuredProviderBackoffUntil = Instant.MIN;
+        }
+        rateLimitService.recordSuccess(provider);
     }
 
     /**
@@ -165,87 +189,60 @@ public final class OpenAiProviderRoutingService {
         if (throwable == null || isCallerCancellation(throwable) || containsPermanentProviderFailure(throwable)) {
             return false;
         }
-        if (throwable instanceof ConfiguredProviderTemporarilyUnavailableException) {
-            return true;
+        Set<Throwable> visitedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable failureCandidate = throwable;
+        while (failureCandidate != null && visitedFailures.add(failureCandidate)) {
+            if (failureCandidate instanceof ConfiguredProviderTemporarilyUnavailableException
+                    || failureCandidate instanceof EmbeddingServiceTemporarilyUnavailableException
+                    || failureCandidate instanceof OpenAIIoException
+                    || failureCandidate instanceof OpenAIRetryableException
+                    || failureCandidate instanceof SseException
+                    || failureCandidate instanceof TimeoutException
+                    || Exceptions.isOverflow(failureCandidate)) {
+                return true;
+            }
+            if (failureCandidate instanceof HybridSearchPartialFailureException retrievalFailure) {
+                return retrievalFailure.isRetryable();
+            }
+            if (failureCandidate instanceof RateLimitException) {
+                return false;
+            }
+            if (failureCandidate instanceof OpenAiResponseException responseFailure) {
+                return responseFailure.isRetryable();
+            }
+            if (failureCandidate instanceof OpenAIServiceException serviceException) {
+                int statusCode = serviceException.statusCode();
+                return statusCode == HTTP_REQUEST_TIMEOUT
+                        || statusCode == HTTP_CONFLICT
+                        || statusCode >= HTTP_INTERNAL_SERVER_ERROR;
+            }
+            failureCandidate = failureCandidate.getCause();
         }
-        if (throwable instanceof RateLimitException) {
-            return false;
-        }
-        if (throwable instanceof OpenAiResponseStreamException responseStreamFailure) {
-            return responseStreamFailure.isRetryable();
-        }
-        if (throwable instanceof OpenAIIoException
-                || throwable instanceof SseException
-                || Exceptions.isOverflow(throwable)) {
-            return true;
-        }
-        if (throwable instanceof OpenAIServiceException serviceException) {
-            int statusCode = serviceException.statusCode();
-            return statusCode == HTTP_REQUEST_TIMEOUT
-                    || statusCode == HTTP_CONFLICT
-                    || statusCode >= HTTP_INTERNAL_SERVER_ERROR;
-        }
-        String exceptionMessage = throwable.getMessage();
-        if (exceptionMessage == null) {
-            return false;
-        }
-        String normalizedMessage = AsciiTextNormalizer.toLowerAscii(exceptionMessage);
-        return normalizedMessage.contains("invalid stream")
-                || normalizedMessage.contains("malformed")
-                || normalizedMessage.contains("unexpected end of json input")
-                || normalizedMessage.contains("timeout")
-                || normalizedMessage.contains("temporarily unavailable")
-                || normalizedMessage.contains("connection reset")
-                || normalizedMessage.contains("connection closed");
+        return false;
     }
 
     boolean shouldBackoffConfiguredProvider(Throwable throwable) {
-        if (isCallerCancellation(throwable) || containsPermanentProviderFailure(throwable)) {
+        if (isCallerCancellation(throwable)
+                || containsOkHttpCallTimeout(throwable)
+                || containsPermanentProviderFailure(throwable)) {
             return false;
         }
         return throwable instanceof OpenAIIoException
-                || throwable instanceof OpenAiResponseStreamException responseStreamFailure
-                        && responseStreamFailure.startsConfiguredProviderBackoff()
+                || throwable instanceof OpenAiResponseException responseFailure
+                        && responseFailure.startsConfiguredProviderBackoff()
                 || isServerError(throwable);
-    }
-
-    private OpenAIClient configuredProviderClient(OpenAIClient githubModelsClient, OpenAIClient openAiClient) {
-        return switch (configuredProvider) {
-            case GITHUB_MODELS -> githubModelsClient;
-            case OPENAI -> openAiClient;
-            case LOCAL -> null;
-        };
     }
 
     private void requireConfiguredProviderAdmission() {
         if (isConfiguredProviderInBackoff()) {
-            log.warn("Configured provider unavailable (backoff active, providerId={})", configuredProvider.ordinal());
-            throw new ConfiguredProviderTemporarilyUnavailableException(configuredProvider);
+            log.warn("Configured provider unavailable (backoff active, providerId={})", CONFIGURED_PROVIDER.ordinal());
+            throw new ConfiguredProviderTemporarilyUnavailableException(CONFIGURED_PROVIDER);
         }
-        if (rateLimitService.tryReserveRequest(configuredProvider)) {
+        if (rateLimitService.tryReserveRequest(CONFIGURED_PROVIDER)) {
             return;
         }
-        log.warn("Configured provider admission denied (providerId={})", configuredProvider.ordinal());
-        throw new ConfiguredProviderTemporarilyUnavailableException(configuredProvider);
-    }
-
-    private static RateLimitService.ApiProvider resolveConfiguredProvider(String configuredProviderSetting) {
-        String normalizedSetting = configuredProviderSetting == null
-                ? ""
-                : AsciiTextNormalizer.toLowerAscii(configuredProviderSetting.trim());
-        return switch (normalizedSetting) {
-            case PROVIDER_SETTING_OPENAI -> RateLimitService.ApiProvider.OPENAI;
-            case PROVIDER_SETTING_GITHUB_MODELS -> RateLimitService.ApiProvider.GITHUB_MODELS;
-            default -> throw invalidConfiguredProviderSetting(configuredProviderSetting);
-        };
-    }
-
-    private static IllegalArgumentException invalidConfiguredProviderSetting(String configuredProviderSetting) {
-        String settingDescription = configuredProviderSetting == null || configuredProviderSetting.isBlank()
-                ? "a blank value"
-                : "'" + configuredProviderSetting + "'";
-        return new IllegalArgumentException(
-                "LLM_PRIMARY_PROVIDER must be 'github_models' or 'openai'; received " + settingDescription + ".");
+        log.warn("Configured provider admission denied (providerId={})", CONFIGURED_PROVIDER.ordinal());
+        throw new ConfiguredProviderTemporarilyUnavailableException(CONFIGURED_PROVIDER);
     }
 
     private boolean containsPermanentProviderFailure(Throwable throwable) {
@@ -265,6 +262,19 @@ public final class OpenAiProviderRoutingService {
         return statusCode == HTTP_UNAUTHORIZED || statusCode == HTTP_FORBIDDEN || statusCode == HTTP_NOT_FOUND;
     }
 
+    private boolean containsOkHttpCallTimeout(Throwable throwable) {
+        Set<Throwable> visitedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable timeoutCandidate = throwable;
+        while (timeoutCandidate != null && visitedFailures.add(timeoutCandidate)) {
+            if (timeoutCandidate instanceof InterruptedIOException interruptedIoException
+                    && isOkHttpCallTimeout(interruptedIoException)) {
+                return true;
+            }
+            timeoutCandidate = timeoutCandidate.getCause();
+        }
+        return false;
+    }
+
     private boolean isServerError(Throwable throwable) {
         return throwable instanceof OpenAIServiceException serviceException
                 && serviceException.statusCode() >= HTTP_INTERNAL_SERVER_ERROR;
@@ -275,7 +285,6 @@ public final class OpenAiProviderRoutingService {
         Throwable cancellationCandidate = throwable;
         while (cancellationCandidate != null && visitedFailures.add(cancellationCandidate)) {
             if (cancellationCandidate instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
                 return true;
             }
             if (cancellationCandidate instanceof InterruptedIOException interruptedIoException
@@ -304,9 +313,8 @@ public final class OpenAiProviderRoutingService {
 
     private synchronized void markConfiguredProviderBackoff() {
         Instant failureObservedAt = instantSource.instant();
-        Instant proposedBackoffDeadline = failureObservedAt.plus(configuredProviderBackoff.duration());
-        if (proposedBackoffDeadline.isAfter(configuredProviderBackoffUntil)) {
-            configuredProviderBackoffUntil = proposedBackoffDeadline;
+        if (!failureObservedAt.isBefore(configuredProviderBackoffUntil)) {
+            configuredProviderBackoffUntil = failureObservedAt.plus(configuredProviderBackoff.duration());
         }
         long backoffSecondsRemaining = Math.max(
                 1L,

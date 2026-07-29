@@ -116,13 +116,9 @@ record JavaInvocationSignature(boolean isExact, String normalizedParameterClause
             return null;
         }
 
-        boolean hasArraySuffix = false;
         while (true) {
             currentIndex = skipWhitespace(queryText, currentIndex);
             if (hasVarargsSuffixAt(queryText, currentIndex)) {
-                if (hasArraySuffix) {
-                    return null;
-                }
                 normalizedType.append(VARARGS_SUFFIX);
                 currentIndex += VARARGS_SUFFIX.length();
                 return new ParsedParameterType(normalizedType.toString(), currentIndex);
@@ -136,7 +132,6 @@ record JavaInvocationSignature(boolean isExact, String normalizedParameterClause
             }
             normalizedType.append("[]");
             currentIndex = closingArrayBracketIndex + 1;
-            hasArraySuffix = true;
         }
     }
 

@@ -138,28 +138,35 @@ public class GitHubRepoProcessor {
     }
 
     private void runRepoProcessing(String... ignoredArgs) {
-        GitHubRepoMetadata repoMetadata = buildMetadataFromEnvironment();
+        processRepository(buildMetadataFromEnvironment());
+    }
+
+    void processRepository(GitHubRepoMetadata repoMetadata) {
         String collectionName = repoMetadata.collectionName();
         Path repoRoot = Path.of(repoMetadata.repoPath()).toAbsolutePath().normalize();
 
         logStartBanner(repoMetadata, repoRoot);
 
-        IngestionWalkSummary ingestionWalkSummary = walkAndProcess(repoRoot, repoMetadata, collectionName);
-
-        purgeDeletedFileOrphans(collectionName, ingestionWalkSummary.activeFileUrls());
-        refreshCollectionMetadata(collectionName, repoMetadata);
+        Set<String> storedFileUrls = hybridVectorService.scrollAllUrlsInCollection(collectionName);
+        SourceCodeFileIngestionProcessor.RepositoryIngestionContext repositoryContext =
+                new SourceCodeFileIngestionProcessor.RepositoryIngestionContext(repoRoot, repoMetadata, storedFileUrls);
+        IngestionWalkSummary ingestionWalkSummary = walkAndProcess(repositoryContext);
 
         logSummary(ingestionWalkSummary.totals(), collectionName);
-
         if (ingestionWalkSummary.totals().failed() > 0) {
             throw new GitHubRepoProcessingException(String.format(
                     Locale.ROOT,
                     "GitHub repo processing completed with %d failed file(s)",
                     ingestionWalkSummary.totals().failed()));
         }
+
+        purgeDeletedFileOrphans(collectionName, storedFileUrls, ingestionWalkSummary.activeFileUrls());
+        refreshCollectionMetadata(collectionName, repoMetadata);
     }
 
-    private IngestionWalkSummary walkAndProcess(Path repoRoot, GitHubRepoMetadata repoMetadata, String collectionName) {
+    private IngestionWalkSummary walkAndProcess(
+            SourceCodeFileIngestionProcessor.RepositoryIngestionContext repositoryContext) {
+        Path repoRoot = repositoryContext.repositoryRoot();
         long processedCount = 0;
         long skippedCount = 0;
         long failedCount = 0;
@@ -179,8 +186,7 @@ public class GitHubRepoProcessor {
             while (eligibleFileIterator.hasNext()) {
                 eligibleFileCount++;
                 Path sourceFile = eligibleFileIterator.next();
-                SourceFileProcessingResult fileProcessingOutcome =
-                        fileProcessor.process(repoRoot, sourceFile, repoMetadata, collectionName);
+                SourceFileProcessingResult fileProcessingOutcome = fileProcessor.process(repositoryContext, sourceFile);
                 activeFileUrls.add(fileProcessingOutcome.fileUrl());
                 switch (fileProcessingOutcome.outcome()) {
                     case LocalDocsFileOutcome.Processed _ -> processedCount++;
@@ -208,10 +214,9 @@ public class GitHubRepoProcessor {
      * @throws IllegalStateException if the collection scroll fails
      * @throws GitHubRepoProcessingException if any orphaned file purge operations fail
      */
-    private void purgeDeletedFileOrphans(String collectionName, Set<String> activeFileUrls) {
-        Set<String> qdrantStoredUrls = hybridVectorService.scrollAllUrlsInCollection(collectionName);
-
-        Set<String> orphanedUrls = new LinkedHashSet<>(qdrantStoredUrls);
+    private void purgeDeletedFileOrphans(
+            String collectionName, Set<String> storedFileUrls, Set<String> activeFileUrls) {
+        Set<String> orphanedUrls = new LinkedHashSet<>(storedFileUrls);
         orphanedUrls.removeAll(activeFileUrls);
 
         if (orphanedUrls.isEmpty()) {

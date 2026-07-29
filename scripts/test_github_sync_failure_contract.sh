@@ -44,6 +44,62 @@ fi
 set --
 # shellcheck source=lib/common_qdrant.sh
 source "$TEST_SCRIPT_DIRECTORY/lib/common_qdrant.sh"
+
+readonly GITHUB_QWEN_COLLECTION_SCHEMA_TEST_NAME="github-qwen3-embedding-4b-2560-schema-contract"
+readonly LOWERCASE_IDF_COLLECTION_STATE='{
+  "result": {
+    "config": {
+      "params": {
+        "vectors": {"dense": {"size": 2560, "distance": "Cosine"}},
+        "sparse_vectors": {"bm25": {"modifier": "idf"}},
+        "on_disk_payload": true
+      }
+    }
+  }
+}'
+
+if ! validate_qwen_generation_collection_state \
+    "$GITHUB_QWEN_COLLECTION_SCHEMA_TEST_NAME" \
+    "$LOWERCASE_IDF_COLLECTION_STATE"; then
+    fail_github_sync_test "lowercase Qdrant idf modifier was rejected"
+fi
+
+uppercase_idf_collection_state="$(jq \
+    '.result.config.params.sparse_vectors.bm25.modifier = "Idf"' \
+    <<< "$LOWERCASE_IDF_COLLECTION_STATE")"
+if validate_qwen_generation_collection_state \
+    "$GITHUB_QWEN_COLLECTION_SCHEMA_TEST_NAME" \
+    "$uppercase_idf_collection_state" >/dev/null 2>&1; then
+    fail_github_sync_test "uppercase Qdrant Idf modifier was accepted"
+fi
+
+wrong_dense_dimension_collection_state="$(jq \
+    '.result.config.params.vectors.dense.size = 1536' \
+    <<< "$LOWERCASE_IDF_COLLECTION_STATE")"
+if validate_qwen_generation_collection_state \
+    "$GITHUB_QWEN_COLLECTION_SCHEMA_TEST_NAME" \
+    "$wrong_dense_dimension_collection_state" >/dev/null 2>&1; then
+    fail_github_sync_test "wrong dense-vector dimension was accepted"
+fi
+
+wrong_dense_distance_collection_state="$(jq \
+    '.result.config.params.vectors.dense.distance = "Dot"' \
+    <<< "$LOWERCASE_IDF_COLLECTION_STATE")"
+if validate_qwen_generation_collection_state \
+    "$GITHUB_QWEN_COLLECTION_SCHEMA_TEST_NAME" \
+    "$wrong_dense_distance_collection_state" >/dev/null 2>&1; then
+    fail_github_sync_test "wrong dense-vector distance was accepted"
+fi
+
+off_disk_payload_collection_state="$(jq \
+    '.result.config.params.on_disk_payload = false' \
+    <<< "$LOWERCASE_IDF_COLLECTION_STATE")"
+if validate_qwen_generation_collection_state \
+    "$GITHUB_QWEN_COLLECTION_SCHEMA_TEST_NAME" \
+    "$off_disk_payload_collection_state" >/dev/null 2>&1; then
+    fail_github_sync_test "off-disk payload configuration was accepted"
+fi
+
 # shellcheck source=lib/github_identity.sh
 source "$TEST_SCRIPT_DIRECTORY/lib/github_identity.sh"
 qdrant_curl() {
@@ -82,4 +138,4 @@ if remote_head_commit "https://github.com/example/repository" >/dev/null 2>&1; t
     fail_github_sync_test "GitHub remote HEAD failure was accepted as an empty commit"
 fi
 
-printf 'PASS: GitHub sync validates generation config before network access and propagates dependency failures.\n'
+printf 'PASS: GitHub sync validates the exact Qdrant generation schema before network access and propagates dependency failures.\n'

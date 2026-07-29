@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 @Service
 public final class ProgressTracker {
     private static final Logger log = LoggerFactory.getLogger(ProgressTracker.class);
+    private static final int SHA_256_HEX_CHARACTER_COUNT = 64;
 
     private final Path parsedDir;
     private final Path indexDir;
@@ -63,7 +64,10 @@ public final class ProgressTracker {
             long indexed = 0;
             if (indexDir != null && Files.isDirectory(indexDir)) {
                 try (var fileStream = Files.list(indexDir)) {
-                    indexed = fileStream.count();
+                    indexed = fileStream
+                            .filter(Files::isRegularFile)
+                            .filter(this::isChunkHashMarker)
+                            .count();
                 }
             }
             indexedCount.set(indexed);
@@ -117,5 +121,25 @@ public final class ProgressTracker {
      */
     public String formatPercent() {
         return String.format("%.1f%%", percentComplete());
+    }
+
+    private boolean isChunkHashMarker(Path markerPath) {
+        Path markerFileName = markerPath.getFileName();
+        if (markerFileName == null) {
+            return false;
+        }
+        String markerName = markerFileName.toString();
+        if (markerName.length() != SHA_256_HEX_CHARACTER_COUNT) {
+            return false;
+        }
+        for (int characterIndex = 0; characterIndex < markerName.length(); characterIndex++) {
+            char markerCharacter = markerName.charAt(characterIndex);
+            boolean decimalDigit = markerCharacter >= '0' && markerCharacter <= '9';
+            boolean lowercaseHexLetter = markerCharacter >= 'a' && markerCharacter <= 'f';
+            if (!decimalDigit && !lowercaseHexLetter) {
+                return false;
+            }
+        }
+        return true;
     }
 }

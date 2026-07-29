@@ -41,6 +41,33 @@ class MarkdownServiceTest {
     }
 
     @Test
+    void splitsMarkdownAtParsedHeadingsWithoutSplittingFencedExamples() {
+        String sourceMarkdown = """
+            # Lesson
+
+            Introductory text.
+
+            ## Complete example
+
+            ```java
+            String headingLikeText = "## Not a Markdown heading";
+            ```
+
+            ## Explanation
+
+            Closing text.
+            """;
+
+        var markdownSections = markdownService.splitIntoSections(sourceMarkdown);
+
+        assertEquals(3, markdownSections.size());
+        assertEquals(sourceMarkdown, String.join("", markdownSections));
+        assertTrue(markdownSections.get(1).contains("## Not a Markdown heading"));
+        assertTrue(markdownSections.get(1).contains("```java"));
+        assertTrue(markdownSections.get(1).endsWith("```\n\n"));
+    }
+
+    @Test
     @DisplayName("Should render bold and italic text")
     void testBoldAndItalic() {
         String markdown = "**bold text** and *italic text* and ***bold italic***";
@@ -129,6 +156,17 @@ class MarkdownServiceTest {
         assertEquals(1, markdownCitations.size());
         assertEquals(sourceUrl, markdownCitations.getFirst().url());
         assertEquals("JLS 14.11: switch", markdownCitations.getFirst().title());
+    }
+
+    @Test
+    void citationTitlePreservesNestedEmphasis() {
+        String sourceUrl = "https://example.com/reference";
+        String markdown = "[*Italic and **bold** source*](" + sourceUrl + ")";
+
+        var markdownCitations = markdownService.processStructured(markdown).citations();
+
+        assertEquals(1, markdownCitations.size());
+        assertEquals("Italic and bold source", markdownCitations.getFirst().title());
     }
 
     @Test
@@ -341,6 +379,20 @@ class MarkdownServiceTest {
         assertTrue(html.contains("inline-enrichment example"), "Example card should render");
         assertTrue(html.contains("<code class=\"language-java\">"), "Code block should have language class");
         assertTrue(html.contains("public class A"));
+    }
+
+    @Test
+    @DisplayName("Example enrichment preserves fence-like and template text inside attached fenced code")
+    void testExampleCardPreservesFenceLikeAndTemplateCode() {
+        String markdown = "{{example:Intro```handlebars\n<section>\n```ruby\n{{mustache}}\n</section>\n```}}";
+
+        String html = markdownService.processStructured(markdown).html();
+
+        assertTrue(html.contains("inline-enrichment example"), "Example card should render");
+        assertTrue(html.contains("Intro"), "Inline preamble should remain in the enrichment");
+        assertTrue(html.contains("<code class=\"language-handlebars\">"), "Attached fence should own the code");
+        assertTrue(html.contains("```ruby"), "Fence-like code content should remain literal");
+        assertTrue(html.contains("{{mustache}}"), "Template code should not terminate the enrichment");
     }
 
     @Test

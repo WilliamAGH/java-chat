@@ -35,6 +35,9 @@ public final class SseConstants {
     /** Stable status code emitted when a response stream begins retrieval preparation. */
     public static final String STATUS_CODE_STREAM_PREPARING = "stream.preparing";
 
+    /** Stable error code emitted when retrieval preparation exceeds its deadline. */
+    public static final String STATUS_CODE_RETRIEVAL_TIMEOUT = "retrieval.timeout";
+
     /** Processing stage label for stream-provider diagnostics. */
     public static final String STATUS_STAGE_STREAM = "stream";
 

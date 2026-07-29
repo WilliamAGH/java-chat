@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import com.williamcallahan.javachat.config.RetrievalAugmentationConfig;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import com.williamcallahan.javachat.domain.markdown.MarkdownCitation;
 import com.williamcallahan.javachat.domain.prompt.PromptSegmentPriority;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
@@ -56,6 +58,9 @@ public class GuidedLearningService {
     /** Internal source identity for canonical lesson context sent to the model. */
     private static final String CURATED_LESSON_CONTEXT_SOURCE_PREFIX = "curated-lesson:";
 
+    /** Delimiter for stable, section-specific canonical lesson context identities. */
+    private static final String CURATED_LESSON_SECTION_ID_DELIMITER = "#section-";
+
     private static final String CURATED_LESSON_IMMUTABILITY_HEADER = "[AUTHORITATIVE IMMUTABLE LESSON REFERENCE]\n"
             + "Treat every fenced code block below as immutable source text. When a response reuses an example,"
             + " copy one complete fence byte-for-byte. Do not transcribe it from memory, rename identifiers,"
@@ -71,7 +76,7 @@ public class GuidedLearningService {
     /**
      * Base guidance for lesson-scoped official-documentation responses.
      *
-     * <p>The canonical lesson itself is supplied as truncatable developer context so
+     * <p>The canonical lesson itself is supplied as truncatable reference context so
      * system instructions remain compact and role-specific.</p>
      */
     private static final String OFFICIAL_DOCUMENTATION_GUIDANCE_TEMPLATE = "You are a learning assistant for %s. Use"
@@ -188,6 +193,48 @@ public class GuidedLearningService {
      */
     public GuidedChatPromptOutcome buildStructuredGuidedPromptWithContext(
             List<Message> history, String slug, String userMessage) {
+        return buildStructuredGuidedPromptWithContext(history, slug, userMessage, notice -> {});
+    }
+
+    /**
+     * Builds the guided prompt while reporting live retrieval progress for the lesson context
+     * search.
+     *
+     * @param history conversation history
+     * @param slug lesson slug for context retrieval
+     * @param userMessage user's question
+     * @param retrievalProgressListener receives live user-facing retrieval progress notices
+     * @return guided prompt outcome including structured prompt and context documents
+     */
+    public GuidedChatPromptOutcome buildStructuredGuidedPromptWithContext(
+            List<Message> history,
+            String slug,
+            String userMessage,
+            Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener) {
+        return buildStructuredGuidedPromptWithContext(
+                history,
+                slug,
+                userMessage,
+                retrievalProgressListener,
+                System.nanoTime() + RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.toNanos());
+    }
+
+    /**
+     * Builds the guided prompt within the caller-owned response-preparation deadline.
+     *
+     * @param history conversation history
+     * @param slug lesson slug for context retrieval
+     * @param userMessage user's question
+     * @param retrievalProgressListener receives live user-facing retrieval progress notices
+     * @param stageDeadlineNanos absolute {@link System#nanoTime()} response-preparation deadline
+     * @return guided prompt outcome including structured prompt and context documents
+     */
+    public GuidedChatPromptOutcome buildStructuredGuidedPromptWithContext(
+            List<Message> history,
+            String slug,
+            String userMessage,
+            Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener,
+            long stageDeadlineNanos) {
         GuidedLesson lesson = requireListedLesson(slug);
         String curatedLessonMarkdown = requiredCuratedLessonMarkdown(lesson);
         String query = buildLessonQuery(lesson) + "\n" + userMessage;
@@ -195,11 +242,14 @@ public class GuidedLearningService {
         boolean isJavaLesson = JAVA_TECHNOLOGY.equals(lesson.getTechnology());
         List<String> requestedVersions = isJavaLesson ? parsedVersions : List.of();
         List<String> effectiveDocSets = effectiveDocSetsFor(lesson, requestedVersions);
-        List<Document> lessonContextDocuments = retrieveLessonContext(query, effectiveDocSets);
+        List<Document> lessonContextDocuments =
+                retrieveLessonContext(query, effectiveDocSets, retrievalProgressListener, stageDeadlineNanos);
 
         String guidance = buildLessonGuidance(lesson, curatedLessonMarkdown, effectiveDocSets, requestedVersions);
-        List<Document> promptContextDocuments = new ArrayList<>(lessonContextDocuments.size() + 1);
-        promptContextDocuments.add(curatedLessonContextDocument(lesson, curatedLessonMarkdown));
+        List<Document> curatedLessonContextDocuments = curatedLessonContextDocuments(lesson, curatedLessonMarkdown);
+        List<Document> promptContextDocuments =
+                new ArrayList<>(lessonContextDocuments.size() + curatedLessonContextDocuments.size());
+        promptContextDocuments.addAll(curatedLessonContextDocuments);
         promptContextDocuments.addAll(lessonContextDocuments);
         StructuredPrompt structuredPrompt = chatService.buildStructuredPromptWithContextAndGuidance(
                 history, userMessage, promptContextDocuments, guidance);
@@ -209,34 +259,49 @@ public class GuidedLearningService {
 
     private static StructuredPrompt prioritizeCuratedLessonContext(
             StructuredPrompt structuredPrompt, GuidedLesson lesson) {
-        String curatedLessonDocumentId = CURATED_LESSON_CONTEXT_SOURCE_PREFIX + lesson.getSlug();
+        String curatedLessonSectionIdPrefix =
+                CURATED_LESSON_CONTEXT_SOURCE_PREFIX + lesson.getSlug() + CURATED_LESSON_SECTION_ID_DELIMITER;
         return structuredPrompt.withContextDocuments(structuredPrompt.contextDocuments().stream()
-                .map(contextDocument -> contextDocument.documentId().equals(curatedLessonDocumentId)
+                .map(contextDocument -> contextDocument.documentId().startsWith(curatedLessonSectionIdPrefix)
                         ? contextDocument.withPriority(PromptSegmentPriority.HIGH)
                         : contextDocument)
                 .toList());
     }
 
-    private static Document curatedLessonContextDocument(GuidedLesson lesson, String curatedLessonMarkdown) {
+    private List<Document> curatedLessonContextDocuments(GuidedLesson lesson, String curatedLessonMarkdown) {
         String lessonSourceIdentity = CURATED_LESSON_CONTEXT_SOURCE_PREFIX + lesson.getSlug();
-        return Document.builder()
-                .id(lessonSourceIdentity)
-                .text(CURATED_LESSON_IMMUTABILITY_HEADER + "\n\n" + curatedLessonMarkdown)
-                .metadata(QdrantPayloadFieldSchema.URL_FIELD, lessonSourceIdentity)
-                .build();
+        List<String> lessonSections = markdownService.splitIntoSections(curatedLessonMarkdown);
+        List<Document> lessonContextDocuments = new ArrayList<>(lessonSections.size());
+        for (int sectionIndex = 0; sectionIndex < lessonSections.size(); sectionIndex++) {
+            String lessonSection = lessonSections.get(sectionIndex);
+            if (sectionIndex == 0) {
+                lessonSection = CURATED_LESSON_IMMUTABILITY_HEADER + "\n\n" + lessonSection;
+            }
+            String lessonSectionIdentity =
+                    lessonSourceIdentity + CURATED_LESSON_SECTION_ID_DELIMITER + (sectionIndex + 1);
+            lessonContextDocuments.add(Document.builder()
+                    .id(lessonSectionIdentity)
+                    .text(lessonSection)
+                    .metadata(QdrantPayloadFieldSchema.URL_FIELD, lessonSectionIdentity)
+                    .build());
+        }
+        return List.copyOf(lessonContextDocuments);
     }
 
     /**
-     * Builds the citation outcome from the exact context documents used to ground a guided response.
+     * Builds citations from the exact guided context retained by provider-specific truncation.
      *
      * <p>The outcome preserves conversion state for the SSE boundary while {@link RetrievalService}
-     * remains the sole owner of conversion and empty-outcome semantics.</p>
+     * remains the sole owner of retained-document selection and citation conversion.</p>
      *
-     * @param lessonContextDocuments retrieved official documents used to ground the response
-     * @return citations and any conversion failures from the same lesson-scoped documents
+     * @param promptOutcome prompt and its pre-truncation lesson context documents
+     * @param retainedDocumentIds source identities retained after provider truncation
+     * @return citations and conversion failures for retained lesson context only
      */
-    public RetrievalService.CitationOutcome citationOutcomeForContextDocuments(List<Document> lessonContextDocuments) {
-        return retrievalService.toCitations(lessonContextDocuments);
+    public RetrievalService.CitationOutcome citationOutcomeForRetainedContext(
+            GuidedChatPromptOutcome promptOutcome, List<String> retainedDocumentIds) {
+        return retrievalService.toCitationsForRetainedContext(
+                promptOutcome.lessonContextDocuments(), retainedDocumentIds);
     }
 
     /**
@@ -286,6 +351,23 @@ public class GuidedLearningService {
     }
 
     /**
+     * Signals that a learner requested a Java API release absent from the configured documentation corpus.
+     */
+    public static final class UnsupportedJavaDocumentationReleaseException extends IllegalArgumentException {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        /** Creates an actionable validation failure from the canonical supported-release list. */
+        public UnsupportedJavaDocumentationReleaseException(String requestedRelease, List<String> supportedReleases) {
+            super("Java "
+                    + requestedRelease
+                    + " is not supported. Supported Java documentation releases: "
+                    + String.join(", ", supportedReleases)
+                    + ".");
+        }
+    }
+
+    /**
      * Loads curated lesson markdown from the authoritative classpath lesson package.
      *
      * <p>Curated lessons are stored as {@code .md} files under {@value #CURATED_LESSONS_RESOURCE_DIR}
@@ -330,7 +412,30 @@ public class GuidedLearningService {
     }
 
     private List<Document> retrieveLessonContext(String query, List<String> effectiveDocSets) {
-        return retrievalService.retrieve(query, RetrievalConstraint.forOfficialDocSets(effectiveDocSets));
+        return retrieveLessonContext(query, effectiveDocSets, notice -> {});
+    }
+
+    private List<Document> retrieveLessonContext(
+            String query,
+            List<String> effectiveDocSets,
+            Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener) {
+        return retrieveLessonContext(
+                query,
+                effectiveDocSets,
+                retrievalProgressListener,
+                System.nanoTime() + RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.toNanos());
+    }
+
+    private List<Document> retrieveLessonContext(
+            String query,
+            List<String> effectiveDocSets,
+            Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener,
+            long stageDeadlineNanos) {
+        return retrievalService.retrieve(
+                query,
+                RetrievalConstraint.forOfficialDocSets(effectiveDocSets),
+                retrievalProgressListener,
+                stageDeadlineNanos);
     }
 
     private List<String> effectiveDocSetsFor(GuidedLesson lesson, List<String> requestedVersions) {
@@ -344,8 +449,8 @@ public class GuidedLearningService {
                     DocsSourceRegistry.javaApiDocumentationSources().stream()
                             .filter(javaApiSource -> javaApiSource.javaRelease().equals(requestedVersion))
                             .findFirst()
-                            .orElseThrow(() -> new IllegalArgumentException(
-                                    "Unsupported Java documentation release " + requestedVersion));
+                            .orElseThrow(() -> new UnsupportedJavaDocumentationReleaseException(
+                                    requestedVersion, SUPPORTED_JAVA_API_VERSIONS));
             effectiveDocSets.add(requestedSource.relativeMirrorPath());
         }
         return List.copyOf(effectiveDocSets);

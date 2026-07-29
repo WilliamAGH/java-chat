@@ -18,7 +18,6 @@ import com.williamcallahan.javachat.application.ingestion.PageLimit;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.domain.javaapi.JavadocMemberAnchor;
-import com.williamcallahan.javachat.service.ingestion.LocalDocsDirectoryIngestionService;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -50,7 +49,6 @@ class DocsIngestionServiceTest {
     private ContentHasher contentHasher;
     private LocalStoreService localStoreService;
     private HtmlContentExtractor htmlContentExtractor;
-    private LocalDocsDirectoryIngestionService localDirectoryIngestionService;
 
     @BeforeEach
     void setUp() {
@@ -59,7 +57,6 @@ class DocsIngestionServiceTest {
         contentHasher = new ContentHasher();
         localStoreService = mock(LocalStoreService.class);
         htmlContentExtractor = mock(HtmlContentExtractor.class);
-        localDirectoryIngestionService = mock(LocalDocsDirectoryIngestionService.class);
     }
 
     @Test
@@ -144,6 +141,146 @@ class DocsIngestionServiceTest {
         ArgumentCaptor<String> fetchedUrlCaptor = ArgumentCaptor.forClass(String.class);
         verify(crawlPageFetcher, times(2)).fetch(fetchedUrlCaptor.capture());
         assertEquals(List.of(rootUrl, allowedChildUrl), fetchedUrlCaptor.getAllValues());
+    }
+
+    @Test
+    void redirectTargetIsNotFetchedAgainWhenDiscoveredDirectly() throws IOException {
+        String rootUrl = "https://docs.example.com/root/";
+        String redirectSourceUrl = rootUrl + "old-page";
+        String redirectTargetUrl = rootUrl + "new-page";
+        String rootHtml = """
+            <html><body>
+              <a href="/root/old-page">Old page</a>
+              <a href="/root/new-page">New page</a>
+            </body></html>
+            """;
+        DocsIngestionService.CrawlPageFetcher crawlPageFetcher = mock(DocsIngestionService.CrawlPageFetcher.class);
+        when(crawlPageFetcher.fetch(rootUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(rootUrl, rootHtml));
+        when(crawlPageFetcher.fetch(redirectSourceUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(
+                        redirectTargetUrl, "<html><body>Canonical page</body></html>"));
+        when(htmlContentExtractor.extractCleanContent(any())).thenReturn("");
+        when(chunkProcessingService.processAndStoreChunks(any(), any(), any(), any()))
+                .thenAnswer(invocation -> redirectTargetUrl.equals(invocation.getArgument(1, String.class))
+                        ? new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of("canonical-hash"), 1, 1)
+                        : new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
+        when(hybridVectorService.hasExactPointIdsForUrl(
+                        QdrantCollectionKind.DOCS,
+                        redirectTargetUrl,
+                        List.of(contentHasher.uuidFromHash("canonical-hash"))))
+                .thenReturn(true);
+        DocsIngestionService ingestionService = ingestionServiceFor(rootUrl);
+
+        ingestionService.crawlAndIngest(new PageLimit(3), crawlPageFetcher);
+
+        ArgumentCaptor<String> fetchedUrlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(crawlPageFetcher, times(2)).fetch(fetchedUrlCaptor.capture());
+        assertEquals(List.of(rootUrl, redirectSourceUrl), fetchedUrlCaptor.getAllValues());
+        verify(crawlPageFetcher, never()).fetch(redirectTargetUrl);
+        verify(localStoreService).saveHtml(redirectTargetUrl, "<html><body>Canonical page</body></html>");
+        verify(chunkProcessingService).processAndStoreChunks("", redirectTargetUrl, "", "");
+        verify(hybridVectorService).deleteByUrl(QdrantCollectionKind.DOCS, redirectSourceUrl);
+    }
+
+    @Test
+    void redirectAliasDoesNotReindexFinalUrlAlreadyProcessedDirectly() throws IOException {
+        String rootUrl = "https://docs.example.com/root/";
+        String redirectSourceUrl = rootUrl + "old-page";
+        String redirectTargetUrl = rootUrl + "new-page";
+        String rootHtml = """
+            <html><body>
+              <a href="/root/new-page">New page</a>
+              <a href="/root/old-page">Old page</a>
+            </body></html>
+            """;
+        DocsIngestionService.CrawlPageFetcher crawlPageFetcher = mock(DocsIngestionService.CrawlPageFetcher.class);
+        when(crawlPageFetcher.fetch(rootUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(rootUrl, rootHtml));
+        when(crawlPageFetcher.fetch(redirectTargetUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(
+                        redirectTargetUrl, "<html><body>Canonical page</body></html>"));
+        when(crawlPageFetcher.fetch(redirectSourceUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(
+                        redirectTargetUrl, "<html><body>Canonical page</body></html>"));
+        when(htmlContentExtractor.extractCleanContent(any())).thenReturn("");
+        when(chunkProcessingService.processAndStoreChunks(any(), any(), any(), any()))
+                .thenAnswer(invocation -> redirectTargetUrl.equals(invocation.getArgument(1, String.class))
+                        ? new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of("canonical-hash"), 1, 1)
+                        : new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
+        when(hybridVectorService.hasExactPointIdsForUrl(
+                        QdrantCollectionKind.DOCS,
+                        redirectTargetUrl,
+                        List.of(contentHasher.uuidFromHash("canonical-hash"))))
+                .thenReturn(true);
+        DocsIngestionService ingestionService = ingestionServiceFor(rootUrl);
+
+        ingestionService.crawlAndIngest(new PageLimit(3), crawlPageFetcher);
+
+        verify(crawlPageFetcher).fetch(redirectSourceUrl);
+        verify(localStoreService, times(2)).saveHtml(any(), any());
+        verify(chunkProcessingService, times(2)).processAndStoreChunks(any(), any(), any(), any());
+        verify(hybridVectorService).deleteByUrl(QdrantCollectionKind.DOCS, redirectSourceUrl);
+    }
+
+    @Test
+    void redirectSourceRemainsSearchableWhenCanonicalChunkingFails() throws IOException {
+        String rootUrl = "https://docs.example.com/root/";
+        String redirectSourceUrl = rootUrl + "old-page";
+        String redirectTargetUrl = rootUrl + "new-page";
+        String rootHtml = "<html><body><a href=\"/root/old-page\">Old page</a></body></html>";
+        DocsIngestionService.CrawlPageFetcher crawlPageFetcher = mock(DocsIngestionService.CrawlPageFetcher.class);
+        when(crawlPageFetcher.fetch(rootUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(rootUrl, rootHtml));
+        when(crawlPageFetcher.fetch(redirectSourceUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(
+                        redirectTargetUrl, "<html><body>Canonical page</body></html>"));
+        when(htmlContentExtractor.extractCleanContent(any())).thenReturn("");
+        when(chunkProcessingService.processAndStoreChunks(any(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    if (redirectTargetUrl.equals(invocation.getArgument(1, String.class))) {
+                        throw new IOException("canonical chunking failed");
+                    }
+                    return new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0);
+                });
+        DocsIngestionService ingestionService = ingestionServiceFor(rootUrl);
+
+        assertThrows(IOException.class, () -> ingestionService.crawlAndIngest(new PageLimit(2), crawlPageFetcher));
+
+        verify(hybridVectorService, never()).deleteByUrl(QdrantCollectionKind.DOCS, redirectSourceUrl);
+    }
+
+    @Test
+    void redirectAliasesCannotExceedFetchLimit() throws IOException {
+        String rootUrl = "https://docs.example.com/root/";
+        String firstAliasUrl = rootUrl + "first-alias";
+        String secondAliasUrl = rootUrl + "second-alias";
+        String thirdAliasUrl = rootUrl + "third-alias";
+        String rootHtml = """
+            <html><body>
+              <a href="/root/first-alias">First alias</a>
+              <a href="/root/second-alias">Second alias</a>
+              <a href="/root/third-alias">Third alias</a>
+            </body></html>
+            """;
+        DocsIngestionService.CrawlPageFetcher crawlPageFetcher = mock(DocsIngestionService.CrawlPageFetcher.class);
+        when(crawlPageFetcher.fetch(rootUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(rootUrl, rootHtml));
+        when(crawlPageFetcher.fetch(firstAliasUrl))
+                .thenReturn(
+                        DocsIngestionService.prepareCrawlPageSnapshot(rootUrl, "<html><body>Root alias</body></html>"));
+        when(htmlContentExtractor.extractCleanContent(any())).thenReturn("");
+        when(chunkProcessingService.processAndStoreChunks(any(), any(), any(), any()))
+                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
+        DocsIngestionService ingestionService = ingestionServiceFor(rootUrl);
+
+        ingestionService.crawlAndIngest(new PageLimit(2), crawlPageFetcher);
+
+        ArgumentCaptor<String> fetchedUrlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(crawlPageFetcher, times(2)).fetch(fetchedUrlCaptor.capture());
+        assertEquals(List.of(rootUrl, firstAliasUrl), fetchedUrlCaptor.getAllValues());
+        verify(crawlPageFetcher, never()).fetch(secondAliasUrl);
+        verify(crawlPageFetcher, never()).fetch(thirdAliasUrl);
     }
 
     @Test
@@ -587,8 +724,7 @@ class DocsIngestionServiceTest {
                 chunkProcessingService,
                 contentHasher,
                 localStoreService,
-                htmlContentExtractor,
-                localDirectoryIngestionService);
+                htmlContentExtractor);
     }
 
     private static org.springframework.ai.document.Document replacementDocument(

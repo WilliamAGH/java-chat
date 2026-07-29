@@ -8,13 +8,16 @@ import java.util.Locale;
  */
 public class RetrievalAugmentationConfig {
 
+    /** Maximum time from retrieval preparation to the first provider or terminal event. */
+    public static final Duration RESPONSE_PREPARATION_TIMEOUT = Duration.ofSeconds(20);
+
     private static final int TOP_K_DEF = 10;
     private static final int RETURN_K_DEF = 5;
     private static final int CHUNK_MAX_DEF = 900;
     private static final int OVERLAP_DEF = 150;
     private static final int CITE_DEF = 3;
     private static final double MMR_LAMBDA_DEF = 0.5d;
-    private static final Duration RERANK_TIMEOUT_DEF = Duration.ofSeconds(30);
+    private static final Duration RERANK_TIMEOUT_DEF = Duration.ofSeconds(8);
     private static final int MIN_POSITIVE = 1;
     private static final int MIN_NON_NEG = 0;
     private static final double MMR_MIN = 0.0d;
@@ -29,6 +32,8 @@ public class RetrievalAugmentationConfig {
     private static final String POSITIVE_FMT = "%s must be greater than 0.";
     private static final String NON_NEG_FMT = "%s must be 0 or greater.";
     private static final String RANGE_FMT = "%s must be between %s and %s.";
+    private static final String RERANKER_TIMEOUT_BOUND_MESSAGE_FORMAT =
+            "%s must be less than the response preparation timeout of %s.";
 
     private int searchTopK = TOP_K_DEF;
     private int searchReturnK = RETURN_K_DEF;
@@ -57,6 +62,7 @@ public class RetrievalAugmentationConfig {
         requireNonNegativeCount(CITE_KEY, searchCitations);
         requireLambdaRange();
         requirePositiveDuration(RERANK_TIMEOUT_KEY, rerankerTimeout);
+        requireRerankerTimeoutWithinResponsePreparationBudget();
         if (searchReturnK > searchTopK) {
             throw new IllegalArgumentException(
                     String.format(Locale.ROOT, RETURN_K_BOUND_MSG, RETURN_K_KEY, TOP_K_KEY, searchReturnK, searchTopK));
@@ -215,6 +221,16 @@ public class RetrievalAugmentationConfig {
     private void requirePositiveDuration(String propertyKey, Duration duration) {
         if (duration == null || duration.isNegative() || duration.isZero()) {
             throw new IllegalArgumentException(String.format(Locale.ROOT, POSITIVE_FMT, propertyKey));
+        }
+    }
+
+    private void requireRerankerTimeoutWithinResponsePreparationBudget() {
+        if (rerankerTimeout.compareTo(RESPONSE_PREPARATION_TIMEOUT) >= 0) {
+            throw new IllegalArgumentException(String.format(
+                    Locale.ROOT,
+                    RERANKER_TIMEOUT_BOUND_MESSAGE_FORMAT,
+                    RERANK_TIMEOUT_KEY,
+                    RESPONSE_PREPARATION_TIMEOUT));
         }
     }
 }

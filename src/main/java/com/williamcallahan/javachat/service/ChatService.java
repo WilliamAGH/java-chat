@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.ModelConfiguration;
+import com.williamcallahan.javachat.config.RetrievalAugmentationConfig;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import com.williamcallahan.javachat.domain.SearchQualityLevel;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
@@ -14,6 +15,7 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.support.DocumentContentAdapter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -86,6 +88,20 @@ public class ChatService {
     }
 
     /**
+     * Builds citations from the exact prompt context retained by provider-specific truncation.
+     *
+     * @param userQuery current user query
+     * @param promptOutcome prompt and its pre-truncation context documents
+     * @param retainedDocumentIds source identities retained after provider truncation
+     * @return citations and conversion failures for retained prompt context only
+     */
+    public RetrievalService.CitationOutcome citationOutcomeForRetainedContext(
+            String userQuery, StructuredPromptOutcome promptOutcome, List<String> retainedDocumentIds) {
+        return retrievalService.toCitationsForRetainedContext(
+                userQuery, promptOutcome.documents(), retainedDocumentIds);
+    }
+
+    /**
      * Builds a structured prompt with pre-selected context and custom guidance.
      *
      * <p>Used by guided learning flows where context documents are pre-filtered
@@ -127,23 +143,53 @@ public class ChatService {
      *
      * @param history existing chat history
      * @param latestUserMessage user query
-     * @param modelHint optional model hint for RAG optimization
      * @return structured prompt outcome with segments and retrieval metadata
      */
     public StructuredPromptOutcome buildStructuredPromptWithContextOutcome(
-            List<Message> history, String latestUserMessage, String modelHint) {
+            List<Message> history, String latestUserMessage) {
+        return buildStructuredPromptWithContextOutcome(history, latestUserMessage, notice -> {});
+    }
 
-        // Use reduced RAG for token-constrained models (GPT-5.x family)
-        RetrievalService.RetrievalOutcome retrievalOutcome;
-        if (ModelConfiguration.isTokenConstrained(modelHint)) {
-            retrievalOutcome = retrieveTokenConstrainedOfficialDocumentation(latestUserMessage);
-            logger.debug(
-                    "Using reduced RAG: {} documents with max {} tokens each",
-                    retrievalOutcome.documents().size(),
-                    ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
-        } else {
-            retrievalOutcome = retrievalService.retrieveOutcome(latestUserMessage, officialDocumentationConstraint());
-        }
+    /**
+     * Builds a context-augmented structured prompt while reporting live retrieval progress.
+     *
+     * @param history existing chat history
+     * @param latestUserMessage user query
+     * @param retrievalProgressListener receives live user-facing retrieval progress notices
+     * @return structured prompt outcome with segments and retrieval metadata
+     */
+    public StructuredPromptOutcome buildStructuredPromptWithContextOutcome(
+            List<Message> history,
+            String latestUserMessage,
+            Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener) {
+        return buildStructuredPromptWithContextOutcome(
+                history,
+                latestUserMessage,
+                retrievalProgressListener,
+                System.nanoTime() + RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.toNanos());
+    }
+
+    /**
+     * Builds a context-augmented prompt within the caller-owned response-preparation deadline.
+     *
+     * @param history existing chat history
+     * @param latestUserMessage user query
+     * @param retrievalProgressListener receives live user-facing retrieval progress notices
+     * @param stageDeadlineNanos absolute {@link System#nanoTime()} response-preparation deadline
+     * @return structured prompt outcome with segments and retrieval metadata
+     */
+    public StructuredPromptOutcome buildStructuredPromptWithContextOutcome(
+            List<Message> history,
+            String latestUserMessage,
+            Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener,
+            long stageDeadlineNanos) {
+
+        RetrievalService.RetrievalOutcome retrievalOutcome = retrieveTokenConstrainedOfficialDocumentation(
+                latestUserMessage, retrievalProgressListener, stageDeadlineNanos);
+        logger.debug(
+                "Using GPT-5.4 retrieval context: {} documents with max {} tokens each",
+                retrievalOutcome.documents().size(),
+                ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
 
         List<Document> contextDocs = retrievalOutcome.documents();
         String searchQualityNote = determineSearchQuality(contextDocs);
@@ -180,11 +226,43 @@ public class ChatService {
      * @return constrained official-document retrieval outcome
      */
     public RetrievalService.RetrievalOutcome retrieveTokenConstrainedOfficialDocumentation(String query) {
+        return retrieveTokenConstrainedOfficialDocumentation(query, notice -> {});
+    }
+
+    /**
+     * Retrieves the official documentation context while reporting live retrieval progress.
+     *
+     * @param query learner query
+     * @param retrievalProgressListener receives live user-facing retrieval progress notices
+     * @return constrained official-document retrieval outcome
+     */
+    public RetrievalService.RetrievalOutcome retrieveTokenConstrainedOfficialDocumentation(
+            String query, Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener) {
+        return retrieveTokenConstrainedOfficialDocumentation(
+                query,
+                retrievalProgressListener,
+                System.nanoTime() + RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.toNanos());
+    }
+
+    /**
+     * Retrieves constrained official documentation within the caller-owned deadline.
+     *
+     * @param query learner query
+     * @param retrievalProgressListener receives live user-facing retrieval progress notices
+     * @param stageDeadlineNanos absolute {@link System#nanoTime()} response-preparation deadline
+     * @return constrained official-document retrieval outcome
+     */
+    public RetrievalService.RetrievalOutcome retrieveTokenConstrainedOfficialDocumentation(
+            String query,
+            Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener,
+            long stageDeadlineNanos) {
         return retrievalService.retrieveWithLimitOutcome(
                 query,
                 ModelConfiguration.RAG_LIMIT_CONSTRAINED,
                 ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED,
-                officialDocumentationConstraint());
+                officialDocumentationConstraint(),
+                retrievalProgressListener,
+                stageDeadlineNanos);
     }
 
     private static RetrievalConstraint officialDocumentationConstraint() {

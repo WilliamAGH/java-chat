@@ -8,6 +8,7 @@ TEST_SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_WORK_DIRECTORY="$(mktemp -d)"
 CAPTURED_CHILD_ENVIRONMENT="$TEST_WORK_DIRECTORY/child-environment"
 CAPTURED_CHILD_ARGUMENTS="$TEST_WORK_DIRECTORY/child-arguments"
+JAR_STAGING_ROOT="$TEST_WORK_DIRECTORY/jar-staging"
 trap 'rm -rf -- "$TEST_WORK_DIRECTORY"' EXIT
 
 fail_process_environment_test() {
@@ -18,6 +19,9 @@ fail_process_environment_test() {
 set --
 # shellcheck source=process_all_to_qdrant.sh
 source "$TEST_SCRIPT_DIRECTORY/process_all_to_qdrant.sh"
+
+export LOG_FILE="$TEST_WORK_DIRECTORY/process_qdrant.log"
+export PID_FILE="$TEST_WORK_DIRECTORY/process_qdrant.pid"
 
 load_env_file() {
     :
@@ -43,6 +47,11 @@ locate_app_jar() {
     printf '%s\n' "$TEST_WORK_DIRECTORY/application.jar"
 }
 
+stage_app_jar() {
+    cp "$1" "$2/application.jar"
+    printf '%s\n' "$2/application.jar"
+}
+
 monitor_java_process() {
     wait "$1"
 }
@@ -61,6 +70,7 @@ java() {
 }
 
 mkdir -p \
+    "$JAR_STAGING_ROOT" \
     "$TEST_WORK_DIRECTORY/arbitrary-corpus/kotlin" \
     "$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/local/snapshots" \
     "$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/local/parsed" \
@@ -83,6 +93,7 @@ export DOCS_DIR="$TEST_WORK_DIRECTORY/arbitrary-corpus"
 export DOCS_SNAPSHOT_DIR="$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/local/snapshots"
 export DOCS_PARSED_DIR="$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/local/parsed"
 export DOCS_INDEX_DIR="$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/local/index"
+export TMPDIR="$JAR_STAGING_ROOT"
 
 run_documentation_ingestion --doc-sets=kotlin >/dev/null
 
@@ -96,6 +107,14 @@ if ! grep -Fxq -- "--app.qdrant.ensure-collections=true" "$CAPTURED_CHILD_ARGUME
 fi
 if grep -q -- "-DDOCS_DIR" "$CAPTURED_CHILD_ARGUMENTS"; then
     fail_process_environment_test "DOCS_DIR was passed as an ineffective JVM property"
+fi
+staged_app_jar_argument="$(awk 'previous_argument == "-jar" { print; exit } { previous_argument = $0 }' "$CAPTURED_CHILD_ARGUMENTS")"
+if [ "$staged_app_jar_argument" = "$TEST_WORK_DIRECTORY/application.jar" ] \
+    || [[ "$staged_app_jar_argument" != "$JAR_STAGING_ROOT"/java-chat-document-ingestion.*/application.jar ]]; then
+    fail_process_environment_test "CLI child did not receive the private staged application jar"
+fi
+if find "$JAR_STAGING_ROOT" -mindepth 1 -print -quit | grep -q .; then
+    fail_process_environment_test "successful ingestion left a staged application jar directory"
 fi
 
 if (
@@ -150,6 +169,35 @@ if (
     run_documentation_ingestion --doc-sets=kotlin >/dev/null 2>&1
 ); then
     fail_process_environment_test "production generation state was accepted under the local profile"
+fi
+
+setup_pid_and_cleanup() {
+    : > "$1"
+}
+
+stage_app_jar() {
+    return 1
+}
+
+if run_documentation_ingestion --doc-sets=kotlin >/dev/null 2>&1; then
+    fail_process_environment_test "application jar staging failure was accepted"
+fi
+if [ -e "$PID_FILE" ]; then
+    fail_process_environment_test "application jar staging failure left the ingestion PID claim"
+fi
+if find "$JAR_STAGING_ROOT" -mindepth 1 -print -quit | grep -q .; then
+    fail_process_environment_test "application jar staging failure left its private staging directory"
+fi
+
+mktemp() {
+    return 1
+}
+
+if run_documentation_ingestion --doc-sets=kotlin >/dev/null 2>&1; then
+    fail_process_environment_test "temporary staging directory failure was accepted"
+fi
+if [ -e "$PID_FILE" ]; then
+    fail_process_environment_test "temporary staging directory failure left the ingestion PID claim"
 fi
 
 printf 'PASS: arbitrary DOCS_DIR is exported to a servlet-free ingestion child after fail-fast validation.\n'

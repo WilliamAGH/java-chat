@@ -39,6 +39,140 @@ validate_fetch_result() {
     log "${GREEN}✓ $name fetched successfully: $fetched_html_count HTML files${NC}"
 }
 
+# Requires the single parser that verifies Java 25 specification PDFs are readable.
+require_java25_specification_pdf_parser() {
+    if ! command -v mutool >/dev/null 2>&1; then
+        log "${RED}✗ Java 25 specification validation requires mutool. Install with: brew install mupdf (macOS) or apt install mupdf-tools (Ubuntu)${NC}"
+        return 1
+    fi
+}
+
+# Validates the binary, parseability, and source identity of one Java 25 specification PDF.
+validate_java25_specification_pdf() {
+    local specification_path="$1"
+    local specification_name="$2"
+    local required_title_fragment="$3"
+    local required_parsed_title="$4"
+    if [ ! -s "$specification_path" ]; then
+        log "${RED}✗ $specification_name PDF is missing or empty: $specification_path${NC}"
+        return 1
+    fi
+
+    local pdf_magic
+    if ! pdf_magic="$(head -c 5 "$specification_path")" \
+        || [ "$pdf_magic" != "%PDF-" ]; then
+        log "${RED}✗ $specification_name did not return a PDF header${NC}"
+        return 1
+    fi
+
+    local detected_mime_type
+    if ! detected_mime_type="$(file --brief --mime-type "$specification_path")" \
+        || [ "$detected_mime_type" != "application/pdf" ]; then
+        log "${RED}✗ $specification_name has unexpected MIME type: ${detected_mime_type:-unknown}${NC}"
+        return 1
+    fi
+    if ! grep -aFq -- "$required_title_fragment" "$specification_path"; then
+        log "${RED}✗ $specification_name does not contain its required specification title${NC}"
+        return 1
+    fi
+    if ! grep -aFq -- "%%EOF" "$specification_path"; then
+        log "${RED}✗ $specification_name is missing its PDF EOF marker${NC}"
+        return 1
+    fi
+
+    if ! require_java25_specification_pdf_parser; then
+        return 1
+    fi
+
+    local parsed_first_page
+    if ! parsed_first_page="$(mutool draw -q -F txt -o - "$specification_path" 1)"; then
+        log "${RED}✗ $specification_name cannot be parsed by mutool${NC}"
+        return 1
+    fi
+    if ! grep -Fxq -- "Java SE 25 Edition" <<< "$parsed_first_page"; then
+        log "${RED}✗ $specification_name is not the exact Java SE 25 Edition${NC}"
+        return 1
+    fi
+
+    local normalized_first_page
+    normalized_first_page="$(tr '\n' ' ' <<< "$parsed_first_page")"
+    if [[ "$normalized_first_page" != *"$required_parsed_title"* ]]; then
+        log "${RED}✗ $specification_name does not match its parsed specification title${NC}"
+        return 1
+    fi
+    if ! mutool draw -q -F txt -o /dev/null "$specification_path"; then
+        log "${RED}✗ $specification_name cannot be fully parsed by mutool${NC}"
+        return 1
+    fi
+}
+
+# Fetches one Java 25 specification into the staged Java API mirror.
+fetch_java25_specification_pdf() {
+    local target_directory="$1"
+    local specification_name="$2"
+    local specification_url="$3"
+    local relative_specification_path="$4"
+    local required_title_fragment="$5"
+    local required_parsed_title="$6"
+    local specification_path="$target_directory/$relative_specification_path"
+    if ! mkdir -p "$(dirname "$specification_path")"; then
+        log "${RED}✗ Could not create the Java 25 specification directory for $specification_name${NC}"
+        return 1
+    fi
+
+    local temporary_specification_path
+    if ! temporary_specification_path="$(mktemp "$specification_path.XXXXXX")"; then
+        log "${RED}✗ Could not create a temporary PDF for $specification_name${NC}"
+        return 1
+    fi
+    if ! wget \
+        --output-document="$temporary_specification_path" \
+        --max-redirect=0 \
+        "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}" \
+        --user-agent="java-chat-doc-fetcher/1.0" \
+        "$specification_url" 2>&1 | tee -a "$LOG_FILE"; then
+        rm -f "$temporary_specification_path"
+        log "${RED}✗ Failed to fetch $specification_name from its canonical URL${NC}"
+        return 1
+    fi
+    if ! validate_java25_specification_pdf \
+        "$temporary_specification_path" "$specification_name" "$required_title_fragment" "$required_parsed_title"; then
+        rm -f "$temporary_specification_path"
+        return 1
+    fi
+    if ! mv "$temporary_specification_path" "$specification_path"; then
+        rm -f "$temporary_specification_path"
+        log "${RED}✗ Could not install the validated PDF for $specification_name${NC}"
+        return 1
+    fi
+    validate_java25_specification_pdf \
+        "$specification_path" "$specification_name" "$required_title_fragment" "$required_parsed_title"
+}
+
+# Keeps the two language-specification PDFs in the same atomic Java 25 source publication.
+fetch_java25_specification_pdfs() {
+    local target_directory="$1"
+    local source_name="$2"
+    if ! require_java25_specification_pdf_parser; then
+        return 1
+    fi
+    fetch_java25_specification_pdf \
+        "$target_directory" \
+        "$source_name JLS 25" \
+        "https://docs.oracle.com/javase/specs/jls/se25/jls25.pdf" \
+        "docs.oracle.com/javase/specs/jls/se25/jls25.pdf" \
+        "Language Specification" \
+        "The Java® Language Specification" \
+        || return 1
+    fetch_java25_specification_pdf \
+        "$target_directory" \
+        "$source_name JVMS 25" \
+        "https://docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf" \
+        "docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf" \
+        "Virtual Machine Specification" \
+        "The Java® Virtual Machine Specification"
+}
+
 # Fetches one governed article without recursively following unrelated page links.
 fetch_single_documentation_page() {
     local url="$1"

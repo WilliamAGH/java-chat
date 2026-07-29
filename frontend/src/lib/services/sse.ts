@@ -33,6 +33,27 @@ export interface StreamSseRequestOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Terminal failure thrown when the server emits an SSE error event.
+ * Carries the full validated payload so the UI can render details and
+ * honor the server's retryable flag; a plain Error would drop them.
+ */
+export class StreamFailureError extends Error {
+  readonly details?: string;
+  readonly code?: string;
+  readonly retryable?: boolean;
+  readonly stage?: string;
+
+  constructor(streamError: StreamError) {
+    super(streamError.message);
+    this.name = "StreamFailureError";
+    this.details = streamError.details ?? undefined;
+    this.code = streamError.code ?? undefined;
+    this.retryable = streamError.retryable ?? undefined;
+    this.stage = streamError.stage ?? undefined;
+  }
+}
+
 /** Callbacks for SSE stream processing. */
 export interface SseCallbacks {
   onText: (streamText: string) => void;
@@ -42,13 +63,32 @@ export interface SseCallbacks {
   onProvider?: (provider: ProviderEvent) => void;
 }
 
+/** User-facing summary when a stream request never reaches the server or drops mid-stream. */
+const NETWORK_FAILURE_MESSAGE = "Couldn't reach the server";
+
+/** Recovery guidance shown with the network failure summary. */
+const NETWORK_FAILURE_DETAILS = "Check your connection and try again.";
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
-function reportSseFailure(callbacks: SseCallbacks, sseFailure: unknown): void {
-  const sseFailureMessage = sseFailure instanceof Error ? sseFailure.message : String(sseFailure);
-  callbacks.onError?.({ message: sseFailureMessage });
+/**
+ * Reports and throws the canonical network-layer stream failure.
+ *
+ * <p>fetch rejections and mid-stream read failures are transport problems, not server answers:
+ * surfacing the browser's raw TypeError text ("Failed to fetch") leaks jargon and carries no
+ * recovery path. The wrapped StreamFailureError gives views the same friendly details and
+ * retryable flag that server-sent error events already provide.</p>
+ */
+function throwNetworkStreamFailure(callbacks: SseCallbacks): never {
+  const networkFailure: StreamError = {
+    message: NETWORK_FAILURE_MESSAGE,
+    details: NETWORK_FAILURE_DETAILS,
+    retryable: true,
+  };
+  callbacks.onError?.(networkFailure);
+  throw new StreamFailureError(networkFailure);
 }
 
 function throwInvalidSseEvent(callbacks: SseCallbacks): never {
@@ -120,9 +160,7 @@ function processEvent(
     }
     const streamError = errorValidation.validated;
     callbacks.onError?.(streamError);
-    const streamFailure: Error & { details?: string } = new Error(streamError.message);
-    streamFailure.details = streamError.details ?? undefined;
-    throw streamFailure;
+    throw new StreamFailureError(streamError);
   }
 
   if (normalizedSseEventType === SSE_EVENT_CITATION) {
@@ -218,8 +256,7 @@ export async function streamSse(
     if (abortSignal?.aborted || isAbortError(fetchError)) {
       return;
     }
-    reportSseFailure(callbacks, fetchError);
-    throw fetchError;
+    throwNetworkStreamFailure(callbacks);
   }
 
   await consumeSseStream(httpResponse, callbacks, source, abortSignal);
@@ -243,8 +280,7 @@ export async function streamSseGet(
     if (abortSignal?.aborted || isAbortError(fetchError)) {
       return;
     }
-    reportSseFailure(callbacks, fetchError);
-    throw fetchError;
+    throwNetworkStreamFailure(callbacks);
   }
 
   await consumeSseStream(httpResponse, callbacks, source, abortSignal);
@@ -299,10 +335,10 @@ async function consumeSseStream(
       const { done: streamEnded, value: byteSegment } = await sseReader
         .read()
         .catch((streamReadFailure: unknown): never => {
-          if (!abortSignal?.aborted && !isAbortError(streamReadFailure)) {
-            reportSseFailure(callbacks, streamReadFailure);
+          if (abortSignal?.aborted || isAbortError(streamReadFailure)) {
+            throw streamReadFailure;
           }
-          throw streamReadFailure;
+          throwNetworkStreamFailure(callbacks);
         });
 
       if (streamEnded) {

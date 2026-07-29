@@ -391,6 +391,30 @@ class QdrantIndexInitializerTest {
     }
 
     @Test
+    void mixedCaseSparseModifierRemainsTerminal() {
+        InitializerHarness initializerHarness = newInitializer(false);
+        String firstCollectionName = initializerHarness.collectionName().getFirst();
+        String mixedCaseSparseModifierCollectionMetadata =
+                collectionMetadataJson(EMBEDDING_DIMENSIONS).replace("\"modifier\": \"idf\"", "\"modifier\": \"Idf\"");
+        expectCollectionGet(
+                initializerHarness,
+                QDRANT_REST_BASE_URL,
+                firstCollectionName,
+                mixedCaseSparseModifierCollectionMetadata);
+
+        IllegalStateException schemaFailure = assertThrows(
+                IllegalStateException.class, initializerHarness.initializer()::ensureCollectionsAndIndexes);
+
+        assertEquals(
+                "Qdrant collection '" + firstCollectionName + "' sparse vector modifier must be idf but found 'Idf'.",
+                schemaFailure.getMessage());
+        assertEquals(
+                Status.DOWN,
+                initializerHarness.initializer().initializationHealth().getStatus());
+        initializerHarness.qdrantServer().verify();
+    }
+
+    @Test
     void createsExactJavaApiLookupPayloadIndexesWithFilterCompatibleTypes() {
         InitializerHarness initializerHarness = newInitializer(false, true, true);
         AtomicInteger collectionReadCount = new AtomicInteger();
@@ -527,7 +551,7 @@ class QdrantIndexInitializerTest {
                     "config": {
                       "params": {
                         "vectors": {"dense": {"size": ${DENSE_VECTOR_DIMENSIONS}, "distance": "Cosine"}},
-                        "sparse_vectors": {"bm25": {"modifier": "Idf"}},
+                        "sparse_vectors": {"bm25": {"modifier": "idf"}},
                         "on_disk_payload": true
                       }
                     },
@@ -565,7 +589,7 @@ class QdrantIndexInitializerTest {
                     "config": {
                       "params": {
                         "vectors": {"dense": {"size": ${DENSE_VECTOR_DIMENSIONS}, "distance": "Cosine"}},
-                        "sparse_vectors": {"bm25": {"modifier": "Idf"}},
+                        "sparse_vectors": {"bm25": {"modifier": "idf"}},
                         "on_disk_payload": true
                       }
                     },

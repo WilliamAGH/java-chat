@@ -32,6 +32,32 @@ class RetrievalServiceCitationTest {
     ObjectMapper objectMapper;
 
     @Test
+    void convertsOnlyContextDocumentsRetainedAfterProviderTruncation() {
+        String retainedCitationUrl = "https://example.test/reference/retained";
+        Document retainedContextDocument = Document.builder()
+                .id("retained-context")
+                .text("Retained reference")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, retainedCitationUrl)
+                .build();
+        Document truncatedContextDocument = Document.builder()
+                .id("truncated-context")
+                .text("Reference removed before the provider request")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, "https://example.test/reference/truncated")
+                .build();
+
+        RetrievalService.CitationOutcome citationOutcome = citationService()
+                .toCitationsForRetainedContext(
+                        "Explain the retained reference",
+                        List.of(retainedContextDocument, truncatedContextDocument),
+                        List.of(retainedContextDocument.getId()));
+
+        assertEquals(
+                List.of(retainedCitationUrl),
+                citationOutcome.citations().stream().map(Citation::getUrl).toList());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
     void collapsesDocumentsWithTheSameExactJavadocMemberAnchor() {
         String stringJavadocUrl = javaLangStringJavadocUrl();
         RetrievalService.CitationOutcome citationOutcome = citationService()

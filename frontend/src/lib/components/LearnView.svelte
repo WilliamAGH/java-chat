@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { tick } from "svelte";
     import {
         fetchTOC,
         fetchGuidedLessonCitations,
@@ -13,6 +12,7 @@
         type Citation,
         type ChatMessage,
     } from "../services/chat";
+    import { StreamFailureError } from "../services/sse";
     import { applyJavaLanguageDetection } from "../services/javaLanguageDetection";
     import { parseMarkdown } from "../services/markdown";
     import CitationPanel from "./CitationPanel.svelte";
@@ -28,6 +28,13 @@
     import { createChatMessageId } from "../utils/chatMessageId";
     import { createStreamingState } from "../composables/createStreamingState.svelte";
     import { createScrollAnchor } from "../composables/createScrollAnchor.svelte";
+
+    interface Props {
+        /** Lesson slug from the /learn/<slug> route; bound so selection drives the URL. */
+        selectedSlug?: string | null;
+    }
+
+    let { selectedSlug = $bindable(null) }: Props = $props();
 
     // TOC state
     let lessons = $state<GuidedLesson[]>([]);
@@ -87,7 +94,6 @@
 
     // Mobile chat drawer state
     let isChatDrawerOpen = $state(false);
-    let mobileChatTrigger: HTMLButtonElement | null = null;
 
     // Attach scroll anchor to the active container when components mount
     $effect(() => {
@@ -154,6 +160,28 @@
         loadTOC();
     });
 
+    // Resolve the /learn/<slug> route once the catalog is available, and keep
+    // local selection in sync with browser history (popstate).
+    $effect(() => {
+        if (loadingTOC || tocError) return;
+        const routeSlug = selectedSlug;
+        if (routeSlug && selectedLesson?.slug !== routeSlug) {
+            const routeLesson = lessons.find(
+                (lesson) => lesson.slug === routeSlug,
+            );
+            if (routeLesson) {
+                void selectLesson(routeLesson);
+            } else {
+                // Unknown slug: no lesson owns this route, fall back to the list.
+                selectedSlug = null;
+            }
+            return;
+        }
+        if (!routeSlug && selectedLesson) {
+            goBack();
+        }
+    });
+
     async function loadTOC(): Promise<void> {
         loadingTOC = true;
         tocError = null;
@@ -186,6 +214,7 @@
 
         // Reset state atomically before async operation
         selectedLesson = lesson;
+        selectedSlug = lesson.slug;
         loadingLesson = true;
         lessonMarkdown = "";
         lessonError = null;
@@ -304,6 +333,7 @@
         cancelInFlightLessonContentStream();
         isChatDrawerOpen = false;
         selectedLesson = null;
+        selectedSlug = null;
         lessonMarkdown = "";
         lessonError = null;
         lessonCitations = [];
@@ -334,17 +364,12 @@
         messages = [];
     }
 
-    function toggleChatDrawer(event?: MouseEvent): void {
+    function toggleChatDrawer(): void {
         if (isChatDrawerOpen) {
             closeChatDrawer();
             return;
         }
 
-        const chatDrawerTrigger = event?.currentTarget;
-        mobileChatTrigger =
-            chatDrawerTrigger instanceof HTMLButtonElement
-                ? chatDrawerTrigger
-                : null;
         isChatDrawerOpen = true;
         // Re-attach scroll anchor to the new active container
         updateScrollAnchorContainer();
@@ -354,7 +379,6 @@
         isChatDrawerOpen = false;
         // Re-attach scroll anchor to desktop container
         updateScrollAnchorContainer();
-        void tick().then(() => mobileChatTrigger?.focus());
     }
 
     /** Returns the currently active messages container based on drawer state. */
@@ -411,16 +435,8 @@
     async function handleSend(message: string): Promise<void> {
         if (!message.trim() || streaming.isStreaming || !selectedLesson) return;
 
-        guidedChatStreamVersion++;
-        const activeStreamVersion = guidedChatStreamVersion;
-
-        guidedChatAbortController?.abort();
-        guidedChatAbortController = new AbortController();
-        const abortSignal = guidedChatAbortController.signal;
-
-        const streamLessonSlug = selectedLesson.slug;
         const userQuery = message.trim();
-        const lessonSessionId = getSessionIdForLesson(streamLessonSlug);
+        const lessonSessionId = getSessionIdForLesson(selectedLesson.slug);
 
         messages = [
             ...messages,
@@ -431,6 +447,46 @@
                 timestamp: Date.now(),
             },
         ];
+
+        await streamAssistantResponse(userQuery);
+    }
+
+    /**
+     * Re-runs the question that produced a failed assistant message.
+     * The failed bubble is removed and the existing user message is reused,
+     * so the transcript reads as one continuous conversation.
+     */
+    async function handleRetryMessage(
+        failedMessage: ChatMessage,
+    ): Promise<void> {
+        if (streaming.isStreaming) return;
+        const failedIndex = findMessageIndex(failedMessage.messageId);
+        if (failedIndex < 0) return;
+
+        const precedingUserMessage = messages
+            .slice(0, failedIndex)
+            .findLast((candidateMessage) => candidateMessage.role === "user");
+        if (!precedingUserMessage) return;
+
+        messages = messages.filter(
+            (existingMessage) =>
+                existingMessage.messageId !== failedMessage.messageId,
+        );
+        await streamAssistantResponse(precedingUserMessage.messageText);
+    }
+
+    async function streamAssistantResponse(userQuery: string): Promise<void> {
+        if (!selectedLesson) return;
+
+        guidedChatStreamVersion++;
+        const activeStreamVersion = guidedChatStreamVersion;
+
+        guidedChatAbortController?.abort();
+        guidedChatAbortController = new AbortController();
+        const abortSignal = guidedChatAbortController.signal;
+
+        const streamLessonSlug = selectedLesson.slug;
+        const lessonSessionId = getSessionIdForLesson(streamLessonSlug);
 
         // Scroll once when user sends - no auto-scroll during streaming
         await scrollAnchor.scrollOnce();
@@ -519,14 +575,28 @@
                 error instanceof Error
                     ? error.message
                     : "Sorry, I encountered an error. Please try again.";
+            const errorDetails =
+                error instanceof StreamFailureError
+                    ? error.details
+                    : undefined;
+            const errorRetryable =
+                error instanceof StreamFailureError &&
+                error.retryable === true;
             ensureAssistantMessage(assistantMessageId);
             updateAssistantMessage(assistantMessageId, (existingMessage) =>
                 hasVisibleChatMessageText(existingMessage.messageText)
-                    ? { ...existingMessage, streamErrorMessage: errorMessage }
+                    ? {
+                          ...existingMessage,
+                          streamErrorMessage: errorMessage,
+                          errorDetails,
+                          errorRetryable,
+                      }
                     : {
                           ...existingMessage,
                           messageText: errorMessage,
                           isError: true,
+                          errorDetails,
+                          errorRetryable,
                       },
             );
         } finally {
@@ -540,7 +610,9 @@
                     streaming.finishStream();
                 }
                 activeStreamingMessageId = null;
-                // No final scroll - user maintains their position
+                // Give successful responses and terminal errors the same
+                // final reveal after their DOM content has settled.
+                await scrollAnchor.revealFinalContentIfFollowing();
             }
 
             if (guidedChatStreamVersion === activeStreamVersion) {
@@ -702,6 +774,7 @@
                     unseenCount={scrollAnchor.unseenCount}
                     onClear={clearChat}
                     onSend={handleSend}
+                    onRetry={handleRetryMessage}
                     onScroll={scrollAnchor.onUserScroll}
                     onJumpToBottom={scrollAnchor.jumpToBottom}
                 />
@@ -737,6 +810,7 @@
                             message={typedMessage}
                             {index}
                             {isStreaming}
+                            onRetry={handleRetryMessage}
                         />
                         {#if typedMessage.role === "assistant" && typedMessage.citations && typedMessage.citations.length > 0 && !typedMessage.isError}
                             <CitationPanel citations={typedMessage.citations} />
@@ -963,6 +1037,16 @@
         font-weight: 500;
         margin: var(--space-8) 0 var(--space-4);
         letter-spacing: var(--tracking-tight);
+    }
+
+    /* WebKit derives auto optical sizing in points (0.75x px); pin opsz to the
+       px font size so Safari matches Chromium (see Header.svelte .brand-text). */
+    .lesson-content :global(h2) {
+        font-variation-settings: "opsz" 24;
+    }
+
+    .lesson-content :global(h3) {
+        font-variation-settings: "opsz" 19;
     }
 
     .lesson-content :global(h1:first-child),

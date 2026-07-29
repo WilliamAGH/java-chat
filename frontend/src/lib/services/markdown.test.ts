@@ -321,6 +321,47 @@ describe("parseMarkdown", () => {
     expect(renderedHtml).not.toContain("```The");
   });
 
+  it("keeps later fenced blocks separate after repairing an attached close", () => {
+    const markdown = [
+      "Example:```java",
+      "int first = 1;",
+      "```The result is one.",
+      "",
+      "```java",
+      "int second = 2;",
+      "```",
+    ].join("\n");
+    const renderedHtml = parseMarkdown(markdown);
+    const renderedContainer = document.createElement("div");
+    renderedContainer.innerHTML = renderedHtml;
+    const codeBlocks = renderedContainer.querySelectorAll("pre > code");
+
+    expect(codeBlocks).toHaveLength(2);
+    expect(codeBlocks[0].textContent).toContain("int first = 1;");
+    expect(codeBlocks[0].textContent).not.toContain("int second = 2;");
+    expect(codeBlocks[1].textContent).toContain("int second = 2;");
+    expect(renderedContainer.textContent).toContain("The result is one.");
+  });
+
+  it("preserves fence-like language lines after an attached opening", () => {
+    for (const fenceLikeLanguageLine of ["```ruby", "```Java"]) {
+      const markdown = ["Example:```text", "alpha", fenceLikeLanguageLine, "beta", "```"].join(
+        "\n",
+      );
+
+      for (const isStreaming of [false, true]) {
+        const renderedHtml = parseMarkdown(markdown, isStreaming);
+        const renderedContainer = document.createElement("div");
+        renderedContainer.innerHTML = renderedHtml;
+        const codeBlocks = renderedContainer.querySelectorAll("pre > code");
+
+        expect(codeBlocks).toHaveLength(1);
+        expect(codeBlocks[0].className).toBe("language-text");
+        expect(codeBlocks[0].textContent).toContain(`alpha\n${fenceLikeLanguageLine}\nbeta`);
+      }
+    }
+  });
+
   it("auto-closes unbalanced fenced code while streaming partial content", () => {
     const markdown = '```java\nSystem.out.println("hi");';
     const renderedHtml = parseMarkdown(markdown);
@@ -328,6 +369,47 @@ describe("parseMarkdown", () => {
     expect(renderedHtml).toContain("<pre>");
     expect(renderedHtml).toContain('<code class="language-java">');
     expect(renderedHtml).toContain("System.out.println");
+  });
+
+  it("opens external links in a new tab with noopener noreferrer", () => {
+    const markdown =
+      "See the [Kotlin version FAQ](https://kotlinlang.org/docs/faq.html) and [Oracle docs](http://docs.oracle.com/).";
+    const renderedHtml = parseMarkdown(markdown);
+
+    expect(renderedHtml).toContain(
+      '<a href="https://kotlinlang.org/docs/faq.html" target="_blank" rel="noopener noreferrer">Kotlin version FAQ</a>',
+    );
+    expect(renderedHtml).toContain(
+      '<a href="http://docs.oracle.com/" target="_blank" rel="noopener noreferrer">Oracle docs</a>',
+    );
+  });
+
+  it("keeps relative and fragment links in the current tab", () => {
+    const markdown = "Read [the guide](/docs/guide) and jump to [the section](#details).";
+    const renderedHtml = parseMarkdown(markdown);
+
+    expect(renderedHtml).toContain('<a href="/docs/guide">the guide</a>');
+    expect(renderedHtml).toContain('<a href="#details">the section</a>');
+    expect(renderedHtml).not.toContain('target="_blank"');
+  });
+
+  it("opens external links inside enrichment cards in a new tab", () => {
+    const markdown = "{{hint: See the [Java tutorial](https://docs.oracle.com/javase/tutorial/).}}";
+    const renderedHtml = parseMarkdown(markdown);
+
+    expect(renderedHtml).toContain('data-enrichment-type="hint"');
+    expect(renderedHtml).toContain(
+      '<a href="https://docs.oracle.com/javase/tutorial/" target="_blank" rel="noopener noreferrer">Java tutorial</a>',
+    );
+  });
+
+  it("escapes link titles while preserving the new-tab attributes", () => {
+    const markdown = '[docs](https://example.com/ "Tom & Jerry <Guide>")';
+    const renderedHtml = parseMarkdown(markdown);
+
+    expect(renderedHtml).toContain(
+      '<a href="https://example.com/" title="Tom &amp; Jerry <Guide>" target="_blank" rel="noopener noreferrer">docs</a>',
+    );
   });
 
   it("is SSR-safe - does not use document APIs", () => {

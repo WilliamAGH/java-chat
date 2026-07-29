@@ -1,18 +1,26 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.config.RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT;
+import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
 import static com.williamcallahan.javachat.web.SseConstants.HEARTBEAT_INTERVAL_SECONDS;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_RETRIEVAL_TIMEOUT;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
 import static com.williamcallahan.javachat.web.SseConstants.STREAM_BACKPRESSURE_BUFFER_CAPACITY;
 import static com.williamcallahan.javachat.web.SseConstants.STREAM_CHUNK_COALESCE_MAX_ITEMS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,13 +39,17 @@ import reactor.test.subscriber.TestSubscriber;
 class SseSupportTest {
 
     private static final int BACKPRESSURE_OVERFLOW_BUFFER_MULTIPLIER = 2;
+    private static final int DEADLINE_TEST_MULTIPLIER = 2;
     private static final Duration BACKPRESSURE_TEST_COMPLETION_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration DELAYED_SUBSCRIPTION_BUDGET = Duration.ofSeconds(1);
+    private static final Duration DELAYED_SUBSCRIPTION_DELAY = Duration.ofMillis(1_250);
+    private static final Duration DELAYED_SUBSCRIPTION_VERIFICATION_TIMEOUT = Duration.ofMillis(1_750);
 
     @Autowired
     ObjectMapper objectMapper;
 
     @Test
-    void prepareDataStreamPublishesAllChunksToBothSubscribers() {
+    void prepareDataStreamPublishesEveryChunkOnce() {
         SseSupport sseSupport = createSseSupport();
 
         List<String> upstreamChunks = List.of("```java\n", "int x = 10;\n", "```");
@@ -45,19 +57,15 @@ class SseSupportTest {
         Flux<String> preparedStream =
                 sseSupport.prepareDataStream(Flux.fromIterable(upstreamChunks), consumedChunks::add);
 
-        List<String> firstSubscriberChunks = new CopyOnWriteArrayList<>();
-        List<String> secondSubscriberChunks = new CopyOnWriteArrayList<>();
+        List<String> emittedChunks = new CopyOnWriteArrayList<>();
 
-        preparedStream.subscribe(firstSubscriberChunks::add);
-        preparedStream.subscribe(secondSubscriberChunks::add);
+        preparedStream.subscribe(emittedChunks::add);
 
         String expectedContent = String.join("", upstreamChunks);
-        String firstSubscriberContent = String.join("", firstSubscriberChunks);
-        String secondSubscriberContent = String.join("", secondSubscriberChunks);
+        String emittedContent = String.join("", emittedChunks);
         String consumedContent = String.join("", consumedChunks);
 
-        assertEquals(expectedContent, firstSubscriberContent, "First subscriber should receive full stream content");
-        assertEquals(expectedContent, secondSubscriberContent, "Second subscriber should receive full stream content");
+        assertEquals(expectedContent, emittedContent, "Subscriber should receive full stream content");
         assertEquals(expectedContent, consumedContent, "Chunk consumer should observe full stream content");
     }
 
@@ -70,25 +78,17 @@ class SseSupportTest {
                 Flux.range(0, rawChunkCount).map(rawChunkIndex -> "chunk-" + rawChunkIndex), ignoredChunk -> {});
         TestSubscriber<String> textSubscriber =
                 TestSubscriber.builder().initialRequest(0).build();
-        TestSubscriber<String> heartbeatSubscriber =
-                TestSubscriber.builder().initialRequest(0).build();
 
         preparedStream.subscribe(textSubscriber);
-        preparedStream.subscribe(heartbeatSubscriber);
 
         textSubscriber.request(Long.MAX_VALUE);
-        heartbeatSubscriber.request(Long.MAX_VALUE);
         textSubscriber.block(BACKPRESSURE_TEST_COMPLETION_TIMEOUT);
-        heartbeatSubscriber.block(BACKPRESSURE_TEST_COMPLETION_TIMEOUT);
 
         List<String> deliveredChunks = textSubscriber.getReceivedOnNext();
         assertTrue(textSubscriber.isTerminatedError());
-        assertTrue(heartbeatSubscriber.isTerminatedError());
         assertTrue(Exceptions.isOverflow(textSubscriber.expectTerminalError()));
-        assertTrue(Exceptions.isOverflow(heartbeatSubscriber.expectTerminalError()));
         assertEquals(STREAM_BACKPRESSURE_BUFFER_CAPACITY, deliveredChunks.size());
         assertTrue(deliveredChunks.getFirst().startsWith("chunk-0"));
-        assertEquals(deliveredChunks, heartbeatSubscriber.getReceivedOnNext());
     }
 
     @Test
@@ -101,7 +101,7 @@ class SseSupportTest {
                 .doOnCancel(upstreamCancellationCount::incrementAndGet);
         Flux<String> preparedStream = sseSupport.prepareDataStream(upstreamStream, ignoredChunk -> {});
         Flux<ServerSentEvent<String>> sseEventStream =
-                Flux.merge(preparedStream.map(sseSupport::textEvent), sseSupport.heartbeats(preparedStream));
+                sseSupport.withHeartbeats(preparedStream.map(sseSupport::textEvent));
 
         Disposable clientSubscription = sseEventStream.subscribe();
 
@@ -116,15 +116,132 @@ class SseSupportTest {
     @Test
     void heartbeatsDoNotOverflowWhenDownstreamStartsWithZeroDemand() {
         SseSupport sseSupport = createSseSupport();
-        Flux<ServerSentEvent<String>> heartbeatStream = sseSupport.heartbeats(Flux.never());
 
-        StepVerifier.withVirtualTime(() -> heartbeatStream, 0)
+        StepVerifier.withVirtualTime(() -> sseSupport.heartbeats(Flux.never()), 0)
                 .thenAwait(Duration.ofSeconds((long) HEARTBEAT_INTERVAL_SECONDS * 3))
                 .thenRequest(1)
                 .thenAwait(Duration.ofSeconds(HEARTBEAT_INTERVAL_SECONDS))
                 .assertNext(heartbeat -> assertTrue(!heartbeat.comment().isBlank()))
                 .thenCancel()
                 .verify();
+    }
+
+    @Test
+    void responsePreparationDeadlineCancelsAnOperationThatNeverEmits() {
+        SseSupport sseSupport = createSseSupport();
+        AtomicInteger operationCancellationCount = new AtomicInteger();
+        Flux<ServerSentEvent<String>> stalledOperationEvents =
+                Flux.<ServerSentEvent<String>>never().doOnCancel(operationCancellationCount::incrementAndGet);
+
+        StepVerifier.withVirtualTime(() -> sseSupport.enforceResponsePreparationDeadline(stalledOperationEvents))
+                .thenAwait(RESPONSE_PREPARATION_TIMEOUT)
+                .expectError(TimeoutException.class)
+                .verify();
+
+        assertEquals(1, operationCancellationCount.get());
+    }
+
+    @Test
+    void responsePreparationDeadlineStopsAfterTheFirstOperationEvent() {
+        SseSupport sseSupport = createSseSupport();
+        ServerSentEvent<String> firstOperationEvent = sseSupport.providerEvent("OpenAI");
+        Flux<ServerSentEvent<String>> operationEvents = Flux.concat(Flux.just(firstOperationEvent), Flux.never());
+
+        StepVerifier.withVirtualTime(() -> sseSupport.enforceResponsePreparationDeadline(operationEvents))
+                .expectNext(firstOperationEvent)
+                .thenAwait(RESPONSE_PREPARATION_TIMEOUT.multipliedBy(DEADLINE_TEST_MULTIPLIER))
+                .thenCancel()
+                .verify();
+    }
+
+    @Test
+    void responsePreparationDeadlineUsesTheRemainingBudgetAtSubscription() {
+        SseSupport sseSupport = createSseSupport();
+        AtomicInteger operationSubscriptionCount = new AtomicInteger();
+        Flux<ServerSentEvent<String>> stalledOperationEvents = Flux.defer(() -> {
+            operationSubscriptionCount.incrementAndGet();
+            return Flux.never();
+        });
+        long responsePreparationDeadlineNanos = System.nanoTime() + DELAYED_SUBSCRIPTION_BUDGET.toNanos();
+        Flux<ServerSentEvent<String>> deadlineBoundEvents =
+                sseSupport.enforceResponsePreparationDeadline(stalledOperationEvents, responsePreparationDeadlineNanos);
+
+        StepVerifier.create(deadlineBoundEvents.delaySubscription(DELAYED_SUBSCRIPTION_DELAY))
+                .expectError(TimeoutException.class)
+                .verify(DELAYED_SUBSCRIPTION_VERIFICATION_TIMEOUT);
+
+        assertEquals(0, operationSubscriptionCount.get());
+    }
+
+    @Test
+    void responsePreparationTimeoutErrorUsesTheStableRetryableContract() throws JsonProcessingException {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        SseSupport sseSupport = new SseSupport(objectMapper, meterRegistry);
+        Flux<ServerSentEvent<String>> timeoutEvents = sseSupport.responsePreparationTimeoutError();
+        StepVerifier.create(timeoutEvents, 0).thenCancel().verify();
+        assertEquals(
+                0.0,
+                meterRegistry
+                        .get(SseSupport.RETRIEVAL_TIMEOUT_COUNTER_NAME)
+                        .counter()
+                        .count());
+
+        ServerSentEvent<String> timeoutEvent =
+                Objects.requireNonNull(timeoutEvents.blockFirst(), "response preparation timeout event");
+        SseSupport.SseEventPayload timeoutEventPayload = objectMapper.readValue(
+                Objects.requireNonNull(timeoutEvent.data(), "response preparation timeout event data"),
+                SseSupport.SseEventPayload.class);
+
+        assertEquals(EVENT_ERROR, timeoutEvent.event());
+        assertEquals(STATUS_CODE_RETRIEVAL_TIMEOUT, timeoutEventPayload.code());
+        assertEquals(STATUS_STAGE_RETRIEVAL, timeoutEventPayload.stage());
+        assertEquals(Boolean.TRUE, timeoutEventPayload.retryable());
+        assertEquals(
+                1.0,
+                meterRegistry
+                        .get(SseSupport.RETRIEVAL_TIMEOUT_COUNTER_NAME)
+                        .counter()
+                        .count());
+    }
+
+    @Test
+    void responsePreparationTimeoutDetectionTraversesWrappedFailures() {
+        SseSupport sseSupport = createSseSupport();
+        RuntimeException wrappedTimeout =
+                new RuntimeException("retrieval failed", new TimeoutException("embedding deadline"));
+
+        assertTrue(sseSupport.isResponsePreparationTimeout(wrappedTimeout));
+    }
+
+    @Test
+    void responsePreparationTimeoutDetectionTraversesSuppressedDependencyFailures() {
+        SseSupport sseSupport = createSseSupport();
+        RuntimeException fanOutFailure = new RuntimeException("retrieval fan-out failed");
+        fanOutFailure.addSuppressed(
+                new IllegalStateException("later collection failed", new TimeoutException("Qdrant deadline")));
+
+        assertTrue(sseSupport.isResponsePreparationTimeout(fanOutFailure));
+    }
+
+    @Test
+    void responsePreparationTimeoutDoesNotHidePermanentFanOutFailure() {
+        SseSupport sseSupport = createSseSupport();
+        HybridSearchPartialFailureException mixedFanOutFailure = new HybridSearchPartialFailureException(
+                "retrieval fan-out failed",
+                List.of(
+                        new HybridSearchPartialFailureException.CollectionSearchFailure(
+                                "docs",
+                                "InvalidArgument",
+                                "invalid filter",
+                                HybridSearchPartialFailureException.FailureDisposition.PERMANENT),
+                        new HybridSearchPartialFailureException.CollectionSearchFailure(
+                                "pdfs",
+                                "Timeout",
+                                "deadline exceeded",
+                                HybridSearchPartialFailureException.FailureDisposition.TRANSIENT)),
+                List.of(new IllegalArgumentException("invalid filter"), new TimeoutException("Qdrant deadline")));
+
+        assertFalse(sseSupport.isResponsePreparationTimeout(mixedFanOutFailure));
     }
 
     @Test
@@ -155,6 +272,6 @@ class SseSupportTest {
     }
 
     private SseSupport createSseSupport() {
-        return new SseSupport(objectMapper);
+        return new SseSupport(objectMapper, new SimpleMeterRegistry());
     }
 }

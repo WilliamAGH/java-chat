@@ -24,9 +24,10 @@ Fetch all configured sources:
 make fetch-all
 ```
 
-This runs `scripts/fetch_all_docs.sh` (requires `wget`). See the canonical source ownership and edit
-workflow in [pipeline-commands.md](pipeline-commands.md#scrape-fetch-html-mirrors), along with flags
-(`--force`, `--include-quick`, `--no-clean`).
+This runs `scripts/fetch_all_docs.sh` (requires `wget` and MuPDF's `mutool`). See the canonical source
+ownership, prerequisites, and edit workflow in
+[pipeline-commands.md](pipeline-commands.md#scrape-fetch-html-mirrors), along with flags (`--force`,
+`--include-quick`, `--no-clean`).
 
 ## Process + upload to Qdrant
 
@@ -39,7 +40,7 @@ This runs `scripts/process_all_to_qdrant.sh`, which:
 - Loads `.env`
 - Requires `SPRING_PROFILE` to be exactly `local`, `dev`, or `prod`
 - Requires readable `DOCS_DIR` and writable generation-specific `DOCS_SNAPSHOT_DIR`, `DOCS_PARSED_DIR`, and `DOCS_INDEX_DIR`
-- Validates Qdrant connectivity and probes gateway embedding batches of 1 and 32 with `X-Tier: batch`
+- Validates Qdrant connectivity and probes gateway embedding batches of 1 and 4 with `X-Tier: batch`
 - Builds the app JAR (`./gradlew buildForScripts`)
 - Runs the `cli` Spring profile (`DocumentProcessor`)
 - Routes each doc set to the appropriate Qdrant collection (`QdrantCollectionRouter`)

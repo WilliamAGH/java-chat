@@ -1,5 +1,6 @@
 import { Marked, type TokenizerExtension, type RendererExtension, type Tokens } from "marked";
 import DOMPurify from "dompurify";
+import { nestNumericListFences } from "./numericListFenceNesting";
 
 /** Display metadata owned by the browser renderer. */
 interface EnrichmentPresentation {
@@ -10,6 +11,11 @@ interface EnrichmentPresentation {
 const NEWLINE = "\n";
 const ZERO_WIDTH_SPACE_CODE_POINT = 0x200b;
 const WORD_JOINER_CODE_POINT = 0x2060;
+
+/** Matches absolute web URLs; relative and fragment links stay in the current tab. */
+const EXTERNAL_LINK_PATTERN = /^https?:\/\//i;
+/** noopener prevents the opened page from reaching window.opener; noreferrer drops the referrer. */
+const EXTERNAL_LINK_REL = "noopener noreferrer";
 
 interface EnrichmentToken extends Tokens.Generic {
   type: "enrichment";
@@ -151,6 +157,31 @@ function scanFenceAfterCommonMarkIndentation(
   return marker ? { marker, markerIndex } : null;
 }
 
+function hasOnlyClosingFenceSpacing(src: string, suffixStartIndex: number): boolean {
+  for (let cursor = suffixStartIndex; cursor < src.length; cursor++) {
+    const character = src[cursor];
+    if (character === NEWLINE || character === "\r") {
+      return true;
+    }
+    if (character !== " " && character !== "\t") {
+      return false;
+    }
+  }
+  return true;
+}
+
+function hasTrailingFenceProse(src: string, suffixStartIndex: number): boolean {
+  const lineEndIndex = src.indexOf(NEWLINE, suffixStartIndex);
+  const suffixEndIndex = lineEndIndex < 0 ? src.length : lineEndIndex;
+  const trailingText = src.slice(suffixStartIndex, suffixEndIndex).trim();
+  const containsWordBoundary = trailingText.includes(" ") || trailingText.includes("\t");
+  const terminalCharacter = trailingText.at(-1);
+  return (
+    containsWordBoundary &&
+    (terminalCharacter === "." || terminalCharacter === "!" || terminalCharacter === "?")
+  );
+}
+
 function scanBacktickRun(src: string, index: number): BacktickRun | null {
   if (index < 0 || index >= src.length || src[index] !== "`") {
     return null;
@@ -194,6 +225,7 @@ class MarkdownCodeRegionState {
   private inFence = false;
   private fenceCharacter = "";
   private fenceLength = 0;
+  private attachedFenceOpening = false;
   private inInlineCode = false;
   private inlineBacktickLength = 0;
 
@@ -205,22 +237,32 @@ class MarkdownCodeRegionState {
     return this.inInlineCode;
   }
 
-  enterFence(marker: FenceMarker): void {
+  enterFence(marker: FenceMarker, attachedFenceOpening: boolean): void {
     this.inFence = true;
     this.fenceCharacter = marker.character;
     this.fenceLength = marker.length;
+    this.attachedFenceOpening = attachedFenceOpening;
   }
 
   exitFence(): void {
     this.inFence = false;
     this.fenceCharacter = "";
     this.fenceLength = 0;
+    this.attachedFenceOpening = false;
   }
 
-  wouldCloseFence(marker: FenceMarker): boolean {
-    return (
-      this.inFence && marker.character === this.fenceCharacter && marker.length >= this.fenceLength
-    );
+  wouldCloseFence(src: string, markerIndex: number, marker: FenceMarker): boolean {
+    const matchesOpeningFence =
+      this.inFence && marker.character === this.fenceCharacter && marker.length >= this.fenceLength;
+    if (!matchesOpeningFence) {
+      return false;
+    }
+
+    const suffixStartIndex = markerIndex + marker.length;
+    if (hasOnlyClosingFenceSpacing(src, suffixStartIndex)) {
+      return true;
+    }
+    return this.attachedFenceOpening && hasTrailingFenceProse(src, suffixStartIndex);
   }
 
   openFence(): FenceMarker | null {
@@ -343,14 +385,14 @@ function normalizeMarkdownForStreaming(content: string): string {
         const consumed = consumeOpeningFence(content, cursor, marker);
         normalized += consumed.text;
         cursor = consumed.nextCursor;
-        codeRegionState.enterFence(marker);
+        codeRegionState.enterFence(marker, !fenceAtCommonMarkIndentation);
         continue;
       }
 
       if (
         codeRegionState.isInsideFence() &&
         fenceAtCommonMarkIndentation &&
-        codeRegionState.wouldCloseFence(marker)
+        codeRegionState.wouldCloseFence(content, cursor, marker)
       ) {
         const consumed = consumeClosingFence(content, cursor, marker);
         normalized += consumed.text;
@@ -382,6 +424,28 @@ function normalizeMarkdownForStreaming(content: string): string {
   }
 
   return normalized;
+}
+
+function prepareMarkdownForParsing(markdownText: string, markdownParser: Marked): string {
+  const normalizedContent = normalizeMarkdownForStreaming(
+    nestNumericListFences(markdownText, markdownParser),
+  );
+  if (import.meta.env.DEV && normalizedContent !== markdownText) {
+    for (let markerIndex = 0; markerIndex < markdownText.length; markerIndex++) {
+      const opening = readEnrichmentOpening(markdownText, markerIndex);
+      if (!opening) {
+        continue;
+      }
+      const rawLength = markdownText.length - markerIndex;
+      console.warn("[markdown] Repaired enrichment markdown structure", {
+        kind: opening.kind,
+        contentLength: Math.max(0, rawLength - opening.length - ENRICHMENT_CLOSE.length),
+        rawLength,
+      });
+      break;
+    }
+  }
+  return normalizedContent;
 }
 
 /** Enrichment close marker. */
@@ -454,8 +518,8 @@ function findEnrichmentClose(src: string, startIndex: number, isStreaming: boole
       if (fenceCandidate) {
         const { marker, markerIndex } = fenceCandidate;
         if (!codeRegionState.isInsideFence()) {
-          codeRegionState.enterFence(marker);
-        } else if (codeRegionState.wouldCloseFence(marker)) {
+          codeRegionState.enterFence(marker, false);
+        } else if (codeRegionState.wouldCloseFence(src, markerIndex, marker)) {
           codeRegionState.exitFence();
         }
         cursor = markerIndex + marker.length;
@@ -570,7 +634,7 @@ function createEnrichmentExtension(
 
       if (token.resolved !== true) {
         const unresolvedContent = typeof token.content === "string" ? token.content : "";
-        return markdownParser.parse(normalizeMarkdownForStreaming(unresolvedContent), {
+        return markdownParser.parse(unresolvedContent, {
           async: false,
           gfm: true,
           breaks: false,
@@ -587,11 +651,9 @@ function createEnrichmentExtension(
         return "";
       }
 
-      const normalizedEnrichmentMarkdown = normalizeMarkdownForStreaming(enrichmentMarkdown);
-
       // Render inner content as markdown
       // IMPORTANT: Use gfm but disable breaks to prevent fence interference
-      const innerHtml = markdownParser.parse(normalizedEnrichmentMarkdown, {
+      const innerHtml = markdownParser.parse(enrichmentMarkdown, {
         async: false,
         gfm: true,
         breaks: false, // Preserve fence detection accuracy
@@ -607,9 +669,22 @@ function createEnrichmentExtension(
 function createMarkdownParser(isStreaming: boolean): Marked {
   const markdownParser = new Marked({ gfm: true, breaks: true });
   markdownParser.use({
+    hooks: {
+      preprocess(markdownText) {
+        return prepareMarkdownForParsing(markdownText, markdownParser);
+      },
+    },
     renderer: {
       html(token: Tokens.HTML | Tokens.Tag): string {
         return escapeHtml(token.text);
+      },
+      link(token: Tokens.Link): string {
+        const linkText = this.parser.parseInline(token.tokens);
+        const titleAttribute = token.title ? ` title="${escapeHtml(token.title)}"` : "";
+        const externalLinkAttributes = EXTERNAL_LINK_PATTERN.test(token.href)
+          ? ` target="_blank" rel="${EXTERNAL_LINK_REL}"`
+          : "";
+        return `<a href="${escapeHtml(token.href)}"${titleAttribute}${externalLinkAttributes}>${linkText}</a>`;
       },
     },
     extensions: [createEnrichmentExtension(isStreaming, markdownParser)],
@@ -637,31 +712,13 @@ export function parseMarkdown(
     return "";
   }
 
-  const normalizedContent = normalizeMarkdownForStreaming(markdownText);
-
-  if (import.meta.env.DEV && normalizedContent !== markdownText) {
-    for (let markerIndex = 0; markerIndex < markdownText.length; markerIndex++) {
-      const opening = readEnrichmentOpening(markdownText, markerIndex);
-      if (!opening) {
-        continue;
-      }
-      const rawLength = markdownText.length - markerIndex;
-      console.warn("[markdown] Repaired enrichment markdown structure", {
-        kind: opening.kind,
-        contentLength: Math.max(0, rawLength - opening.length - ENRICHMENT_CLOSE.length),
-        rawLength,
-      });
-      break;
-    }
-  }
-
   try {
     const markdownParser = isStreaming ? STREAMING_MARKDOWN_PARSER : COMPLETE_MARKDOWN_PARSER;
-    const rawHtml = markdownParser.parse(normalizedContent, { async: false });
+    const rawHtml = markdownParser.parse(markdownText, { async: false });
 
     return DOMPurify.sanitize(rawHtml, {
       USE_PROFILES: { html: true },
-      ADD_ATTR: ["class", "data-enrichment-type"],
+      ADD_ATTR: ["class", "data-enrichment-type", "target"],
     });
   } catch (parseError) {
     console.error("[markdown] Failed to parse markdown content:", parseError);

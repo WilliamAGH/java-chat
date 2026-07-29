@@ -21,14 +21,16 @@ build-with-lock: frontend-build-with-lock
 
 test: test-shell ## Run tests (loads .env if present)
 	@$(call load_env); \
-	  $(LOCKED_GRADLEW) test
+	  $(LOCKED_GRADLEW) --no-daemon cleanTest test
 
 test-shell: ## Run deterministic ingestion and fetch shell contract tests
 	bash scripts/test_documentation_fetch_projection.sh
 	bash scripts/test_documentation_fetch_publication.sh
 	bash scripts/test_embedding_preflight.sh
 	bash scripts/test_github_sync_failure_contract.sh
+	bash scripts/test_ingestion_pid_safety.sh
 	bash scripts/test_make_local_qdrant_bootstrap.sh
+	bash scripts/test_make_port_safety.sh
 	bash scripts/test_process_all_to_qdrant_environment.sh
 	bash scripts/test_process_all_to_qdrant_postconditions.sh
 	bash scripts/test_prune_retired_java_api_vectors.sh
@@ -45,7 +47,10 @@ lint-frontend: ## Run frontend linting (oxlint + ast-grep + svelte-check)
 lint-ast: ## Run ast-grep rules for Java naming and type safety
 	@$(call require_cmd,ast-grep,brew install ast-grep)
 	@echo "$(CYAN)Running ast-grep rules...$(NC)"
+	@ast-grep test -c config/sgconfig.yml --skip-snapshot-tests
 	@ast-grep scan -c config/sgconfig.yml src/main/java/
+	@ruby scripts/lint/check-chat-model-ssot.rb --self-test
+	@ruby scripts/lint/check-chat-model-ssot.rb
 
 format: ## Apply Java formatting (Palantir via Spotless)
 	$(LOCKED_GRADLEW) spotlessApply
@@ -58,25 +63,27 @@ run: build ## Run the packaged jar (loads .env if present)
 	@$(call load_env); \
 	  $(call validate_api_keys); \
 	  SERVER_PORT=$$($(call get_server_port)); \
-	  echo "Ensuring port $$SERVER_PORT is free..." >&2; \
-	  $(call free_port,$$SERVER_PORT); \
+	  echo "Checking whether port $$SERVER_PORT is available..." >&2; \
+	  $(call require_port_available,$$SERVER_PORT); \
 	  echo "Binding app to port $$SERVER_PORT" >&2; \
 	  $(call build_app_args,$$SERVER_PORT); \
 	  $(call append_local_qdrant_bootstrap_argument); \
 	  JAVA_OPTS="$${JAVA_OPTS:- $(DEFAULT_JAVA_OPTS)}"; \
 	  java $$JAVA_OPTS -Djava.net.preferIPv4Stack=true -jar $(call get_jar) "$${APP_ARGS[@]}" & disown
 
-dev: frontend-build ## Start both Spring Boot and Vite dev servers (Ctrl+C stops both)
+dev: frontend-build ## Start both Spring Boot and Vite dev servers
 	@echo "$(YELLOW)Starting full-stack development environment...$(NC)"
 	@echo "$(CYAN)Frontend: http://localhost:5173/$(NC)"
 	@echo "$(YELLOW)Backend API: http://localhost:$(DEFAULT_PORT)/api/$(NC)"
 	@echo ""
 	@$(call load_env); \
 	  $(call validate_api_keys); \
-	  trap 'kill 0' INT TERM; \
+	  SERVER_PORT=$(DEFAULT_PORT); \
+	  echo "Checking whether port $$SERVER_PORT is available..." >&2; \
+	  $(call require_port_available,$$SERVER_PORT); \
 	  (cd frontend && npm run dev 2>&1 | awk '{print "\033[36m[vite]\033[0m " $$0; fflush()}') & \
 	  ($(call load_env); \
-	   $(call build_app_args,$(DEFAULT_PORT)); \
+	   $(call build_app_args,$$SERVER_PORT); \
 	   $(call append_local_qdrant_bootstrap_argument); \
 	   SPRING_PROFILES_ACTIVE=dev $(GRADLEW) bootRun \
 	   --args="$${APP_ARGS[*]}" \
@@ -89,9 +96,9 @@ dev-backend: ## Run only Spring Boot backend (dev profile)
 	  $(call validate_api_keys); \
 	  SERVER_PORT=$$($(call get_server_port)); \
 	  LIVERELOAD_PORT=$${LIVERELOAD_PORT:-$(DEFAULT_LIVERELOAD_PORT)}; \
-	  echo "Ensuring ports $$SERVER_PORT and $$LIVERELOAD_PORT are free..." >&2; \
-	  $(call free_port,$$SERVER_PORT); \
-	  $(call free_port,$$LIVERELOAD_PORT); \
+	  echo "Checking whether ports $$SERVER_PORT and $$LIVERELOAD_PORT are available..." >&2; \
+	  $(call require_port_available,$$SERVER_PORT); \
+	  $(call require_port_available,$$LIVERELOAD_PORT); \
 	  echo "Binding app (dev) to port $$SERVER_PORT, LiveReload on $$LIVERELOAD_PORT" >&2; \
 	  $(call build_app_args,$$SERVER_PORT); \
 	  $(call append_local_qdrant_bootstrap_argument); \
@@ -111,7 +118,7 @@ frontend-build-with-lock: frontend-install
 
 compose-up: ## Start local Qdrant via Docker Compose (detached)
 	@for p in 8086 8087; do \
-	  $(call free_port,$$p); \
+	  $(call require_port_available,$$p); \
 	done; \
 	docker compose -f $(QDRANT_COMPOSE_FILE) up -d
 

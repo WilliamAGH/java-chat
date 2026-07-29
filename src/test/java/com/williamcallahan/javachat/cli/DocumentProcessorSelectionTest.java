@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
-import com.williamcallahan.javachat.application.ingestion.DocumentationIngestionUseCase;
+import com.williamcallahan.javachat.application.ingestion.LocalDocumentationIngestionUseCase;
 import com.williamcallahan.javachat.service.ProgressTracker;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -25,7 +25,7 @@ class DocumentProcessorSelectionTest {
     private static final String DOCSET_GROOVY_MIRROR_PATH = "groovy/5.0.7";
 
     private final DocumentProcessor documentProcessor =
-            new DocumentProcessor(mock(DocumentationIngestionUseCase.class), mock(ProgressTracker.class));
+            new DocumentProcessor(mock(LocalDocumentationIngestionUseCase.class), mock(ProgressTracker.class));
 
     @Test
     void separatesQuickMirrorsFromCanonicalAllSelection() {

@@ -67,4 +67,17 @@ public class Chunker {
         }
         return encoding.decode(lastTokens);
     }
+
+    /**
+     * Counts model-input tokens using the same encoding as truncation.
+     *
+     * @param text text to measure
+     * @return encoded token count, or zero for null or empty text
+     */
+    public int countTokens(String text) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+        return encoding.encode(text).size();
+    }
 }

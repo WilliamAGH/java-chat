@@ -1,6 +1,5 @@
 package com.williamcallahan.javachat.service;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.time.InstantSource;
 import java.util.Objects;
@@ -9,89 +8,66 @@ import java.util.Objects;
  * Tracks in-memory request and circuit-breaker state for one provider.
  */
 final class ProviderCircuitState {
-    private static final Duration DAILY_REQUEST_WINDOW = Duration.ofDays(1);
-
-    private final int maxBackoffMultiplier;
     private final InstantSource instantSource;
 
     private boolean circuitOpen = false;
     private Instant nextRetryTime = Instant.EPOCH;
-    private int backoffMultiplier = 1;
-    private int requestsToday;
-    private Instant dayReset;
 
     /**
-     * Creates a provider state with bounded exponential backoff growth.
+     * Creates provider retry-window state using the system clock.
      */
-    ProviderCircuitState(int maxBackoffMultiplier) {
-        this(maxBackoffMultiplier, InstantSource.system());
+    ProviderCircuitState() {
+        this(InstantSource.system());
     }
 
-    ProviderCircuitState(int maxBackoffMultiplier, InstantSource instantSource) {
-        if (maxBackoffMultiplier <= 0) {
-            throw new IllegalArgumentException("maxBackoffMultiplier must be positive");
-        }
-        this.maxBackoffMultiplier = maxBackoffMultiplier;
+    ProviderCircuitState(InstantSource instantSource) {
         this.instantSource = Objects.requireNonNull(instantSource, "instantSource");
-        this.dayReset = instantSource.instant().plus(DAILY_REQUEST_WINDOW);
     }
 
     /**
-     * Returns whether one request could be admitted without consuming its daily reservation.
+     * Returns whether one request can be admitted outside a provider-declared retry window.
      */
-    synchronized boolean isAvailable(int dailyLimit) {
-        return isRequestAdmissionAvailable(dailyLimit, instantSource.instant());
+    synchronized boolean isAvailable() {
+        return isRequestAdmissionAvailable(instantSource.instant());
     }
 
     /**
-     * Atomically admits and counts one provider request when its circuit and daily window allow it.
+     * Atomically admits one provider request when its provider-declared retry window allows it.
+     */
+    synchronized boolean tryReserveRequest() {
+        return isRequestAdmissionAvailable(instantSource.instant());
+    }
+
+    /**
+     * Resets expired circuit state after a successful request.
      *
-     * <p>Reservations are not released after dispatch failures, preventing retries from bypassing
-     * the protective daily cap.</p>
-     */
-    synchronized boolean tryReserveRequest(int dailyLimit) {
-        if (!isRequestAdmissionAvailable(dailyLimit, instantSource.instant())) {
-            return false;
-        }
-        requestsToday++;
-        return true;
-    }
-
-    /**
-     * Closes the circuit after a successful request whose daily admission was already reserved.
+     * <p>A success observed during an active retry window belongs to a request admitted before
+     * the rate limit was recorded, so it must not erase the newer provider deadline.</p>
      */
     synchronized void recordSuccess() {
-        backoffMultiplier = 1;
-        circuitOpen = false;
+        Instant successObservedAt = instantSource.instant();
+        if (!circuitOpen || !successObservedAt.isBefore(nextRetryTime)) {
+            circuitOpen = false;
+        }
     }
 
     /**
-     * Marks a rate limit and computes next retry using explicit delay or bounded exponential backoff.
+     * Marks a rate limit using the exact provider-declared retry deadline.
      */
-    synchronized void recordRateLimit(long retryAfterSeconds) {
-        Instant retryTime;
-        if (retryAfterSeconds > 0) {
-            retryTime = instantSource.instant().plusSeconds(retryAfterSeconds);
-        } else {
-            backoffMultiplier = Math.min(backoffMultiplier * 2, maxBackoffMultiplier);
-            retryTime = instantSource.instant().plusSeconds(backoffMultiplier);
+    synchronized void recordRateLimit(Instant providerRetryTime) {
+        Instant requiredRetryTime = Objects.requireNonNull(providerRetryTime, "providerRetryTime");
+        Instant currentTime = instantSource.instant();
+        boolean activeWindow = circuitOpen && currentTime.isBefore(nextRetryTime);
+        if (!activeWindow || requiredRetryTime.isAfter(nextRetryTime)) {
+            nextRetryTime = requiredRetryTime;
         }
-        nextRetryTime = retryTime;
-        circuitOpen = true;
+        circuitOpen = currentTime.isBefore(nextRetryTime);
     }
 
-    private boolean isRequestAdmissionAvailable(int dailyLimit, Instant currentTime) {
-        if (dailyLimit <= 0) {
-            throw new IllegalArgumentException("dailyLimit must be positive");
-        }
+    private boolean isRequestAdmissionAvailable(Instant currentTime) {
         if (circuitOpen && !currentTime.isBefore(nextRetryTime)) {
             circuitOpen = false;
-            backoffMultiplier = 1;
         }
-        if (!currentTime.isBefore(dayReset)) {
-            requestsToday = 0;
-            dayReset = currentTime.plus(DAILY_REQUEST_WINDOW);
-        }
-        return !circuitOpen && requestsToday < dailyLimit;
+        return !circuitOpen;
     }
 }

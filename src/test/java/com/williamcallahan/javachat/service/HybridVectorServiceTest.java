@@ -34,12 +34,14 @@ import io.qdrant.client.grpc.Points.RetrievedPoint;
 import io.qdrant.client.grpc.Points.ScrollPoints;
 import io.qdrant.client.grpc.Points.ScrollResponse;
 import io.qdrant.client.grpc.Points.UpdateResult;
+import io.qdrant.client.grpc.Points.UpsertPoints;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -87,7 +89,7 @@ class HybridVectorServiceTest {
                         ? Futures.immediateFailedFuture(Status.UNAVAILABLE.asRuntimeException())
                         : Futures.immediateFuture(UpdateResult.getDefaultInstance()))
                 .when(qdrantClient)
-                .upsertAsync(eq(COLLECTION_NAME), anyList());
+                .upsertAsync(any(UpsertPoints.class));
 
         Document document = new Document(DOCUMENT_ID, DOCUMENT_TEXT, Map.of());
 
@@ -96,6 +98,13 @@ class HybridVectorServiceTest {
             assertRetryWarning(
                     expectedLogEvents,
                     "Qdrant hybrid upsert failed with transient error on attempt 1/3, retrying in 500ms");
+        }
+
+        ArgumentCaptor<UpsertPoints> upsertRequests = ArgumentCaptor.forClass(UpsertPoints.class);
+        verify(qdrantClient, times(2)).upsertAsync(upsertRequests.capture());
+        for (UpsertPoints upsertRequest : upsertRequests.getAllValues()) {
+            assertEquals(COLLECTION_NAME, upsertRequest.getCollectionName());
+            assertTrue(upsertRequest.getWait());
         }
     }
 
@@ -154,7 +163,7 @@ class HybridVectorServiceTest {
         when(qdrantClient.scrollAsync(any(ScrollPoints.class)))
                 .thenReturn(Futures.immediateFuture(scrollResponse(DOCUMENT_ID, OBSOLETE_DOCUMENT_ID)));
         configureReplacementEmbedding();
-        when(qdrantClient.upsertAsync(eq(COLLECTION_NAME), anyList()))
+        when(qdrantClient.upsertAsync(any(UpsertPoints.class)))
                 .thenReturn(Futures.immediateFailedFuture(new IllegalArgumentException("upsert rejected")));
         Document replacementDocument = replacementDocument(DOCUMENT_ID, DOCUMENT_TEXT, DOCUMENT_URL);
 
@@ -180,7 +189,7 @@ class HybridVectorServiceTest {
                         Futures.immediateFuture(scrollResponse(DOCUMENT_ID, OBSOLETE_DOCUMENT_ID)),
                         Futures.immediateFuture(scrollResponse(DOCUMENT_ID)));
         configureReplacementEmbedding();
-        when(qdrantClient.upsertAsync(eq(COLLECTION_NAME), anyList()))
+        when(qdrantClient.upsertAsync(any(UpsertPoints.class)))
                 .thenReturn(Futures.immediateFuture(UpdateResult.getDefaultInstance()));
         when(qdrantClient.deleteAsync(eq(COLLECTION_NAME), eq(List.of(obsoletePointId))))
                 .thenReturn(Futures.immediateFuture(UpdateResult.getDefaultInstance()));
@@ -190,7 +199,7 @@ class HybridVectorServiceTest {
 
         InOrder replacementOrder = inOrder(qdrantClient);
         replacementOrder.verify(qdrantClient).scrollAsync(any(ScrollPoints.class));
-        replacementOrder.verify(qdrantClient).upsertAsync(eq(COLLECTION_NAME), anyList());
+        replacementOrder.verify(qdrantClient).upsertAsync(any(UpsertPoints.class));
         replacementOrder.verify(qdrantClient).deleteAsync(COLLECTION_NAME, List.of(obsoletePointId));
         replacementOrder.verify(qdrantClient).scrollAsync(any(ScrollPoints.class));
         verify(qdrantClient, never()).countAsync(eq(COLLECTION_NAME), any(Filter.class), eq(true));
@@ -202,7 +211,7 @@ class HybridVectorServiceTest {
         when(qdrantClient.scrollAsync(any(ScrollPoints.class)))
                 .thenReturn(Futures.immediateFuture(scrollResponse(DOCUMENT_ID, OBSOLETE_DOCUMENT_ID)));
         configureReplacementEmbedding();
-        when(qdrantClient.upsertAsync(eq(COLLECTION_NAME), anyList()))
+        when(qdrantClient.upsertAsync(any(UpsertPoints.class)))
                 .thenReturn(Futures.immediateFuture(UpdateResult.getDefaultInstance()));
         when(qdrantClient.deleteAsync(eq(COLLECTION_NAME), eq(List.of(obsoletePointId))))
                 .thenReturn(Futures.immediateFailedFuture(new IllegalArgumentException("delete rejected")));
@@ -215,7 +224,7 @@ class HybridVectorServiceTest {
 
         InOrder replacementOrder = inOrder(qdrantClient);
         replacementOrder.verify(qdrantClient).scrollAsync(any(ScrollPoints.class));
-        replacementOrder.verify(qdrantClient).upsertAsync(eq(COLLECTION_NAME), anyList());
+        replacementOrder.verify(qdrantClient).upsertAsync(any(UpsertPoints.class));
         replacementOrder.verify(qdrantClient).deleteAsync(COLLECTION_NAME, List.of(obsoletePointId));
         verify(qdrantClient, times(1)).scrollAsync(any(ScrollPoints.class));
     }
@@ -227,7 +236,7 @@ class HybridVectorServiceTest {
                         Futures.immediateFuture(scrollResponse(DOCUMENT_ID)),
                         Futures.immediateFuture(scrollResponse(OBSOLETE_DOCUMENT_ID)));
         configureReplacementEmbedding();
-        when(qdrantClient.upsertAsync(eq(COLLECTION_NAME), anyList()))
+        when(qdrantClient.upsertAsync(any(UpsertPoints.class)))
                 .thenReturn(Futures.immediateFuture(UpdateResult.getDefaultInstance()));
         Document replacementDocument = replacementDocument(DOCUMENT_ID, DOCUMENT_TEXT, DOCUMENT_URL);
 
@@ -238,7 +247,7 @@ class HybridVectorServiceTest {
 
         InOrder replacementOrder = inOrder(qdrantClient);
         replacementOrder.verify(qdrantClient).scrollAsync(any(ScrollPoints.class));
-        replacementOrder.verify(qdrantClient).upsertAsync(eq(COLLECTION_NAME), anyList());
+        replacementOrder.verify(qdrantClient).upsertAsync(any(UpsertPoints.class));
         replacementOrder.verify(qdrantClient).scrollAsync(any(ScrollPoints.class));
         verify(qdrantClient, never()).deleteAsync(eq(COLLECTION_NAME), anyList());
         verify(qdrantClient, never()).countAsync(eq(COLLECTION_NAME), any(Filter.class), eq(true));
@@ -255,7 +264,7 @@ class HybridVectorServiceTest {
                         QdrantCollectionKind.DOCS, DOCUMENT_URL, List.of(replacementDocument)));
 
         verify(qdrantClient, never()).scrollAsync(any(ScrollPoints.class));
-        verify(qdrantClient, never()).upsertAsync(eq(COLLECTION_NAME), anyList());
+        verify(qdrantClient, never()).upsertAsync(any(UpsertPoints.class));
         verify(qdrantClient, never()).deleteAsync(eq(COLLECTION_NAME), anyList());
     }
 

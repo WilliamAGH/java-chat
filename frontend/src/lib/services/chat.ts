@@ -26,9 +26,19 @@ export interface ChatMessage {
   timestamp: number;
   isError?: boolean;
   streamErrorMessage?: string;
+  /** Secondary explanation from the SSE error event, shown under the error message. */
+  errorDetails?: string;
+  /** Whether the server flagged the failure as retryable; drives the retry action. */
+  errorRetryable?: boolean;
 }
 
-const INVISIBLE_CHAT_FORMAT_CHARACTERS = new Set(["\u200B", "\uFEFF", "\u2060"]);
+const INVISIBLE_CHAT_FORMAT_CHARACTERS = new Set([
+  "\u200B",
+  "\u200C",
+  "\u200D",
+  "\uFEFF",
+  "\u2060",
+]);
 
 /** Reports whether streamed message text contains a user-visible character. */
 export function hasVisibleChatMessageText(messageText: string): boolean {

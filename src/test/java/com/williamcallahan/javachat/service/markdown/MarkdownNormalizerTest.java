@@ -1,18 +1,23 @@
 package com.williamcallahan.javachat.service.markdown;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 
+import java.time.Duration;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Verifies normalization rules that precede markdown AST parsing.
  */
 class MarkdownNormalizerTest {
+    private static final int AMBIGUOUS_INLINE_SEGMENT_COUNT = 3_000;
+    private static final Duration MARKDOWN_LINEAR_TIME_BUDGET = Duration.ofSeconds(5);
 
     @Test
     void preNormalizeForListsAndFences_indentsContinuationForThreeDigitNumericHeaderOnly() {
@@ -87,6 +92,40 @@ class MarkdownNormalizerTest {
     }
 
     @Test
+    void preNormalizeForListsAndFences_preservesTripleBacktickMultilineInlineCodeAfterPreamble() {
+        String multilineInlineCode = String.join("\n", "Intro```code", "continued``` end");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(multilineInlineCode);
+
+        assertEquals(multilineInlineCode, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_preservesTripleBacktickInlineCloserAtBlockIndentation() {
+        String multilineInlineCode = String.join("\n", "Intro```code", "``` end");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(multilineInlineCode);
+
+        assertEquals(multilineInlineCode, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_handlesRepeatedAmbiguousInlineFencesWithoutTailRescans() {
+        StringBuilder repeatedInlineCodeBuilder = new StringBuilder();
+        for (int segmentIndex = 0; segmentIndex < AMBIGUOUS_INLINE_SEGMENT_COUNT; segmentIndex++) {
+            repeatedInlineCodeBuilder.append("segment").append(segmentIndex).append("```code\ncontinued``` end\n");
+        }
+        for (int rejectedFenceIndex = 0; rejectedFenceIndex < AMBIGUOUS_INLINE_SEGMENT_COUNT; rejectedFenceIndex++) {
+            repeatedInlineCodeBuilder.append("```x\n");
+        }
+        String repeatedInlineCode = repeatedInlineCodeBuilder.toString();
+
+        assertTimeout(
+                MARKDOWN_LINEAR_TIME_BUDGET,
+                () -> MarkdownNormalizer.preNormalizeForListsAndFences(repeatedInlineCode));
+    }
+
+    @Test
     void preNormalizeForListsAndFences_preservesClosedBacktickFence() {
         String backtickFence = String.join("\n", "```java", "int answer = 42;", "```");
 
@@ -102,6 +141,26 @@ class MarkdownNormalizerTest {
         String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(tildeFence);
 
         assertEquals(tildeFence, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_preservesFenceMarkerWithTrailingCodeContent() {
+        String fenceLikeCodeContent =
+                String.join("\n", "```text", "literal content", "```ruby", "still literal content", "```");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(fenceLikeCodeContent);
+
+        assertEquals(fenceLikeCodeContent, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_preservesClosingBracesAfterFenceMarkerAsCode() {
+        String fenceLikeCodeContent = String.join("\n", "```text", "literal content", "```}}", "still code");
+        String expectedMarkdown = fenceLikeCodeContent + "\n```";
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(fenceLikeCodeContent);
+
+        assertEquals(expectedMarkdown, normalizedMarkdown);
     }
 
     @Test
@@ -125,13 +184,87 @@ class MarkdownNormalizerTest {
     }
 
     @Test
-    void preNormalizeForListsAndFences_keepsEnrichmentMarkerOutsideNumericListCodeIndentation() {
-        String markdownWithFollowingEnrichment = String.join(
-                "\n", "1. Learn the language", "", "{{hint:Read the official documentation}}", "", "### Next topic");
+    void preNormalizeForListsAndFences_repairsAttachedClosingFenceWithTrailingProse() {
+        String attachedFences = String.join("\n", "Before```java", "int answer = 42;", "```The result is 42.");
+        String expectedNormalizedMarkdown =
+                String.join("\n", "Before", "```java", "int answer = 42;", "```", "The result is 42.");
 
-        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(markdownWithFollowingEnrichment);
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(attachedFences);
 
-        assertEquals(markdownWithFollowingEnrichment, normalizedMarkdown);
+        assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_repairsAttachedClosingFenceWithCompactTitleCaseProse() {
+        String attachedFences = String.join("\n", "Before```java", "int answer = 42;", "```Done");
+        String expectedNormalizedMarkdown = String.join("\n", "Before", "```java", "int answer = 42;", "```", "Done");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(attachedFences);
+
+        assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_repairsAttachedClosingFenceWithParentheticalProse() {
+        String attachedFences = String.join("\n", "Before```java", "int answer = 42;", "```(note)  ");
+        String expectedNormalizedMarkdown =
+                String.join("\n", "Before", "```java", "int answer = 42;", "```", "(note)  ");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(attachedFences);
+
+        assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Done", "(note)", "Java"})
+    void preNormalizeForListsAndFences_preservesCompactFenceLikeCodeBeforeRealClosingFence(String fenceSuffix) {
+        String fenceLikeCodeContent =
+                String.join("\n", "Before```text", "literal content", "```" + fenceSuffix, "still literal", "```");
+        String expectedNormalizedMarkdown = "Before\n"
+                + String.join("\n", "```text", "literal content", "```" + fenceSuffix, "still literal", "```");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(fenceLikeCodeContent);
+
+        assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_preservesFenceLikeCodeAfterAttachedOpeningFence() {
+        String fenceLikeCodeContent =
+                String.join("\n", "Before```text", "literal content", "```ruby", "still literal content", "```");
+        String expectedNormalizedMarkdown =
+                "Before\n" + String.join("\n", "```text", "literal content", "```ruby", "still literal content", "```");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(fenceLikeCodeContent);
+
+        assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_keepsUnknownBraceMarkerInsideNumericList() {
+        String markdownWithTemplate = String.join("\n", "1. Render the value", "{{name}}", "Continue rendering.");
+        String expectedMarkdown = String.join("\n", "1. Render the value", "    {{name}}", "    Continue rendering.");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(markdownWithTemplate);
+
+        assertEquals(expectedMarkdown, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_preservesBraceMarkerInsideNumericListFence() {
+        String fencedTemplate = String.join(
+                "\n", "1. Render the template:", "```handlebars", "<p>{{name}}</p>", "return renderedTemplate;", "```");
+        String expectedMarkdown = String.join(
+                "\n",
+                "1. Render the template:",
+                "    ```handlebars",
+                "    <p>{{name}}</p>",
+                "    return renderedTemplate;",
+                "    ```");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(fencedTemplate);
+
+        assertEquals(expectedMarkdown, normalizedMarkdown);
     }
 
     @ParameterizedTest(name = "{0} fence with {1} spaces remains code context")

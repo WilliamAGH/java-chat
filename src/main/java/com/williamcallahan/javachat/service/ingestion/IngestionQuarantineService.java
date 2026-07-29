@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service.ingestion;
 
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.service.ContentHasher;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
@@ -17,7 +18,7 @@ import org.springframework.stereotype.Service;
  * Copies invalid or unsafe content outside the canonical documentation mirror for later inspection.
  */
 @Service
-public class IngestionQuarantineService {
+public final class IngestionQuarantineService {
     private static final Logger log = LoggerFactory.getLogger(IngestionQuarantineService.class);
 
     private static final String QUARANTINE_DIRECTORY_NAME = ".quarantine";
@@ -25,26 +26,37 @@ public class IngestionQuarantineService {
     private static final String TEMPORARY_INSPECTION_FILE_SUFFIX = ".tmp";
 
     private final Path documentationRoot;
+    private final Path quarantineRoot;
     private final ContentHasher contentHasher;
 
-    /**
-     * Uses the canonical documentation root so inspection copies remain outside recursive ingestion.
-     */
+    /** Uses generation state so read-only documentation mirrors can retain rejected-page evidence. */
     @Autowired
     public IngestionQuarantineService(
-            @Value("${DOCS_DIR:data/docs}") String documentationRoot, ContentHasher contentHasher) {
-        this(Path.of(documentationRoot), contentHasher);
+            @Value("${DOCS_DIR:data/docs}") String documentationRoot,
+            AppProperties appProperties,
+            ContentHasher contentHasher) {
+        this(
+                Path.of(documentationRoot),
+                snapshotStorageRoot(Objects.requireNonNull(appProperties, "appProperties")),
+                contentHasher);
     }
 
-    IngestionQuarantineService(Path documentationRoot, ContentHasher contentHasher) {
+    IngestionQuarantineService(Path documentationRoot, Path quarantineStorageRoot, ContentHasher contentHasher) {
         this.documentationRoot = Objects.requireNonNull(documentationRoot, "documentationRoot")
                 .toAbsolutePath()
                 .normalize();
+        this.quarantineRoot = Objects.requireNonNull(quarantineStorageRoot, "quarantineStorageRoot")
+                .resolve(QUARANTINE_DIRECTORY_NAME)
+                .toAbsolutePath()
+                .normalize();
+        if (quarantineRoot.startsWith(this.documentationRoot)) {
+            throw new IllegalArgumentException("Quarantine root must be outside documentation root: " + quarantineRoot);
+        }
         this.contentHasher = Objects.requireNonNull(contentHasher, "contentHasher");
     }
 
     /**
-     * Copies the supplied document to a content-addressed inspection path under {@code data/.quarantine}.
+     * Copies the supplied document to a content-addressed inspection path under generation state.
      *
      * <p>The inspection name uses the SHA-256 fingerprint of the copied raw bytes, so identical rejected content
      * reuses one inspection copy without decoding the document.
@@ -139,17 +151,13 @@ public class IngestionQuarantineService {
     }
 
     private Path quarantineRoot() {
-        Path storageRoot = documentationRoot.getParent();
-        if (storageRoot == null) {
-            throw new IllegalStateException("Documentation root has no storage parent: " + documentationRoot);
-        }
-
-        Path quarantineRoot =
-                storageRoot.resolve(QUARANTINE_DIRECTORY_NAME).toAbsolutePath().normalize();
-        if (quarantineRoot.startsWith(documentationRoot)) {
-            throw new IllegalStateException("Quarantine root must be outside documentation root: " + quarantineRoot);
-        }
         return quarantineRoot;
+    }
+
+    private static Path snapshotStorageRoot(AppProperties appProperties) {
+        return Path.of(appProperties.getDocs().getSnapshotDir())
+                .toAbsolutePath()
+                .normalize();
     }
 
     private String appendContentFingerprint(String fileName, String contentFingerprint) {

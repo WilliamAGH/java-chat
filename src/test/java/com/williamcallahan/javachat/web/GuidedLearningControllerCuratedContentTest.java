@@ -20,6 +20,7 @@ import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,7 +36,7 @@ import reactor.core.publisher.Flux;
 
 /** Verifies guided content HTTP contracts resolve only authoritative curated lesson markdown. */
 @WebMvcTest(controllers = GuidedLearningController.class)
-@Import({AppProperties.class, WebMvcConfig.class, SseSupport.class})
+@Import({AppProperties.class, WebMvcConfig.class, SseSupport.class, SimpleMeterRegistry.class})
 @org.springframework.security.test.context.support.WithMockUser
 class GuidedLearningControllerCuratedContentTest {
     private static final String CURATED_LESSON_MARKDOWN = "Curated lesson markdown";

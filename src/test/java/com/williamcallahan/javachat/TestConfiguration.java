@@ -44,7 +44,7 @@ public class TestConfiguration {
         @Override
         public ConditionEvaluationResult evaluateExecutionCondition(ExtensionContext context) {
             // Check for API keys
-            boolean hasApiKeys = System.getenv("OPENAI_API_KEY") != null || System.getenv("GITHUB_TOKEN") != null;
+            boolean hasApiKeys = System.getenv("OPENAI_API_KEY") != null;
 
             // Check for integration test flag
             boolean integrationEnabled = "true".equals(System.getProperty("test.integration.enabled"));

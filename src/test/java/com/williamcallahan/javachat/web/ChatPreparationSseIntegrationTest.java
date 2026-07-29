@@ -10,13 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.config.RequiredCredentialValidation;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.service.ChatMemoryService;
@@ -113,6 +113,7 @@ class ChatPreparationSseIntegrationTest {
         AtomicReference<ServerSentEvent<String>> firstSseEvent = new AtomicReference<>();
         AtomicReference<Throwable> clientFailure = new AtomicReference<>();
 
+        when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenAnswer(ignoredInvocation -> {
             retrievalStarted.countDown();
@@ -123,11 +124,11 @@ class ChatPreparationSseIntegrationTest {
                 retrievalFinished.countDown();
             }
         });
-        when(chatService.buildStructuredPromptWithContextOutcome(
-                        anyList(), eq(USER_QUERY), eq(ModelConfiguration.DEFAULT_MODEL)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
-        when(retrievalService.toCitationsForQuery(eq(USER_QUERY), anyList()))
+        when(chatService.citationOutcomeForRetainedContext(
+                        eq(USER_QUERY), any(ChatService.StructuredPromptOutcome.class), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(

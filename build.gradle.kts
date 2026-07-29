@@ -176,6 +176,7 @@ spotless {
 // Test configuration - base settings for all Test tasks
 tasks.withType<Test> {
     systemProperty("spring.profiles.active", "test")
+    environment("OPENAI_MODEL", "gpt-5.4")
     useJUnitPlatform()
     maxHeapSize = "1024m"
     jvmArgs(
@@ -192,7 +193,8 @@ tasks.withType<Test> {
 
 // Unit test task - exclude integration tests
 tasks.test {
-    environment("GITHUB_TOKEN", "test-token")
+    environment("OPENAI_API_KEY", "test-token")
+    environment("OPENAI_BASE_URL", "https://api.llm-gateway.iocloudhost.net/v1")
     useJUnitPlatform {
         excludeTags("integration")
     }

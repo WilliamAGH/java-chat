@@ -4,15 +4,19 @@ import com.williamcallahan.javachat.application.search.JavaApiMethodSelector;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.ModelConfiguration;
+import com.williamcallahan.javachat.config.RetrievalAugmentationConfig;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.util.QueryVersionExtractor;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -35,10 +39,35 @@ public class RetrievalService {
 
     private static final String FILE_URL_PREFIX = "file://";
     private static final char URL_FRAGMENT_DELIMITER = '#';
+
+    /** User-facing progress status emitted when the hybrid library search begins. */
+    private static final String RETRIEVAL_SEARCH_STATUS_SUMMARY = "Searching the Java documentation index";
+
+    private static final String RETRIEVAL_SEARCH_STATUS_DETAILS =
+            "Embedding your question and matching it against the official JDK documentation, books, and GitHub repositories.";
+
+    /** User-facing progress status emitted when the reranker reviews search matches. */
+    private static final String RETRIEVAL_RERANK_STATUS_SUMMARY = "Reviewing the top matches";
+
+    private static final String RETRIEVAL_RERANK_STATUS_DETAILS =
+            "Ranking the most relevant passages before writing the answer.";
+
+    /** Listener for callers that run retrieval without a user-facing progress channel. */
+    private static final Consumer<RetrievalNotice> NO_PROGRESS_LISTENER = notice -> {};
+
     private static final List<String> SUPPORTED_JAVA_API_VERSIONS =
             DocsSourceRegistry.javaApiDocumentationSources().stream()
                     .map(DocsSourceRegistry.JavaApiDocumentationSource::javaRelease)
                     .toList();
+    private static final Set<String> JAVA_API_DOCUMENTATION_DOC_SETS =
+            Set.copyOf(DocsSourceRegistry.javaApiDocumentationSources().stream()
+                    .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
+                    .toList());
+    private static final String CURRENT_JAVA_API_DOCUMENTATION_DOC_SET =
+            DocsSourceRegistry.javaApiDocumentationSources().stream()
+                    .max(Comparator.comparingInt(source -> Integer.parseInt(source.javaRelease())))
+                    .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
+                    .orElseThrow();
 
     private final HybridSearchService hybridSearchService;
     private final AppProperties appProperties;
@@ -113,6 +142,41 @@ public class RetrievalService {
     }
 
     /**
+     * Retrieves documents within the caller-owned constraint while reporting live progress.
+     *
+     * <p>The listener receives one notice when the hybrid library search begins and one when the
+     * reranker starts reviewing matches, so streaming callers can show which retrieval step is
+     * running instead of a single opaque preparation status.</p>
+     *
+     * @param query retrieval query
+     * @param retrievalConstraint exact server-side constraint for the retrieval
+     * @param progressListener receives live user-facing retrieval progress notices
+     * @return retrieved and reranked documents
+     */
+    public List<Document> retrieve(
+            String query, RetrievalConstraint retrievalConstraint, Consumer<RetrievalNotice> progressListener) {
+        return retrieve(query, retrievalConstraint, progressListener, retrievalStageDeadlineNanos());
+    }
+
+    /**
+     * Retrieves documents within the caller-owned response-preparation deadline.
+     *
+     * @param query retrieval query
+     * @param retrievalConstraint exact server-side constraint for the retrieval
+     * @param progressListener receives live user-facing retrieval progress notices
+     * @param stageDeadlineNanos absolute {@link System#nanoTime()} response-preparation deadline
+     * @return retrieved and reranked documents
+     */
+    public List<Document> retrieve(
+            String query,
+            RetrievalConstraint retrievalConstraint,
+            Consumer<RetrievalNotice> progressListener,
+            long stageDeadlineNanos) {
+        return retrieveOutcome(query, retrievalConstraint, progressListener, stageDeadlineNanos)
+                .documents();
+    }
+
+    /**
      * Discovers static citations from one sparse official-documentation query.
      *
      * <p>Candidate documents are converted and deduplicated by their final citation URL and anchor
@@ -133,11 +197,14 @@ public class RetrievalService {
             return new CitationOutcome(List.of(), 0);
         }
         int citationCandidateLimit = Math.max(appProperties.getRag().getSearchTopK(), citationLimit);
+        long stageDeadlineNanos = retrievalStageDeadlineNanos();
         List<String> parsedVersions = QueryVersionExtractor.extractVersionNumbers(query, SUPPORTED_JAVA_API_VERSIONS);
-        List<String> requestedVersions = applicableRequestedVersions(retrievalConstraint, parsedVersions);
-        RetrievalConstraint combinedRetrievalConstraint = retrievalConstraint.withDocVersions(requestedVersions);
-        List<Document> citationSearchDocuments =
-                searchCitationCandidates(query, citationCandidateLimit, combinedRetrievalConstraint, requestedVersions);
+        RetrievalConstraint scopedRetrievalConstraint =
+                defaultCurrentJavaApiScope(query, retrievalConstraint, parsedVersions);
+        List<String> requestedVersions = applicableRequestedVersions(scopedRetrievalConstraint, parsedVersions);
+        RetrievalConstraint combinedRetrievalConstraint = scopedRetrievalConstraint.withDocVersions(requestedVersions);
+        List<Document> citationSearchDocuments = searchCitationCandidates(
+                query, citationCandidateLimit, combinedRetrievalConstraint, requestedVersions, stageDeadlineNanos);
         List<Document> orderedCitationCandidates =
                 CitationCandidateRanker.orderForCitationQuery(query, citationSearchDocuments);
         List<Document> limitedCitationCandidates = retainRequestedVersionCoverage(
@@ -159,7 +226,8 @@ public class RetrievalService {
         List<String> requestedVersions =
                 QueryVersionExtractor.extractVersionNumbers(query, SUPPORTED_JAVA_API_VERSIONS);
         RetrievalConstraint retrievalConstraint = RetrievalConstraint.forDocVersions(requestedVersions);
-        return retrieveOutcome(query, retrievalConstraint, requestedVersions);
+        return retrieveOutcome(
+                query, retrievalConstraint, requestedVersions, NO_PROGRESS_LISTENER, retrievalStageDeadlineNanos());
     }
 
     /**
@@ -173,19 +241,68 @@ public class RetrievalService {
      * @return retrieval outcome with documents and notices
      */
     public RetrievalOutcome retrieveOutcome(String query, RetrievalConstraint retrievalConstraint) {
+        return retrieveOutcome(query, retrievalConstraint, NO_PROGRESS_LISTENER);
+    }
+
+    /**
+     * Retrieves documents and notices within the caller-owned constraint, reporting live progress.
+     *
+     * @param query retrieval query
+     * @param retrievalConstraint exact server-side constraint for the retrieval
+     * @param progressListener receives live user-facing retrieval progress notices
+     * @return retrieval outcome with documents and notices
+     */
+    public RetrievalOutcome retrieveOutcome(
+            String query, RetrievalConstraint retrievalConstraint, Consumer<RetrievalNotice> progressListener) {
+        return retrieveOutcome(query, retrievalConstraint, progressListener, retrievalStageDeadlineNanos());
+    }
+
+    /**
+     * Retrieves documents and notices within one caller-owned response-preparation deadline.
+     *
+     * @param query retrieval query
+     * @param retrievalConstraint exact server-side constraint for the retrieval
+     * @param progressListener receives live user-facing retrieval progress notices
+     * @param stageDeadlineNanos absolute {@link System#nanoTime()} response-preparation deadline
+     * @return retrieval outcome with documents and notices
+     */
+    public RetrievalOutcome retrieveOutcome(
+            String query,
+            RetrievalConstraint retrievalConstraint,
+            Consumer<RetrievalNotice> progressListener,
+            long stageDeadlineNanos) {
         Objects.requireNonNull(retrievalConstraint, "retrievalConstraint");
+        Objects.requireNonNull(progressListener, "progressListener");
         if (query == null || query.isBlank()) {
             return new RetrievalOutcome(List.of(), List.of());
         }
         List<String> parsedVersions = QueryVersionExtractor.extractVersionNumbers(query, SUPPORTED_JAVA_API_VERSIONS);
-        List<String> requestedVersions = applicableRequestedVersions(retrievalConstraint, parsedVersions);
-        RetrievalConstraint combinedRetrievalConstraint = retrievalConstraint.withDocVersions(requestedVersions);
-        return retrieveOutcome(query, combinedRetrievalConstraint, requestedVersions);
+        RetrievalConstraint scopedRetrievalConstraint =
+                defaultCurrentJavaApiScope(query, retrievalConstraint, parsedVersions);
+        List<String> requestedVersions = applicableRequestedVersions(scopedRetrievalConstraint, parsedVersions);
+        RetrievalConstraint combinedRetrievalConstraint = scopedRetrievalConstraint.withDocVersions(requestedVersions);
+        return retrieveOutcome(
+                query, combinedRetrievalConstraint, requestedVersions, progressListener, stageDeadlineNanos);
     }
 
+    /**
+     * Runs the retrieval stage under one deadline shared by every dependency hop.
+     *
+     * <p>The stage deadline is computed once here from
+     * {@link RetrievalAugmentationConfig#RESPONSE_PREPARATION_TIMEOUT} — the same budget the SSE
+     * preparation layer enforces — and handed to the embedding, Qdrant fan-out, and reranker hops.
+     * Each hop applies the tighter of its remaining stage time and its own configured cap, so the
+     * hop budgets can never sum past the outer preparation deadline.</p>
+     */
     private RetrievalOutcome retrieveOutcome(
-            String query, RetrievalConstraint retrievalConstraint, List<String> requestedVersions) {
-        CandidateRetrieval candidateRetrieval = retrieveCandidates(query, retrievalConstraint, requestedVersions);
+            String query,
+            RetrievalConstraint retrievalConstraint,
+            List<String> requestedVersions,
+            Consumer<RetrievalNotice> progressListener,
+            long stageDeadlineNanos) {
+        progressListener.accept(new RetrievalNotice(RETRIEVAL_SEARCH_STATUS_SUMMARY, RETRIEVAL_SEARCH_STATUS_DETAILS));
+        CandidateRetrieval candidateRetrieval =
+                retrieveCandidates(query, retrievalConstraint, requestedVersions, stageDeadlineNanos);
 
         int returnDocumentLimit = appProperties.getRag().getSearchReturnK();
         List<Document> promptDocuments;
@@ -198,8 +315,11 @@ public class RetrievalService {
                     : retainRequestedVersionCoverage(
                             exactOverloadDocuments, exactOverloadDocuments, requestedVersions, returnDocumentLimit);
         } else {
-            List<Document> reranked =
-                    rerankerService.rerank(query, candidateRetrieval.documents(), returnDocumentLimit);
+            progressListener.accept(
+                    new RetrievalNotice(RETRIEVAL_RERANK_STATUS_SUMMARY, RETRIEVAL_RERANK_STATUS_DETAILS));
+            List<Document> reranked = rerankerService.rerank(
+                    query, candidateRetrieval.documents(), returnDocumentLimit, stageDeadlineNanos);
+            requireRemainingStageBudget(stageDeadlineNanos);
             promptDocuments = retainRequestedVersionCoverage(
                     reranked, candidateRetrieval.documents(), requestedVersions, returnDocumentLimit);
         }
@@ -217,14 +337,17 @@ public class RetrievalService {
     }
 
     private CandidateRetrieval retrieveCandidates(
-            String query, RetrievalConstraint retrievalConstraint, List<String> requestedVersions) {
+            String query,
+            RetrievalConstraint retrievalConstraint,
+            List<String> requestedVersions,
+            long stageDeadlineNanos) {
         String boostedQuery = QueryVersionExtractor.boostQueryWithVersionContext(query, requestedVersions);
         int baseTopK = Math.max(1, appProperties.getRag().getSearchTopK());
         List<Document> retrievedDocuments = new ArrayList<>();
         List<RetrievalNotice> retrievalNotices = new ArrayList<>();
         if (requiresExactJavaOverloadEvidence(query, retrievalConstraint)) {
-            List<Document> citationCandidates =
-                    searchCitationCandidates(query, baseTopK, retrievalConstraint, requestedVersions);
+            List<Document> citationCandidates = searchCitationCandidates(
+                    query, baseTopK, retrievalConstraint, requestedVersions, stageDeadlineNanos);
             List<Document> exactOverloadDocuments =
                     CitationCandidateRanker.orderForCitationQuery(query, citationCandidates);
             requireExactOverloadEvidence(exactOverloadDocuments, requestedVersions);
@@ -233,15 +356,18 @@ public class RetrievalService {
         }
         if (requestedVersions.isEmpty()) {
             appendSearchOutcome(
-                    hybridSearchService.searchOutcome(boostedQuery, baseTopK, retrievalConstraint),
+                    hybridSearchService.searchOutcome(boostedQuery, baseTopK, retrievalConstraint, stageDeadlineNanos),
                     retrievedDocuments,
                     retrievalNotices);
         } else {
-            for (String requestedVersion : requestedVersions) {
-                RetrievalConstraint exactVersionConstraint =
-                        retrievalConstraint.withDocVersions(List.of(requestedVersion));
-                HybridSearchService.SearchOutcome versionSearchOutcome =
-                        hybridSearchService.searchOutcome(boostedQuery, baseTopK, exactVersionConstraint);
+            List<RetrievalConstraint> versionConstraints = requestedVersions.stream()
+                    .map(requestedVersion -> retrievalConstraint.withDocVersions(List.of(requestedVersion)))
+                    .toList();
+            List<HybridSearchService.SearchOutcome> versionSearchOutcomes =
+                    hybridSearchService.searchOutcomes(boostedQuery, baseTopK, versionConstraints, stageDeadlineNanos);
+            for (int versionIndex = 0; versionIndex < requestedVersions.size(); versionIndex++) {
+                String requestedVersion = requestedVersions.get(versionIndex);
+                HybridSearchService.SearchOutcome versionSearchOutcome = versionSearchOutcomes.get(versionIndex);
                 requireRequestedVersionEvidence(requestedVersion, versionSearchOutcome.documents());
                 appendSearchOutcome(versionSearchOutcome, retrievedDocuments, retrievalNotices);
             }
@@ -256,6 +382,31 @@ public class RetrievalService {
                 && DocsSourceRegistry.javaApiDocumentationSources().stream()
                         .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
                         .anyMatch(retrievalConstraint.docSet()::contains);
+    }
+
+    /**
+     * Uses the current Java API documentation source for a generic broad official-doc request.
+     *
+     * <p>Historical Java API mirrors contain near-duplicate API pages and dominate the broad
+     * documentation corpus. Generic requests therefore use the newest Java API source while
+     * retaining every non-Java documentation set. Explicit release requests, caller-owned release
+     * filters, and exact-overload lookups retain their full source scope for historical evidence.</p>
+     */
+    private static RetrievalConstraint defaultCurrentJavaApiScope(
+            String query, RetrievalConstraint retrievalConstraint, List<String> parsedVersions) {
+        boolean hasBroadOfficialJavaApiScope = "official".equals(retrievalConstraint.sourceKind())
+                && retrievalConstraint.docSet().containsAll(JAVA_API_DOCUMENTATION_DOC_SETS);
+        boolean preservesHistoricalJavaApiEvidence = !parsedVersions.isEmpty()
+                || !retrievalConstraint.docVersions().isEmpty()
+                || requiresExactJavaOverloadEvidence(query, retrievalConstraint);
+        if (!hasBroadOfficialJavaApiScope || preservesHistoricalJavaApiEvidence) {
+            return retrievalConstraint;
+        }
+        List<String> currentJavaApiDocSets = retrievalConstraint.docSet().stream()
+                .filter(docSet -> !JAVA_API_DOCUMENTATION_DOC_SETS.contains(docSet)
+                        || CURRENT_JAVA_API_DOCUMENTATION_DOC_SET.equals(docSet))
+                .toList();
+        return retrievalConstraint.withDocSetScope(currentJavaApiDocSets);
     }
 
     private static void requireExactOverloadEvidence(
@@ -290,8 +441,55 @@ public class RetrievalService {
      */
     public RetrievalOutcome retrieveWithLimitOutcome(
             String query, int maxDocuments, int maxTokensPerDocument, RetrievalConstraint retrievalConstraint) {
+        return retrieveWithLimitOutcome(
+                query, maxDocuments, maxTokensPerDocument, retrievalConstraint, NO_PROGRESS_LISTENER);
+    }
+
+    /**
+     * Retrieves constrained documents with limits while reporting live retrieval progress.
+     *
+     * @param query retrieval query
+     * @param maxDocuments maximum number of documents to retain
+     * @param maxTokensPerDocument maximum estimated tokens retained per document
+     * @param retrievalConstraint exact server-side constraint for the retrieval
+     * @param progressListener receives live user-facing retrieval progress notices
+     * @return constrained, truncated retrieval outcome
+     */
+    public RetrievalOutcome retrieveWithLimitOutcome(
+            String query,
+            int maxDocuments,
+            int maxTokensPerDocument,
+            RetrievalConstraint retrievalConstraint,
+            Consumer<RetrievalNotice> progressListener) {
+        return retrieveWithLimitOutcome(
+                query,
+                maxDocuments,
+                maxTokensPerDocument,
+                retrievalConstraint,
+                progressListener,
+                retrievalStageDeadlineNanos());
+    }
+
+    /**
+     * Retrieves constrained documents under the caller-owned response-preparation deadline.
+     *
+     * @param query retrieval query
+     * @param maxDocuments maximum number of documents to retain
+     * @param maxTokensPerDocument maximum estimated tokens retained per document
+     * @param retrievalConstraint exact server-side constraint for the retrieval
+     * @param progressListener receives live user-facing retrieval progress notices
+     * @param stageDeadlineNanos absolute {@link System#nanoTime()} response-preparation deadline
+     * @return constrained, truncated retrieval outcome
+     */
+    public RetrievalOutcome retrieveWithLimitOutcome(
+            String query,
+            int maxDocuments,
+            int maxTokensPerDocument,
+            RetrievalConstraint retrievalConstraint,
+            Consumer<RetrievalNotice> progressListener,
+            long stageDeadlineNanos) {
         return limitRetrievalOutcome(
-                retrieveOutcome(query, retrievalConstraint),
+                retrieveOutcome(query, retrievalConstraint, progressListener, stageDeadlineNanos),
                 maxDocuments,
                 maxTokensPerDocument,
                 applicableRequestedVersions(
@@ -371,6 +569,18 @@ public class RetrievalService {
         return List.copyOf(deduplicatedDocuments);
     }
 
+    private static long retrievalStageDeadlineNanos() {
+        return System.nanoTime() + RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.toNanos();
+    }
+
+    private static void requireRemainingStageBudget(long stageDeadlineNanos) {
+        long remainingStageNanos = stageDeadlineNanos - System.nanoTime();
+        if (remainingStageNanos <= 0) {
+            String failureMessage = "Retrieval stage deadline elapsed while reranking";
+            throw new RerankingFailureException(failureMessage, new TimeoutException(failureMessage));
+        }
+    }
+
     private static void appendSearchOutcome(
             HybridSearchService.SearchOutcome searchOutcome,
             List<Document> retrievedDocuments,
@@ -385,20 +595,27 @@ public class RetrievalService {
             String query,
             int citationCandidateLimit,
             RetrievalConstraint retrievalConstraint,
-            List<String> requestedVersions) {
+            List<String> requestedVersions,
+            long stageDeadlineNanos) {
         if (requestedVersions.isEmpty()) {
             return hybridSearchService
-                    .searchDocumentationCitationsOutcome(query, citationCandidateLimit, retrievalConstraint)
+                    .searchDocumentationCitationsOutcome(
+                            query, citationCandidateLimit, retrievalConstraint, stageDeadlineNanos)
                     .documents();
         }
+        List<RetrievalConstraint> versionConstraints = requestedVersions.stream()
+                .map(requestedVersion -> retrievalConstraint.withDocVersions(List.of(requestedVersion)))
+                .toList();
+        List<HybridSearchService.SearchOutcome> versionCitationOutcomes =
+                hybridSearchService.searchDocumentationCitationsOutcomes(
+                        query, citationCandidateLimit, versionConstraints, stageDeadlineNanos);
         List<Document> citationCandidates = new ArrayList<>();
-        for (String requestedVersion : requestedVersions) {
-            RetrievalConstraint exactVersionConstraint = retrievalConstraint.withDocVersions(List.of(requestedVersion));
-            List<Document> versionCandidates = hybridSearchService
-                    .searchDocumentationCitationsOutcome(query, citationCandidateLimit, exactVersionConstraint)
-                    .documents();
-            requireRequestedVersionEvidence(requestedVersion, versionCandidates);
-            citationCandidates.addAll(versionCandidates);
+        for (int versionIndex = 0; versionIndex < requestedVersions.size(); versionIndex++) {
+            String requestedVersion = requestedVersions.get(versionIndex);
+            List<Document> versionCitationCandidates =
+                    versionCitationOutcomes.get(versionIndex).documents();
+            requireRequestedVersionEvidence(requestedVersion, versionCitationCandidates);
+            citationCandidates.addAll(versionCitationCandidates);
         }
         return deduplicateByVersionAndContentHashThenHashlessCanonicalUrl(citationCandidates);
     }
@@ -610,6 +827,44 @@ public class RetrievalService {
             return toCitations(promptDocuments);
         }
         return toCitations(CitationCandidateRanker.selectPromptContextForCitationQuery(query, promptDocuments));
+    }
+
+    /**
+     * Converts the exact retained subset of query-aware prompt context into citations.
+     *
+     * @param userQuery current user query
+     * @param promptContextDocuments context documents supplied before provider truncation
+     * @param retainedDocumentIds source identities retained after provider truncation
+     * @return citations and conversion failures for retained prompt context only
+     */
+    public CitationOutcome toCitationsForRetainedContext(
+            String userQuery, List<Document> promptContextDocuments, List<String> retainedDocumentIds) {
+        return toCitationsForQuery(
+                userQuery, retainedPromptContextDocuments(promptContextDocuments, retainedDocumentIds));
+    }
+
+    /**
+     * Converts the exact retained subset of prompt context into citations.
+     *
+     * @param promptContextDocuments context documents supplied before provider truncation
+     * @param retainedDocumentIds source identities retained after provider truncation
+     * @return citations and conversion failures for retained prompt context only
+     */
+    public CitationOutcome toCitationsForRetainedContext(
+            List<Document> promptContextDocuments, List<String> retainedDocumentIds) {
+        return toCitations(retainedPromptContextDocuments(promptContextDocuments, retainedDocumentIds));
+    }
+
+    private static List<Document> retainedPromptContextDocuments(
+            List<Document> promptContextDocuments, List<String> retainedDocumentIds) {
+        Objects.requireNonNull(retainedDocumentIds, "retainedDocumentIds");
+        if (promptContextDocuments == null || promptContextDocuments.isEmpty() || retainedDocumentIds.isEmpty()) {
+            return List.of();
+        }
+        Set<String> retainedDocumentIdSet = Set.copyOf(retainedDocumentIds);
+        return promptContextDocuments.stream()
+                .filter(promptContextDocument -> retainedDocumentIdSet.contains(promptContextDocument.getId()))
+                .toList();
     }
 
     private static String fragmentlessCitationSourceUrl(String citationUrl) {

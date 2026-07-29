@@ -1,9 +1,13 @@
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { createCitationPartialFailureStatusFixture } from "../../test/citationPartialFailureStatus";
 import type { CitationPartialFailureStatus } from "../validation/schemas";
 import { createStreamingState } from "./createStreamingState.svelte";
 
 describe("createStreamingState citation warnings", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("keeps validated citation contract fields nominally discriminated", () => {
     expectTypeOf<CitationPartialFailureStatus["code"]>().not.toEqualTypeOf<string>();
     expectTypeOf<CitationPartialFailureStatus["stage"]>().not.toEqualTypeOf<string>();
@@ -39,6 +43,22 @@ describe("createStreamingState citation warnings", () => {
     expect(streamingState.statusMessage).toBe("");
     expect(streamingState.statusDetails).toBe("");
     expect(streamingState.citationWarning).toBeNull();
+    streamingState.cleanup();
+  });
+
+  it("clears delayed status inputs before later provider updates", () => {
+    vi.useFakeTimers();
+    const streamingState = createStreamingState({ statusClearDelayMs: 800 });
+
+    streamingState.startStream();
+    streamingState.updateStatus({ message: "Preparing", details: "Old details" });
+    streamingState.updateProvider({ provider: "OldProvider" });
+    streamingState.finishStream();
+    vi.advanceTimersByTime(800);
+    streamingState.updateProvider({ provider: "NewProvider" });
+
+    expect(streamingState.statusMessage).toBe("");
+    expect(streamingState.statusDetails).toBe("Provider: NewProvider");
     streamingState.cleanup();
   });
 });

@@ -2,6 +2,7 @@
   import type { ChatMessage } from '../services/chat'
   import type { CitationPartialFailureStatus } from '../validation/schemas'
   import type { Snippet } from 'svelte'
+  import { fly } from 'svelte/transition'
   import MessageBubble from './MessageBubble.svelte'
   import ThinkingIndicator from './ThinkingIndicator.svelte'
 
@@ -66,7 +67,11 @@
   {/if}
 
   {#if isStreaming && !hasContent && !citationWarning}
-    <ThinkingIndicator {statusMessage} {statusDetails} {hasContent} />
+    <!-- Soft exit only: the indicator yields to the streaming bubble, which
+     * carries its own enter animation, so no competing enter transition here. -->
+    <div class="thinking-slot" out:fly={{ y: 4, duration: 150 }}>
+      <ThinkingIndicator {statusMessage} {statusDetails} {hasContent} />
+    </div>
   {/if}
 </div>
 

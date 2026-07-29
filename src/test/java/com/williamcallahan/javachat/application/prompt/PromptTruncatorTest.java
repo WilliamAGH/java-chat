@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.application.prompt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ch.qos.logback.classic.Level;
@@ -41,7 +42,7 @@ class PromptTruncatorTest {
                 List.of(new ConversationTurnSegment("user", "Hello", 10)),
                 new CurrentQuerySegment("What is Java?", 20));
 
-        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 500, false);
+        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 500);
 
         assertFalse(result.wasTruncated());
         assertEquals(1, result.contextDocumentCount());
@@ -62,7 +63,7 @@ class PromptTruncatorTest {
         // Total: 100 + 600 + 50 + 50 = 800 tokens
         // Limit 350: 100 (system) + 50 (query) = 150 reserved, 200 available
         // Should fit 1 context doc (200) but not 2, plus conversation (50)
-        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 400, false);
+        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 400);
 
         assertTrue(result.wasTruncated());
         // With 400 limit: 100 + 50 reserved = 150, 250 available
@@ -85,7 +86,7 @@ class PromptTruncatorTest {
         // Total: 100 + 0 + 300 + 50 = 450 tokens
         // Limit 300: 100 + 50 = 150 reserved, 150 available
         // Should fit 1 turn (100) from newest
-        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 300, false);
+        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 300);
 
         assertTrue(result.wasTruncated());
         assertEquals(0, result.contextDocumentCount());
@@ -109,7 +110,7 @@ class PromptTruncatorTest {
                 List.of(new ConversationTurnSegment("assistant", "long prior answer", 150)),
                 new CurrentQuerySegment("Explain shallow immutability", 50));
 
-        PromptTruncator.TruncatedPrompt truncationOutcome = truncator.truncate(prompt, 350, true);
+        PromptTruncator.TruncatedPrompt truncationOutcome = truncator.truncate(prompt, 350);
 
         assertTrue(truncationOutcome.wasTruncated());
         assertEquals(1, truncationOutcome.contextDocumentCount());
@@ -135,7 +136,7 @@ class PromptTruncatorTest {
                 List.of(new ConversationTurnSegment("assistant", "recent answer", 50)),
                 new CurrentQuerySegment("Current question", 50));
 
-        PromptTruncator.TruncatedPrompt truncationOutcome = truncator.truncate(prompt, 350, true);
+        PromptTruncator.TruncatedPrompt truncationOutcome = truncator.truncate(prompt, 350);
 
         assertTrue(truncationOutcome.wasTruncated());
         assertEquals(2, truncationOutcome.contextDocumentCount());
@@ -153,6 +154,47 @@ class PromptTruncatorTest {
     }
 
     @Test
+    void failsWhenNoAuthoritativeContextDocumentFits() {
+        StructuredPrompt prompt = new StructuredPrompt(
+                new SystemSegment("System", 100),
+                List.of(new ContextDocumentSegment(1, "curated-lesson:oversized", "curated", "canonical lesson", 101)
+                        .withPriority(PromptSegmentPriority.HIGH)),
+                List.of(),
+                new CurrentQuerySegment("Current question", 50));
+
+        assertThrows(
+                PromptTruncator.AuthoritativeContextDoesNotFitException.class, () -> truncator.truncate(prompt, 250));
+    }
+
+    @Test
+    void retainsLaterAuthoritativeDocumentAndStableIdentityWhenEarlierDocumentDoesNotFit() {
+        StructuredPrompt prompt = new StructuredPrompt(
+                new SystemSegment("System", 100),
+                List.of(
+                        new ContextDocumentSegment(
+                                        1, "curated-lesson:oversized", "curated", "oversized canonical section", 101)
+                                .withPriority(PromptSegmentPriority.HIGH),
+                        new ContextDocumentSegment(
+                                        2, "curated-lesson:retained", "curated", "fitting canonical section", 100)
+                                .withPriority(PromptSegmentPriority.HIGH)),
+                List.of(),
+                new CurrentQuerySegment("Current question", 50));
+
+        PromptTruncator.TruncatedPrompt truncationOutcome = truncator.truncate(prompt, 250);
+
+        assertTrue(truncationOutcome.wasTruncated());
+        assertEquals(
+                List.of("curated-lesson:retained"),
+                truncationOutcome.prompt().contextDocuments().stream()
+                        .map(ContextDocumentSegment::documentId)
+                        .toList());
+        assertEquals(1, truncationOutcome.prompt().contextDocuments().getFirst().index());
+        assertEquals(
+                PromptSegmentPriority.HIGH,
+                truncationOutcome.prompt().contextDocuments().getFirst().priority());
+    }
+
+    @Test
     void neverTruncatesSystemPromptOrCurrentQuery() {
         StructuredPrompt prompt = new StructuredPrompt(
                 new SystemSegment("Critical system instructions", 200),
@@ -163,7 +205,7 @@ class PromptTruncatorTest {
         // Limit smaller than system + query alone
         PromptTruncator.TruncatedPrompt truncationOutcome;
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROMPT_TRUNCATOR_LOGGER)) {
-            truncationOutcome = truncator.truncate(prompt, 350, true);
+            truncationOutcome = truncator.truncate(prompt, 350);
 
             assertEquals(1, expectedLogEvents.events().size());
             var truncationWarning = expectedLogEvents.events().getFirst();
@@ -190,7 +232,35 @@ class PromptTruncatorTest {
     }
 
     @Test
-    void prependsTruncationNoticeForGpt5() {
+    void returnsMinimalPromptWhenReservedSegmentsExceedLimitWithAuthoritativeContext() {
+        StructuredPrompt prompt = new StructuredPrompt(
+                new SystemSegment("Critical system instructions", 200),
+                List.of(new ContextDocumentSegment(
+                                1, "curated-lesson:records", "curated", "canonical records lesson", 100)
+                        .withPriority(PromptSegmentPriority.HIGH)),
+                List.of(new ConversationTurnSegment("user", "history", 100)),
+                new CurrentQuerySegment("Important question", 200));
+
+        PromptTruncator.TruncatedPrompt truncationOutcome;
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROMPT_TRUNCATOR_LOGGER)) {
+            truncationOutcome = truncator.truncate(prompt, 350);
+
+            assertEquals(1, expectedLogEvents.events().size());
+            assertEquals(Level.WARN, expectedLogEvents.events().getFirst().getLevel());
+        }
+
+        assertTrue(truncationOutcome.wasTruncated());
+        assertEquals(0, truncationOutcome.contextDocumentCount());
+        assertEquals(0, truncationOutcome.conversationTurnCount());
+        assertEquals(
+                "Critical system instructions",
+                truncationOutcome.prompt().system().content());
+        assertEquals(
+                "Important question", truncationOutcome.prompt().currentQuery().content());
+    }
+
+    @Test
+    void prependsTruncationNotice() {
         StructuredPrompt prompt = new StructuredPrompt(
                 new SystemSegment("System", 100),
                 List.of(
@@ -199,21 +269,7 @@ class PromptTruncatorTest {
                 List.of(),
                 new CurrentQuerySegment("query", 50));
 
-        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 400, true);
-
-        assertTrue(result.wasTruncated());
-        assertTrue(result.render().startsWith("[Context truncated due to GPT-5"));
-    }
-
-    @Test
-    void prependsGenericTruncationNoticeForOtherModels() {
-        StructuredPrompt prompt = new StructuredPrompt(
-                new SystemSegment("System", 100),
-                List.of(new ContextDocumentSegment(1, "document-1", "url1", "doc1", 500)),
-                List.of(),
-                new CurrentQuerySegment("query", 50));
-
-        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 200, false);
+        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 400);
 
         assertTrue(result.wasTruncated());
         assertTrue(result.render().startsWith("[Context truncated due to model input limit]"));
@@ -232,7 +288,7 @@ class PromptTruncatorTest {
                 new CurrentQuerySegment("query", 50));
 
         // Should keep first 2 docs (most relevant), re-indexed as 1 and 2
-        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 350, false);
+        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 350);
 
         assertTrue(result.wasTruncated());
         assertEquals(2, result.contextDocumentCount());
@@ -257,7 +313,7 @@ class PromptTruncatorTest {
                 List.of(),
                 new CurrentQuerySegment("query", 50));
 
-        PromptTruncator.TruncatedPrompt truncationOutcome = truncator.truncate(prompt, 250, true);
+        PromptTruncator.TruncatedPrompt truncationOutcome = truncator.truncate(prompt, 250);
 
         assertTrue(truncationOutcome.wasTruncated());
         assertEquals(1, truncationOutcome.contextDocumentCount());
@@ -273,7 +329,7 @@ class PromptTruncatorTest {
         StructuredPrompt prompt = new StructuredPrompt(
                 new SystemSegment("System", 100), List.of(), List.of(), new CurrentQuerySegment("query", 50));
 
-        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 200, false);
+        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 200);
 
         assertFalse(result.wasTruncated());
         assertEquals(0, result.contextDocumentCount());
@@ -296,7 +352,7 @@ class PromptTruncatorTest {
                         new ConversationTurnSegment("assistant", "answer", 20)),
                 new CurrentQuerySegment("follow-up", 20));
 
-        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 500, false);
+        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 500);
 
         assertFalse(result.wasTruncated());
         String rendered = result.render();

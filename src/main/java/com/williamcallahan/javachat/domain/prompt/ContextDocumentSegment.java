@@ -30,13 +30,14 @@ public record ContextDocumentSegment(
      * Creates a context document segment with validation.
      *
      * @throws IllegalArgumentException if index is less than 1
+     * @throws IllegalArgumentException if documentId is null or blank
      */
     public ContextDocumentSegment {
         if (index < 1) {
             throw new IllegalArgumentException("Context document index must be at least 1");
         }
-        if (documentId == null) {
-            documentId = "";
+        if (documentId == null || documentId.isBlank()) {
+            throw new IllegalArgumentException("Context document identity cannot be null or blank");
         }
         if (sourceUrl == null) {
             sourceUrl = "";

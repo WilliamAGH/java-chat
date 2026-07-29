@@ -35,7 +35,7 @@ final class RateLimitDecisionResolver {
 
         try {
             long retryAfterSeconds = headerParser.parseRetryAfterSeconds(headers);
-            if (retryAfterSeconds > 0) {
+            if (containsHeader(headers, RETRY_AFTER_HEADER)) {
                 return RateLimitDecision.fromRetryAfterSeconds(retryAfterSeconds);
             }
 
@@ -50,6 +50,22 @@ final class RateLimitDecisionResolver {
     }
 
     /**
+     * Resolves a gateway decision only from its authoritative Retry-After header.
+     *
+     * @throws RateLimitDecisionException when Retry-After is missing or invalid
+     */
+    RateLimitDecision resolveFromOpenAiRetryAfterHeaders(Headers headers) {
+        if (headers == null || headers.isEmpty() || !containsHeader(headers, RETRY_AFTER_HEADER)) {
+            throw new RateLimitDecisionException("Gateway rate-limit response did not include Retry-After");
+        }
+        try {
+            return RateLimitDecision.fromRetryAfterSeconds(headerParser.parseRetryAfterSeconds(headers));
+        } catch (IllegalArgumentException parseError) {
+            throw new RateLimitDecisionException("Gateway Retry-After header is invalid", parseError);
+        }
+    }
+
+    /**
      * Resolves a decision from Spring WebClient response headers.
      *
      * @throws RateLimitDecisionException when headers are missing or invalid
@@ -58,9 +74,9 @@ final class RateLimitDecisionResolver {
         Objects.requireNonNull(webClientError, "webClientError");
 
         try {
-            long retryAfterSeconds = headerParser.parseRetryAfterHeader(
-                    webClientError.getHeaders().getFirst(RETRY_AFTER_HEADER));
-            if (retryAfterSeconds > 0) {
+            String retryAfterHeader = webClientError.getHeaders().getFirst(RETRY_AFTER_HEADER);
+            long retryAfterSeconds = headerParser.parseRetryAfterHeader(retryAfterHeader);
+            if (retryAfterHeader != null && !retryAfterHeader.isBlank()) {
                 return RateLimitDecision.fromRetryAfterSeconds(retryAfterSeconds);
             }
 
@@ -72,5 +88,14 @@ final class RateLimitDecisionResolver {
         } catch (IllegalArgumentException parseError) {
             throw new RateLimitDecisionException("WebClient rate-limit headers are invalid", parseError);
         }
+    }
+
+    private boolean containsHeader(Headers headers, String expectedHeaderName) {
+        for (String headerName : headers.names()) {
+            if (headerName != null && headerName.equalsIgnoreCase(expectedHeaderName)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

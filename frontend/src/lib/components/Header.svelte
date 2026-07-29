@@ -18,14 +18,13 @@
       <span class="brand-text">Java Chat</span>
     </a>
 
-    <div class="nav-tabs" role="tablist" aria-label="Main navigation">
+    <nav class="nav-tabs" aria-label="Main navigation">
       <button
         type="button"
-        role="tab"
         class="nav-tab"
         class:active={currentView === 'chat'}
         aria-label="Chat"
-        aria-selected={currentView === 'chat'}
+        aria-current={currentView === 'chat' ? 'page' : undefined}
         onclick={() => currentView = 'chat'}
       >
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -36,11 +35,10 @@
 
       <button
         type="button"
-        role="tab"
         class="nav-tab"
         class:active={currentView === 'learn'}
         aria-label="Learn"
-        aria-selected={currentView === 'learn'}
+        aria-current={currentView === 'learn' ? 'page' : undefined}
         onclick={() => currentView = 'learn'}
       >
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -48,7 +46,7 @@
         </svg>
         <span>Learn</span>
       </button>
-    </div>
+      </nav>
 
   </div>
 </header>
@@ -94,8 +92,11 @@
   }
 
   .brand-text {
-    font-family: var(--font-serif);
-    font-size: var(--text-lg);
+    /* Times New Roman: Fraunces renders its small-optical-size J design (stub
+       hook) at this size in Safari, and the vendored font's STAT table blocks
+       any CSS correction there. */
+    font-family: "Times New Roman", Times, serif;
+    font-size: var(--text-xl);
     font-weight: 500;
     letter-spacing: var(--tracking-tight);
   }

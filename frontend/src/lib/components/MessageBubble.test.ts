@@ -67,6 +67,71 @@ describe("MessageBubble", () => {
     expect(getByRole("alert")).toHaveTextContent("The provider ended the stream");
   });
 
+  it("hides the copy action on error bubbles", () => {
+    const { container } = render(MessageBubble, {
+      props: {
+        message: {
+          messageId: "msg-test-error-no-copy",
+          role: "assistant",
+          messageText: "Response preparation timed out",
+          timestamp: 1,
+          isError: true,
+        },
+        index: 0,
+      },
+    });
+
+    expect(container.querySelector(".bubble-actions")).toBeNull();
+  });
+
+  it("renders error details and a retry action for retryable failures", async () => {
+    const retriedMessages: string[] = [];
+    const { getByRole, getByText } = render(MessageBubble, {
+      props: {
+        message: {
+          messageId: "msg-test-retryable-error",
+          role: "assistant",
+          messageText: "Response preparation timed out",
+          timestamp: 1,
+          isError: true,
+          errorDetails: "Java documentation retrieval did not complete in time. Please retry.",
+          errorRetryable: true,
+        },
+        index: 0,
+        onRetry: (retriedMessage: { messageId: string }) => {
+          retriedMessages.push(retriedMessage.messageId);
+        },
+      },
+    });
+
+    expect(
+      getByText("Java documentation retrieval did not complete in time. Please retry."),
+    ).toBeInTheDocument();
+
+    const retryButton = getByRole("button", { name: /^retry$/i });
+    retryButton.click();
+    expect(retriedMessages).toEqual(["msg-test-retryable-error"]);
+  });
+
+  it("hides the retry action for non-retryable failures", () => {
+    const { queryByRole } = render(MessageBubble, {
+      props: {
+        message: {
+          messageId: "msg-test-fatal-error",
+          role: "assistant",
+          messageText: "Something went wrong",
+          timestamp: 1,
+          isError: true,
+          errorRetryable: false,
+        },
+        index: 0,
+        onRetry: () => {},
+      },
+    });
+
+    expect(queryByRole("button", { name: /^retry$/i })).toBeNull();
+  });
+
   it("does not expose a Unicode-blank enrichment marker as fallback text", () => {
     const { container } = render(MessageBubble, {
       props: {

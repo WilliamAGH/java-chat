@@ -1,15 +1,19 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_RETRIEVAL_TIMEOUT;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
+
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
-import com.williamcallahan.javachat.config.ModelConfiguration;
+import com.williamcallahan.javachat.config.RetrievalAugmentationConfig;
 import com.williamcallahan.javachat.model.ChatTurn;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
+import com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException;
 import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RerankingFailureException;
@@ -39,6 +43,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
 /**
@@ -120,6 +125,8 @@ public class ChatController extends BaseController {
             @Valid @RequestBody ChatStreamRequest request, HttpServletResponse response) {
         sseSupport.configureStreamingHeaders(response);
         long requestToken = REQUEST_SEQUENCE.incrementAndGet();
+        long responsePreparationDeadlineNanos =
+                System.nanoTime() + RetrievalAugmentationConfig.RESPONSE_PREPARATION_TIMEOUT.toNanos();
 
         String sessionId = request.resolvedSessionId();
         String latest = request.latest();
@@ -128,96 +135,96 @@ public class ChatController extends BaseController {
         PIPELINE_LOG.info("[{}] NEW CHAT REQUEST", requestToken);
         PIPELINE_LOG.info("[{}] {}", requestToken, PIPELINE_LOG_SEPARATOR);
 
+        // Retrieval progress events stream live from the blocking retrieval work so the client can
+        // show which step (library search, rerank) is running during response preparation.
+        Sinks.Many<ServerSentEvent<String>> retrievalProgressEvents =
+                Sinks.many().multicast().onBackpressureBuffer();
+
+        Flux<ServerSentEvent<String>> operationEvents = Flux.defer(() -> {
+                    // Avoid reading session state or performing retrieval when the configured provider
+                    // cannot stream.
+                    if (!openAIStreamingService.isAvailable()) {
+                        PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestToken);
+                        return sseSupport.configuredProviderConfigurationError();
+                    }
+                    if (!openAIStreamingService.canAttemptRequest()) {
+                        PIPELINE_LOG.warn("[{}] Configured provider temporarily unavailable", requestToken);
+                        return sseSupport.configuredProviderUnavailableError();
+                    }
+                    List<Message> history = chatMemory.getHistory(sessionId);
+                    PIPELINE_LOG.info("[{}] Chat history loaded", requestToken);
+
+                    // Build structured prompt for intelligent truncation.
+                    ChatService.StructuredPromptOutcome promptOutcome =
+                            chatService.buildStructuredPromptWithContextOutcome(
+                                    history,
+                                    latest,
+                                    retrievalNotice -> {
+                                        // A failed emission only means the client went away; progress
+                                        // notices are diagnostics and must not fail retrieval.
+                                        retrievalProgressEvents.tryEmitNext(sseSupport.statusEvent(
+                                                retrievalNotice.summary(), retrievalNotice.details()));
+                                    },
+                                    responsePreparationDeadlineNanos);
+
+                    // Use OpenAI streaming only (legacy fallback removed)
+                    StringBuilder fullResponse = new StringBuilder();
+                    AtomicInteger chunkCount = new AtomicInteger(0);
+                    PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming (structured prompt)", requestToken);
+
+                    // Stream with provider transparency - surfaces which LLM is responding
+                    return openAIStreamingService
+                            .streamResponse(
+                                    promptOutcome.structuredPrompt(),
+                                    appProperties.getLlm().getTemperature())
+                            .flatMapMany(streamingResult -> {
+                                RetrievalService.CitationOutcome citationOutcome =
+                                        chatService.citationOutcomeForRetainedContext(
+                                                latest, promptOutcome, streamingResult.contextDocumentIds());
+                                List<Citation> finalCitations = citationOutcome.citations();
+
+                                // Provider event first - surfaces which LLM is handling this request
+                                ServerSentEvent<String> providerEvent =
+                                        sseSupport.providerEvent(streamingResult.providerDisplayName());
+
+                                // Stream with structure-aware truncation - preserves semantic
+                                // boundaries
+                                Flux<String> dataStream =
+                                        sseSupport.prepareDataStream(streamingResult.textChunks(), chunk -> {
+                                            fullResponse.append(chunk);
+                                            chunkCount.incrementAndGet();
+                                        });
+
+                                // Surface retrieval and citation-conversion notices before response
+                                // content.
+                                Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
+                                        .map(notice -> sseSupport.statusEvent(notice.summary(), notice.details()));
+                                statusEvents = statusEvents.concatWith(sseSupport.citationPartialFailureStatusFlux(
+                                        citationOutcome.failedConversionCount()));
+
+                                // Wrap chunks in JSON to preserve whitespace
+                                Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
+
+                                Flux<ServerSentEvent<String>> citationEvent =
+                                        Flux.just(sseSupport.citationEvent(finalCitations));
+
+                                // Start selected-provider and status events before the ref-counted data
+                                // stream.
+                                return Flux.concat(Flux.just(providerEvent), statusEvents, dataEvents, citationEvent);
+                            })
+                            .doOnComplete(() -> {
+                                chatMemory.addExchange(sessionId, latest, fullResponse.toString());
+                                PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
+                            });
+                })
+                .subscribeOn(Schedulers.boundedElastic());
+        Flux<ServerSentEvent<String>> deadlineBoundOperationEvents =
+                sseSupport.enforceResponsePreparationDeadline(operationEvents, responsePreparationDeadlineNanos);
+        Flux<ServerSentEvent<String>> operationEventsWithProgress = Flux.merge(
+                retrievalProgressEvents.asFlux(),
+                deadlineBoundOperationEvents.doFinally(terminationSignal -> retrievalProgressEvents.tryEmitComplete()));
         return Flux.concat(
-                        sseSupport.responsePreparationStatus(),
-                        Flux.defer(() -> {
-                                    // Avoid reading session state or performing retrieval when the configured provider
-                                    // cannot stream.
-                                    if (!openAIStreamingService.isAvailable()) {
-                                        PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestToken);
-                                        return sseSupport.configuredProviderConfigurationError();
-                                    }
-
-                                    List<Message> history = chatMemory.getHistory(sessionId);
-                                    PIPELINE_LOG.info("[{}] Chat history loaded", requestToken);
-
-                                    // Build structured prompt for intelligent truncation
-                                    // Pass model hint to optimize RAG for token-constrained models
-                                    ChatService.StructuredPromptOutcome promptOutcome =
-                                            chatService.buildStructuredPromptWithContextOutcome(
-                                                    history, latest, ModelConfiguration.DEFAULT_MODEL);
-
-                                    // Use OpenAI streaming only (legacy fallback removed)
-                                    StringBuilder fullResponse = new StringBuilder();
-                                    AtomicInteger chunkCount = new AtomicInteger(0);
-                                    PIPELINE_LOG.info(
-                                            "[{}] Using OpenAI Java SDK for streaming (structured prompt)",
-                                            requestToken);
-
-                                    // Stream with provider transparency - surfaces which LLM is responding
-                                    return openAIStreamingService
-                                            .streamResponse(
-                                                    promptOutcome.structuredPrompt(),
-                                                    appProperties.getLlm().getTemperature())
-                                            .flatMapMany(streamingResult -> {
-                                                List<org.springframework.ai.document.Document>
-                                                        retainedContextDocuments = promptOutcome.documents().stream()
-                                                                .filter(document -> streamingResult
-                                                                        .contextDocumentIds()
-                                                                        .contains(document.getId()))
-                                                                .toList();
-                                                RetrievalService.CitationOutcome citationOutcome =
-                                                        retrievalService.toCitationsForQuery(
-                                                                latest, retainedContextDocuments);
-                                                List<Citation> finalCitations = citationOutcome.citations();
-
-                                                // Provider event first - surfaces which LLM is handling this request
-                                                ServerSentEvent<String> providerEvent =
-                                                        sseSupport.providerEvent(streamingResult.providerDisplayName());
-
-                                                // Stream with structure-aware truncation - preserves semantic
-                                                // boundaries
-                                                Flux<String> dataStream = sseSupport.prepareDataStream(
-                                                        streamingResult.textChunks(), chunk -> {
-                                                            fullResponse.append(chunk);
-                                                            chunkCount.incrementAndGet();
-                                                        });
-
-                                                // Heartbeats terminate when data stream completes (success or error)
-                                                Flux<ServerSentEvent<String>> heartbeats =
-                                                        sseSupport.heartbeats(dataStream);
-
-                                                // Surface retrieval and citation-conversion notices before response
-                                                // content.
-                                                Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(
-                                                                promptOutcome.notices())
-                                                        .map(notice -> sseSupport.statusEvent(
-                                                                notice.summary(), notice.details()));
-                                                statusEvents = statusEvents.concatWith(
-                                                        sseSupport.citationPartialFailureStatusFlux(
-                                                                citationOutcome.failedConversionCount()));
-
-                                                // Wrap chunks in JSON to preserve whitespace
-                                                Flux<ServerSentEvent<String>> dataEvents =
-                                                        dataStream.map(sseSupport::textEvent);
-
-                                                Flux<ServerSentEvent<String>> citationEvent =
-                                                        Flux.just(sseSupport.citationEvent(finalCitations));
-
-                                                // Start selected-provider and status events before the ref-counted data
-                                                // stream.
-                                                return Flux.concat(
-                                                        Flux.just(providerEvent),
-                                                        statusEvents,
-                                                        Flux.merge(dataEvents, heartbeats),
-                                                        citationEvent);
-                                            })
-                                            .doOnComplete(() -> {
-                                                chatMemory.addExchange(sessionId, latest, fullResponse.toString());
-                                                PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
-                                            });
-                                })
-                                .subscribeOn(Schedulers.boundedElastic()))
+                        sseSupport.responsePreparationStatus(), sseSupport.withHeartbeats(operationEventsWithProgress))
                 .onErrorResume(error -> {
                     Optional<ReportedStreamingFailure> terminalFailureContext =
                             ReportedStreamingFailure.findInCauseChain(error);
@@ -226,6 +233,23 @@ public class ChatController extends BaseController {
                             .orElse(error);
                     if (upstreamError instanceof ConfiguredProviderTemporarilyUnavailableException) {
                         return sseSupport.configuredProviderUnavailableError();
+                    }
+                    if (terminalFailureContext.isEmpty() && sseSupport.isResponsePreparationTimeout(upstreamError)) {
+                        PIPELINE_LOG
+                                .atWarn()
+                                .setMessage("Response preparation timeout")
+                                .addKeyValue("requestToken", requestToken)
+                                .addKeyValue(
+                                        "sessionId",
+                                        StructuredLogValue.bounded(sessionId, MAX_STREAM_LOG_SESSION_ID_LENGTH)
+                                                .text())
+                                .addKeyValue("code", STATUS_CODE_RETRIEVAL_TIMEOUT)
+                                .addKeyValue("stage", STATUS_STAGE_RETRIEVAL)
+                                .addKeyValue(
+                                        "exceptionType",
+                                        upstreamError.getClass().getSimpleName())
+                                .log();
+                        return sseSupport.responsePreparationTimeoutError();
                     }
                     String errorDetail = buildUserFacingErrorMessage(upstreamError);
                     String diagnostics = isRetrievalFailure(upstreamError)
@@ -410,6 +434,8 @@ public class ChatController extends BaseController {
     }
 
     private static boolean isRetrievalFailure(Throwable error) {
-        return error instanceof HybridSearchPartialFailureException || error instanceof RerankingFailureException;
+        return error instanceof EmbeddingServiceUnavailableException
+                || error instanceof HybridSearchPartialFailureException
+                || error instanceof RerankingFailureException;
     }
 }

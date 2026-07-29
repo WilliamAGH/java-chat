@@ -13,14 +13,18 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import com.williamcallahan.javachat.application.ingestion.DocumentationIngestionUseCase;
 import com.williamcallahan.javachat.application.ingestion.FileLimit;
+import com.williamcallahan.javachat.application.ingestion.IngestionAlreadyRunningException;
+import com.williamcallahan.javachat.application.ingestion.LocalDocumentationIngestionUseCase;
 import com.williamcallahan.javachat.application.ingestion.PageLimit;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.domain.ingestion.IngestionBacklogStatus;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.List;
@@ -50,12 +54,15 @@ class IngestionControllerTest {
     @MockitoBean
     DocumentationIngestionUseCase documentationIngestionUseCase;
 
+    @MockitoBean
+    LocalDocumentationIngestionUseCase localDocumentationIngestionUseCase;
+
     @Test
     void rejectsRemoteIngestionAboveConfiguredPageLimit() throws Exception {
         mockMvc.perform(post("/api/ingest").with(csrf()).param("maxPages", Integer.toString(Integer.MAX_VALUE)))
                 .andExpect(status().isBadRequest());
 
-        verifyNoInteractions(documentationIngestionUseCase);
+        verifyNoInteractions(documentationIngestionUseCase, localDocumentationIngestionUseCase);
     }
 
     @Test
@@ -63,7 +70,7 @@ class IngestionControllerTest {
         mockMvc.perform(post("/api/ingest/local").with(csrf()).param("maxFiles", Integer.toString(Integer.MAX_VALUE)))
                 .andExpect(status().isBadRequest());
 
-        verifyNoInteractions(documentationIngestionUseCase);
+        verifyNoInteractions(documentationIngestionUseCase, localDocumentationIngestionUseCase);
     }
 
     @Test
@@ -75,13 +82,30 @@ class IngestionControllerTest {
 
     @Test
     void passesValidatedFileLimitToApplicationBoundary() throws Exception {
-        when(documentationIngestionUseCase.ingestLocalDirectory("data/docs", new FileLimit(23)))
-                .thenReturn(IngestionLocalOutcome.success(0, "data/docs", List.of()));
+        when(localDocumentationIngestionUseCase.ingestLocalDirectory("data/docs", new FileLimit(23)))
+                .thenReturn(IngestionLocalOutcome.fromBacklog(
+                        IngestionBacklogStatus.running("data/docs", 0).finish(), "data/docs", List.of()));
 
         mockMvc.perform(post("/api/ingest/local").with(csrf()).param("maxFiles", "23"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("success"))
+                .andExpect(jsonPath("$.processed").value(0))
+                .andExpect(jsonPath("$.dir").value("data/docs"))
+                .andExpect(jsonPath("$.failures").isArray())
+                .andExpect(jsonPath("$.backlog").doesNotExist());
 
-        verify(documentationIngestionUseCase).ingestLocalDirectory("data/docs", new FileLimit(23));
+        verify(localDocumentationIngestionUseCase).ingestLocalDirectory("data/docs", new FileLimit(23));
+    }
+
+    @Test
+    void preservesExistingFailureContractWhenLocalIngestionIsAlreadyRunning() throws Exception {
+        when(localDocumentationIngestionUseCase.ingestLocalDirectory("data/docs", new FileLimit(50000)))
+                .thenThrow(new IngestionAlreadyRunningException());
+
+        mockMvc.perform(post("/api/ingest/local").with(csrf()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.status").value("error"))
+                .andExpect(content().string(not(containsString("lock"))));
     }
 
     @Test
@@ -109,7 +133,7 @@ class IngestionControllerTest {
 
     @Test
     void omitsFilesystemDetailsFromLocalIngestionFailures() throws Exception {
-        when(documentationIngestionUseCase.ingestLocalDirectory(anyString(), any(FileLimit.class)))
+        when(localDocumentationIngestionUseCase.ingestLocalDirectory(anyString(), any(FileLimit.class)))
                 .thenThrow(new IllegalArgumentException(DOWNSTREAM_SECRET));
 
         mockMvc.perform(post("/api/ingest/local").with(csrf()))

@@ -41,7 +41,7 @@ fi
 
 collection_schema_request='{
   "vectors": {"dense": {"size": 2560, "distance": "Cosine", "on_disk": true}},
-  "sparse_vectors": {"bm25": {"modifier": "idf", "on_disk": true}},
+  "sparse_vectors": {"bm25": {"modifier": "idf"}},
   "on_disk_payload": true
 }'
 qdrant_integration_request PUT "/collections/$QDRANT_INTEGRATION_COLLECTION" "$collection_schema_request" >/dev/null
@@ -58,7 +58,7 @@ collection_state="$(qdrant_integration_request GET "/collections/$QDRANT_INTEGRA
 if ! jq -e '
     .result.config.params.vectors.dense.size == 2560
     and .result.config.params.vectors.dense.distance == "Cosine"
-    and (.result.config.params.sparse_vectors.bm25.modifier | ascii_downcase) == "idf"
+    and .result.config.params.sparse_vectors.bm25.modifier == "idf"
     and .result.config.params.on_disk_payload == true
     and .result.payload_schema.url.data_type == "keyword"
     and .result.payload_schema.anchor.data_type == "keyword"

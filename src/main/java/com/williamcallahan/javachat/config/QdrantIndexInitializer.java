@@ -361,7 +361,7 @@ public final class QdrantIndexInitializer {
                 .path(sparseVectorName)
                 .path("modifier")
                 .asText(EMPTY_TEXT);
-        if (!SPARSE_MODIFIER_IDF.equalsIgnoreCase(sparseModifier)) {
+        if (!SPARSE_MODIFIER_IDF.equals(sparseModifier)) {
             throw new IllegalStateException("Qdrant collection '" + collection + "' sparse vector modifier must be "
                     + SPARSE_MODIFIER_IDF + " but found '" + sparseModifier + "'.");
         }

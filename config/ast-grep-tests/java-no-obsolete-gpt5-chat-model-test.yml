@@ -1,0 +1,39 @@
+id: java-no-obsolete-gpt5-chat-model
+valid:
+  - |
+      class ChatModelConfig {
+          private static final String MODEL = "gpt-5.4";
+      }
+  - |
+      class OtherModelConfig {
+          private static final String MODEL = "o3-mini";
+      }
+invalid:
+  - |
+      class ProviderQualifiedChatModelConfig {
+          private static final String MODEL = "provider/gpt-5.4";
+      }
+  - |
+      class StaleChatModelConfig {
+          private static final String MODEL = "gpt-5";
+      }
+  - |
+      class StaleVersionedChatModelConfig {
+          private static final String MODEL = "gpt-5.2";
+      }
+  - |
+      class StaleVendorQualifiedChatModelConfig {
+          private static final String MODEL = "vendor/gpt-5";
+      }
+  - |
+      class StaleColonQualifiedChatModelConfig {
+          private static final String MODEL = "vendor:gpt-5.4";
+      }
+  - |
+      class StaleUppercaseChatModelConfig {
+          private static final String MODEL = "GPT-5";
+      }
+  - |
+      class StaleUppercaseVersionedChatModelConfig {
+          private static final String MODEL = "GPT-5.4";
+      }

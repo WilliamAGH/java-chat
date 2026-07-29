@@ -36,6 +36,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Verify Java model regression guards
+        run: |
+          cd ..
+          frontend/node_modules/.bin/ast-grep test -c config/sgconfig.yml --skip-snapshot-tests
+          frontend/node_modules/.bin/ast-grep scan -c config/sgconfig.yml src/main/java/
+          ruby scripts/lint/check-chat-model-ssot.rb --self-test
+          ruby scripts/lint/check-chat-model-ssot.rb
+
       - name: Validate frontend
         run: npm run validate
 
@@ -158,7 +166,9 @@ jobs:
             --name java-chat-ci-smoke \
             --network java-chat-ci_default \
             --publish 8085:8085 \
-            --env GITHUB_TOKEN=ci-smoke-token \
+            --env OPENAI_API_KEY=ci-smoke-token \
+            --env OPENAI_BASE_URL=https://api.llm-gateway.iocloudhost.net/v1 \
+            --env OPENAI_MODEL=gpt-5.4 \
             --env APP_LOCAL_EMBEDDING_ENABLED=true \
             --env SPRING_PROFILES_ACTIVE=ci \
             --env QDRANT_HOST=qdrant \
@@ -205,15 +215,55 @@ jobs:
             exit 1
           fi
 
-          if [[ "$deployment_commit" != "$EXPECTED_COMMIT" || "$build_commit" != "$EXPECTED_COMMIT" ]]; then
-            printf 'Deployment identity mismatch: expected=%s deployment.commit=%s build.commit=%s\n' \
-              "$EXPECTED_COMMIT" "$deployment_commit" "$build_commit" >&2
+          if ! runtime_name="$(jq --exit-status --raw-output '.application.name | strings | select(length > 0)' <<<"$info_payload")"; then
+            printf 'Missing application.name in /actuator/info\n' >&2
+            exit 1
+          fi
+
+          expected_runtime_name="$(sed -n 's/^spring\.application\.name=//p' src/main/resources/application.properties)"
+          if [[ -z "$expected_runtime_name" ]]; then
+            printf 'Missing canonical spring.application.name\n' >&2
+            exit 1
+          fi
+          if [[ "$deployment_commit" != "$EXPECTED_COMMIT" || "$build_commit" != "$EXPECTED_COMMIT" || "$runtime_name" != "$expected_runtime_name" ]]; then
+            printf 'Runtime identity mismatch: expected_commit=%s deployment.commit=%s build.commit=%s expected_name=%s actual_name=%s\n' \
+              "$EXPECTED_COMMIT" "$deployment_commit" "$build_commit" "$expected_runtime_name" "$runtime_name" >&2
+            exit 1
+          fi
+          printf 'Runtime identity verified: expected=%s actual=%s deployment.commit=%s build.commit=%s\n' \
+            "$expected_runtime_name" "$runtime_name" "$deployment_commit" "$build_commit"
+
+      - name: Reject conflicting runtime name before readiness
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          expected_runtime_name="$(sed -n 's/^spring\.application\.name=//p' src/main/resources/application.properties)"
+          conflicting_runtime_name="${expected_runtime_name}-conflict"
+          runtime_name_log="$(mktemp)"
+          if docker run --name java-chat-ci-runtime-name-conflict \
+            --network java-chat-ci_default \
+            --env OPENAI_API_KEY=ci-smoke-token \
+            --env OPENAI_BASE_URL=https://api.llm-gateway.iocloudhost.net/v1 \
+            --env OPENAI_MODEL=gpt-5.4 \
+            --env APP_LOCAL_EMBEDDING_ENABLED=true \
+            --env SPRING_PROFILES_ACTIVE=ci \
+            --env SPRING_APPLICATION_NAME="$conflicting_runtime_name" \
+            --env QDRANT_HOST=qdrant \
+            --env QDRANT_PORT=6334 \
+            java-chat:ci >"$runtime_name_log" 2>&1; then
+            printf 'Conflicting runtime name unexpectedly reached a successful exit\n' >&2
+            exit 1
+          fi
+          expected_diagnostic="Runtime name mismatch: expected=${expected_runtime_name} resolved=${conflicting_runtime_name}"
+          if ! grep --fixed-strings "$expected_diagnostic" "$runtime_name_log" >/dev/null; then
+            cat "$runtime_name_log"
             exit 1
           fi
 
       - name: Stop runtime smoke container
         if: always()
         run: |
+          docker rm --force java-chat-ci-runtime-name-conflict >/dev/null 2>&1 || true
           if docker container inspect java-chat-ci-smoke >/dev/null 2>&1; then
             docker stop java-chat-ci-smoke
           fi

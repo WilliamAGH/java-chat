@@ -141,10 +141,11 @@ class LocalDocsFileIngestionProcessorTest {
                 .ingestionProcessor()
                 .processBatch(selectedDocumentationRoot, List.of(firstDocumentationFile, secondDocumentationFile));
 
-        assertEquals(1, outcomes.size());
-        assertEquals(
-                "embedding-unavailable",
-                outcomes.getFirst().failure().orElseThrow().phase());
+        assertEquals(2, outcomes.size());
+        assertTrue(outcomes.stream()
+                .map(LocalDocsFileOutcome::failure)
+                .map(Optional::orElseThrow)
+                .allMatch(failure -> failure.phase().equals("embedding-unavailable")));
         verify(ingestionFixture.fileIngestionMarkerStore, never())
                 .markFileIngested(anyString(), any(FileIngestionRecord.class));
         verify(ingestionFixture.localStoreService, never()).markHashIngested(anyString(), anyString(), anyString());
@@ -189,10 +190,11 @@ class LocalDocsFileIngestionProcessorTest {
                 .ingestionProcessor()
                 .processBatch(localDocsRoot, List.of(documentationFile, classUseFile));
 
-        assertEquals(1, outcomes.size());
-        assertEquals(
-                "embedding-unavailable",
-                outcomes.getFirst().failure().orElseThrow().phase());
+        assertEquals(2, outcomes.size());
+        assertTrue(outcomes.stream()
+                .map(LocalDocsFileOutcome::failure)
+                .map(Optional::orElseThrow)
+                .allMatch(failure -> failure.phase().equals("embedding-unavailable")));
         verify(ingestionFixture.hybridVectorService, never()).deleteByUrl(any(QdrantCollectionKind.class), anyString());
         verify(ingestionFixture.ingestedFilePruneService, never())
                 .pruneObsoleteLocalStateAfterReplacement(anyString(), any(), any());
@@ -241,6 +243,104 @@ class LocalDocsFileIngestionProcessorTest {
                 "embedding-unavailable",
                 outcomes.getFirst().failure().orElseThrow().phase());
         verify(ingestionFixture.quarantineService, never()).quarantine(any(Path.class));
+    }
+
+    @Test
+    void shouldStopBeforeLaterFileWhenQuarantineWriteFails(@TempDir Path temporaryDirectory) throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        Path selectedDocumentationRoot =
+                temporaryDirectory.resolve("corpus").resolve(documentationSource.relativeMirrorPath());
+        Files.createDirectories(selectedDocumentationRoot);
+        Path rejectedFile = selectedDocumentationRoot.resolve("rejected.html");
+        Path laterFile = selectedDocumentationRoot.resolve("later.html");
+        Files.writeString(
+                rejectedFile,
+                "<html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1></body></html>",
+                StandardCharsets.UTF_8);
+        Files.writeString(laterFile, javaApiHtml(), StandardCharsets.UTF_8);
+
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        doThrow(new IOException("quarantine storage unavailable"))
+                .when(ingestionFixture.quarantineService)
+                .quarantine(rejectedFile);
+
+        List<LocalDocsFileOutcome> outcomes = ingestionFixture
+                .ingestionProcessor()
+                .processBatch(selectedDocumentationRoot, List.of(rejectedFile, laterFile));
+
+        assertEquals(1, outcomes.size());
+        assertEquals(
+                "quarantine-write", outcomes.getFirst().failure().orElseThrow().phase());
+        verify(ingestionFixture.chunkProcessingService, never())
+                .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
+        verify(ingestionFixture.fileIngestionMarkerStore, never())
+                .markFileIngested(anyString(), any(FileIngestionRecord.class));
+    }
+
+    @Test
+    void shouldStopBeforeLaterFileWhenContentIsRejected(@TempDir Path temporaryDirectory) throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        Path selectedDocumentationRoot =
+                temporaryDirectory.resolve("corpus").resolve(documentationSource.relativeMirrorPath());
+        Files.createDirectories(selectedDocumentationRoot);
+        Path rejectedFile = selectedDocumentationRoot.resolve("rejected.html");
+        Path laterFile = selectedDocumentationRoot.resolve("later.html");
+        Files.writeString(
+                rejectedFile,
+                "<html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1></body></html>",
+                StandardCharsets.UTF_8);
+        Files.writeString(laterFile, javaApiHtml(), StandardCharsets.UTF_8);
+
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        when(ingestionFixture.quarantineService.quarantine(rejectedFile))
+                .thenReturn(new IngestionQuarantineService.QuarantineResult(
+                        rejectedFile, temporaryDirectory.resolve("quarantine/rejected.html")));
+
+        List<LocalDocsFileOutcome> outcomes = ingestionFixture
+                .ingestionProcessor()
+                .processBatch(selectedDocumentationRoot, List.of(rejectedFile, laterFile));
+
+        assertEquals(1, outcomes.size());
+        assertEquals(
+                "content-guard", outcomes.getFirst().failure().orElseThrow().phase());
+        verify(ingestionFixture.quarantineService).quarantine(rejectedFile);
+        verify(ingestionFixture.chunkProcessingService, never())
+                .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void shouldStopBeforeLaterFileWhenChunkStorageFails(@TempDir Path temporaryDirectory) throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        Path selectedDocumentationRoot =
+                temporaryDirectory.resolve("corpus").resolve(documentationSource.relativeMirrorPath());
+        Files.createDirectories(selectedDocumentationRoot);
+        Path failedFile = selectedDocumentationRoot.resolve("failed.html");
+        Path laterFile = selectedDocumentationRoot.resolve("later.html");
+        Files.writeString(failedFile, javaApiHtml(), StandardCharsets.UTF_8);
+        Files.writeString(laterFile, javaApiHtml(), StandardCharsets.UTF_8);
+
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        doThrow(new IOException("chunk text storage unavailable"))
+                .when(ingestionFixture.chunkProcessingService)
+                .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
+
+        List<LocalDocsFileOutcome> outcomes = ingestionFixture
+                .ingestionProcessor()
+                .processBatch(selectedDocumentationRoot, List.of(failedFile, laterFile));
+
+        assertEquals(1, outcomes.size());
+        assertEquals("chunking", outcomes.getFirst().failure().orElseThrow().phase());
+        verify(ingestionFixture.chunkProcessingService)
+                .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
+        verify(ingestionFixture.hybridVectorService, never()).upsert(any(QdrantCollectionKind.class), any());
+        verify(ingestionFixture.fileIngestionMarkerStore, never())
+                .markFileIngested(anyString(), any(FileIngestionRecord.class));
     }
 
     @Test

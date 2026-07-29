@@ -2,9 +2,12 @@ package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -14,14 +17,13 @@ import static org.mockito.Mockito.when;
 import com.openai.client.OpenAIClient;
 import com.openai.client.OpenAIClientAsync;
 import com.openai.core.RequestOptions;
+import com.openai.core.http.Headers;
+import com.openai.errors.OpenAIIoException;
+import com.openai.errors.RateLimitException;
 import com.openai.models.embeddings.CreateEmbeddingResponse;
 import com.openai.models.embeddings.EmbeddingCreateParams;
 import com.openai.services.async.EmbeddingServiceAsync;
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
-import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
+import java.io.InterruptedIOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -44,18 +46,65 @@ import org.mockito.ArgumentCaptor;
 class OpenAiCompatibleEmbeddingClientTest {
 
     private static final int EXPECTED_EMBEDDING_DIMENSION = 2;
-    private static final Duration EXPECTED_EMBEDDING_CONNECT_TIMEOUT = Duration.ofSeconds(10);
-    private static final Duration EXPECTED_LIVE_EMBEDDING_TIMEOUT = Duration.ofSeconds(60);
+    private static final Duration EXPECTED_LIVE_EMBEDDING_CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration EXPECTED_BATCH_EMBEDDING_CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration EXPECTED_LIVE_EMBEDDING_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration EXPECTED_BATCH_EMBEDDING_TIMEOUT = Duration.ofMinutes(10);
     private static final int TEST_LIVE_MAX_CONCURRENT_REQUESTS = 4;
     private static final int TEST_BATCH_MAX_CONCURRENT_REQUESTS = 1;
     private static final double TEST_UNTHROTTLED_REQUESTS_PER_SECOND = 1_000.0;
     private static final double TEST_PACED_BATCH_REQUESTS_PER_SECOND = 4.0;
-    private static final Duration MINIMUM_EXPECTED_PACING_DELAY = Duration.ofMillis(150);
     private static final Duration TEST_SLOW_SDK_DISPATCH_DURATION = Duration.ofMillis(1_200);
     private static final Duration MINIMUM_EXPECTED_STRICT_LAUNCH_INTERVAL = Duration.ofSeconds(1);
     private static final Duration TEST_SATURATED_LIVE_REQUEST_BUDGET = Duration.ofMillis(250);
+    private static final Duration CALLER_OWNED_LIVE_REQUEST_BUDGET = Duration.ofSeconds(5);
     private static final Duration MAXIMUM_EXPECTED_SATURATION_DELAY = Duration.ofSeconds(1);
+
+    @Test
+    void closesBatchClientWhenLiveClientCloseFails() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        IllegalStateException liveCloseFailure = new IllegalStateException("live close failed");
+        doThrow(liveCloseFailure).when(liveClient).close();
+        OpenAiCompatibleEmbeddingClient embeddingClient =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings());
+
+        OpenAiCompatibleEmbeddingClient.EmbeddingClientCloseException thrownFailure = assertThrows(
+                OpenAiCompatibleEmbeddingClient.EmbeddingClientCloseException.class, embeddingClient::close);
+
+        assertSame(liveCloseFailure, thrownFailure.getCause());
+        verify(batchClient).close();
+    }
+
+    @Test
+    void suppressesBatchCloseFailureBehindLiveCloseFailure() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        IllegalStateException liveCloseFailure = new IllegalStateException("live close failed");
+        IllegalStateException batchCloseFailure = new IllegalStateException("batch close failed");
+        doThrow(liveCloseFailure).when(liveClient).close();
+        doThrow(batchCloseFailure).when(batchClient).close();
+        OpenAiCompatibleEmbeddingClient embeddingClient =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings());
+
+        OpenAiCompatibleEmbeddingClient.EmbeddingClientCloseException thrownFailure = assertThrows(
+                OpenAiCompatibleEmbeddingClient.EmbeddingClientCloseException.class, embeddingClient::close);
+
+        assertSame(liveCloseFailure, thrownFailure.getCause());
+        assertEquals(1, liveCloseFailure.getSuppressed().length);
+        assertSame(batchCloseFailure, liveCloseFailure.getSuppressed()[0]);
+    }
+
+    @Test
+    void closesSharedClientOnlyOnce() {
+        OpenAIClient sharedClient = mock(OpenAIClient.class);
+        OpenAiCompatibleEmbeddingClient embeddingClient =
+                OpenAiCompatibleEmbeddingClient.create(sharedClient, gatewaySettings());
+
+        embeddingClient.close();
+
+        verify(sharedClient).close();
+    }
 
     @Test
     void callUsesSdkAndPreservesIndexOrdering() {
@@ -156,6 +205,26 @@ class OpenAiCompatibleEmbeddingClientTest {
     }
 
     @Test
+    void sdkTransportTimeoutPreservesRetrievalTimeoutCause() {
+        OpenAIClient client = mock(OpenAIClient.class);
+        EmbeddingServiceAsync embeddingService = mockAsyncEmbeddingService(client);
+        OpenAIIoException sdkTimeout = new OpenAIIoException("Request failed", new InterruptedIOException("timeout"));
+        when(embeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.failedFuture(sdkTimeout));
+
+        try (OpenAiCompatibleEmbeddingClient clientAdapter =
+                OpenAiCompatibleEmbeddingClient.create(client, gatewaySettings())) {
+            EmbeddingServiceTemporarilyUnavailableException embeddingTimeout = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
+                    () -> clientAdapter.embed(List.of("single"), LlmGatewayTier.LIVE));
+
+            TimeoutException timeoutFailure = assertInstanceOf(TimeoutException.class, embeddingTimeout.getCause());
+            assertSame(sdkTimeout, timeoutFailure.getCause());
+            verify(embeddingService).create(any(), any(RequestOptions.class));
+        }
+    }
+
+    @Test
     void throwsWhenEmbeddingResponseOmitsIndex() {
         OpenAIClient client = mock(OpenAIClient.class);
         EmbeddingServiceAsync embeddingService = mockAsyncEmbeddingService(client);
@@ -241,8 +310,8 @@ class OpenAiCompatibleEmbeddingClientTest {
             clientAdapter.embed(List.of("live query"), LlmGatewayTier.LIVE);
             verify(liveEmbeddingService).create(any(), liveRequestOptionsCaptor.capture());
             verifyNoInteractions(batchEmbeddingService);
-            assertEquals(
-                    EXPECTED_EMBEDDING_CONNECT_TIMEOUT,
+            assertRemainingTransportBudget(
+                    EXPECTED_LIVE_EMBEDDING_CONNECT_TIMEOUT,
                     liveRequestOptionsCaptor.getValue().getTimeout().connect());
             assertRemainingTransportBudget(
                     EXPECTED_LIVE_EMBEDDING_TIMEOUT,
@@ -255,7 +324,7 @@ class OpenAiCompatibleEmbeddingClientTest {
             clientAdapter.embed(List.of("batch document"), LlmGatewayTier.BATCH);
             verify(batchEmbeddingService).create(any(), batchRequestOptionsCaptor.capture());
             assertEquals(
-                    EXPECTED_EMBEDDING_CONNECT_TIMEOUT,
+                    EXPECTED_BATCH_EMBEDDING_CONNECT_TIMEOUT,
                     batchRequestOptionsCaptor.getValue().getTimeout().connect());
             assertRemainingTransportBudget(
                     EXPECTED_BATCH_EMBEDDING_TIMEOUT,
@@ -267,6 +336,59 @@ class OpenAiCompatibleEmbeddingClientTest {
     }
 
     @Test
+    void callerOwnedBudgetTightensTheLiveRequestTimeoutBelowTheConfiguredCap() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        EmbeddingServiceAsync liveEmbeddingService = mockAsyncEmbeddingService(liveClient);
+
+        CreateEmbeddingResponse response = CreateEmbeddingResponse.builder()
+                .model("qwen/qwen3-embedding-4b")
+                .usage(CreateEmbeddingResponse.Usage.builder()
+                        .promptTokens(1L)
+                        .totalTokens(1L)
+                        .build())
+                .data(List.of(com.openai.models.embeddings.Embedding.builder()
+                        .index(0L)
+                        .embedding(List.of(0.4f, 0.6f))
+                        .build()))
+                .build();
+        when(liveEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.completedFuture(response));
+
+        try (OpenAiCompatibleEmbeddingClient clientAdapter =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
+            ArgumentCaptor<RequestOptions> liveRequestOptionsCaptor = ArgumentCaptor.forClass(RequestOptions.class);
+            clientAdapter.embed(List.of("live query"), LlmGatewayTier.LIVE, CALLER_OWNED_LIVE_REQUEST_BUDGET);
+            verify(liveEmbeddingService).create(any(), liveRequestOptionsCaptor.capture());
+            assertRemainingTransportBudget(
+                    CALLER_OWNED_LIVE_REQUEST_BUDGET,
+                    liveRequestOptionsCaptor.getValue().getTimeout().connect());
+            assertRemainingTransportBudget(
+                    CALLER_OWNED_LIVE_REQUEST_BUDGET,
+                    liveRequestOptionsCaptor.getValue().getTimeout().request());
+            assertRemainingTransportBudget(
+                    CALLER_OWNED_LIVE_REQUEST_BUDGET,
+                    liveRequestOptionsCaptor.getValue().getTimeout().read());
+        }
+    }
+
+    @Test
+    void expiredCallerBudgetFailsAsTimeoutBeforeGatewayDispatch() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+
+        try (OpenAiCompatibleEmbeddingClient clientAdapter =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
+            EmbeddingServiceTemporarilyUnavailableException deadlineFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
+                    () -> clientAdapter.embed(List.of("expired query"), LlmGatewayTier.LIVE, Duration.ZERO));
+
+            assertInstanceOf(TimeoutException.class, deadlineFailure.getCause());
+            verifyNoInteractions(liveClient);
+        }
+    }
+
+    @Test
     void defersProbeWhenForegroundEmbeddingIsAlreadyActive()
             throws InterruptedException, ExecutionException, TimeoutException {
         OpenAIClient liveClient = mock(OpenAIClient.class);
@@ -274,12 +396,11 @@ class OpenAiCompatibleEmbeddingClientTest {
         EmbeddingServiceAsync liveEmbeddingService = mockAsyncEmbeddingService(liveClient);
         EmbeddingServiceAsync batchEmbeddingService = mockAsyncEmbeddingService(batchClient);
         CountDownLatch foregroundStarted = new CountDownLatch(1);
-        CountDownLatch releaseForeground = new CountDownLatch(1);
+        CompletableFuture<CreateEmbeddingResponse> foregroundResponseFuture = new CompletableFuture<>();
 
         when(liveEmbeddingService.create(any(), any(RequestOptions.class))).thenAnswer(invocation -> {
             foregroundStarted.countDown();
-            assertTrue(releaseForeground.await(5, TimeUnit.SECONDS));
-            return CompletableFuture.completedFuture(successfulResponse());
+            return foregroundResponseFuture;
         });
 
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -294,7 +415,7 @@ class OpenAiCompatibleEmbeddingClientTest {
                         OpenAiCompatibleEmbeddingClient.EmbeddingProbeDeferredException.class, clientAdapter::warmUp);
                 verifyNoInteractions(batchEmbeddingService);
             } finally {
-                releaseForeground.countDown();
+                foregroundResponseFuture.complete(successfulResponse());
             }
             assertEquals(1, foregroundEmbedding.get(5, TimeUnit.SECONDS).size());
         }
@@ -308,14 +429,13 @@ class OpenAiCompatibleEmbeddingClientTest {
         EmbeddingServiceAsync liveEmbeddingService = mockAsyncEmbeddingService(liveClient);
         EmbeddingServiceAsync batchEmbeddingService = mockAsyncEmbeddingService(batchClient);
         CountDownLatch probeStarted = new CountDownLatch(1);
-        CountDownLatch releaseProbe = new CountDownLatch(1);
+        CompletableFuture<CreateEmbeddingResponse> probeResponseFuture = new CompletableFuture<>();
 
         when(liveEmbeddingService.create(any(), any(RequestOptions.class)))
                 .thenReturn(CompletableFuture.completedFuture(successfulResponse()));
         when(batchEmbeddingService.create(any(), any(RequestOptions.class))).thenAnswer(invocation -> {
             probeStarted.countDown();
-            assertTrue(releaseProbe.await(5, TimeUnit.SECONDS));
-            return CompletableFuture.completedFuture(successfulResponse());
+            return probeResponseFuture;
         });
 
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -332,7 +452,7 @@ class OpenAiCompatibleEmbeddingClientTest {
                                 .size());
                 verify(liveEmbeddingService).create(any(), any(RequestOptions.class));
             } finally {
-                releaseProbe.countDown();
+                probeResponseFuture.complete(successfulResponse());
             }
             admittedProbe.get(5, TimeUnit.SECONDS);
         }
@@ -347,7 +467,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         EmbeddingServiceAsync batchEmbeddingService = mockAsyncEmbeddingService(batchClient);
         CountDownLatch firstBatchStarted = new CountDownLatch(1);
         CountDownLatch secondBatchStarted = new CountDownLatch(1);
-        CountDownLatch releaseFirstBatch = new CountDownLatch(1);
+        CompletableFuture<CreateEmbeddingResponse> firstBatchResponseFuture = new CompletableFuture<>();
         AtomicInteger batchRequestCount = new AtomicInteger();
 
         when(liveEmbeddingService.create(any(), any(RequestOptions.class)))
@@ -356,11 +476,11 @@ class OpenAiCompatibleEmbeddingClientTest {
             int requestNumber = batchRequestCount.incrementAndGet();
             if (requestNumber == 1) {
                 firstBatchStarted.countDown();
-                assertTrue(releaseFirstBatch.await(5, TimeUnit.SECONDS));
+                return firstBatchResponseFuture;
             } else {
                 secondBatchStarted.countDown();
+                return CompletableFuture.completedFuture(successfulResponse());
             }
-            return CompletableFuture.completedFuture(successfulResponse());
         });
 
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -379,16 +499,16 @@ class OpenAiCompatibleEmbeddingClientTest {
                             .embed(List.of("live query"), LlmGatewayTier.LIVE)
                             .size());
 
-            releaseFirstBatch.countDown();
+            firstBatchResponseFuture.complete(successfulResponse());
             assertEquals(1, firstBatch.get(5, TimeUnit.SECONDS).size());
             assertEquals(1, secondBatch.get(5, TimeUnit.SECONDS).size());
         } finally {
-            releaseFirstBatch.countDown();
+            firstBatchResponseFuture.complete(successfulResponse());
         }
     }
 
     @Test
-    void pacesGatewayRequestsAndReleasesConcurrencyAfterFailure() {
+    void releasesConcurrencyWithoutConsumingPacingWhenDispatchFailsBeforeLaunch() {
         OpenAIClient liveClient = mock(OpenAIClient.class);
         OpenAIClient batchClient = mock(OpenAIClient.class);
         EmbeddingServiceAsync batchEmbeddingService = mockAsyncEmbeddingService(batchClient);
@@ -410,7 +530,6 @@ class OpenAiCompatibleEmbeddingClientTest {
 
         try (OpenAiCompatibleEmbeddingClient embeddingClient =
                 new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, pacedSettings)) {
-            long firstRequestStartNanos = System.nanoTime();
             assertThrows(
                     EmbeddingServiceUnavailableException.class,
                     () -> embeddingClient.embed(List.of("failed batch"), LlmGatewayTier.BATCH));
@@ -419,9 +538,6 @@ class OpenAiCompatibleEmbeddingClientTest {
                     embeddingClient
                             .embed(List.of("successful batch"), LlmGatewayTier.BATCH)
                             .size());
-            long elapsedNanos = System.nanoTime() - firstRequestStartNanos;
-
-            assertTrue(Duration.ofNanos(elapsedNanos).compareTo(MINIMUM_EXPECTED_PACING_DELAY) >= 0);
             assertEquals(2, batchRequestCount.get());
         }
     }
@@ -492,11 +608,12 @@ class OpenAiCompatibleEmbeddingClientTest {
             embeddingClient.embed(List.of("admitted batch"), LlmGatewayTier.BATCH);
 
             long rejectedRequestStartNanos = System.nanoTime();
-            assertThrows(
-                    EmbeddingServiceUnavailableException.class,
+            EmbeddingServiceTemporarilyUnavailableException pacingDeadlineFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
                     () -> embeddingClient.embed(List.of("expired batch"), LlmGatewayTier.BATCH));
             Duration rejectionDelay = Duration.ofNanos(System.nanoTime() - rejectedRequestStartNanos);
 
+            assertInstanceOf(TimeoutException.class, pacingDeadlineFailure.getCause());
             assertTrue(rejectionDelay.compareTo(TEST_SATURATED_LIVE_REQUEST_BUDGET) >= 0);
             assertTrue(rejectionDelay.compareTo(MAXIMUM_EXPECTED_SATURATION_DELAY) < 0);
             verify(batchEmbeddingService, times(1)).create(any(), any(RequestOptions.class));
@@ -578,11 +695,12 @@ class OpenAiCompatibleEmbeddingClientTest {
             assertTrue(firstLiveRequestStarted.await(5, TimeUnit.SECONDS));
 
             long saturatedRequestStartNanos = System.nanoTime();
-            assertThrows(
-                    EmbeddingServiceUnavailableException.class,
+            EmbeddingServiceTemporarilyUnavailableException concurrencyDeadlineFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
                     () -> embeddingClient.embed(List.of("saturated query"), LlmGatewayTier.LIVE));
             Duration saturationDelay = Duration.ofNanos(System.nanoTime() - saturatedRequestStartNanos);
 
+            assertInstanceOf(TimeoutException.class, concurrencyDeadlineFailure.getCause());
             assertTrue(saturationDelay.compareTo(TEST_SATURATED_LIVE_REQUEST_BUDGET) >= 0);
             assertTrue(saturationDelay.compareTo(MAXIMUM_EXPECTED_SATURATION_DELAY) < 0);
             verify(liveEmbeddingService, times(1)).create(any(), any(RequestOptions.class));
@@ -603,29 +721,164 @@ class OpenAiCompatibleEmbeddingClientTest {
     }
 
     @Test
-    void usesSingleSdkAttemptForEveryRateLimitedEmbeddingRequest() throws IOException {
-        AtomicInteger requestCount = new AtomicInteger();
-        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/v1/embeddings", exchange -> {
-            requestCount.incrementAndGet();
-            respondWithRateLimit(exchange);
-        });
-        server.start();
+    void defersProbeDuringBatchCooldownWithoutContactingProvider() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        EmbeddingServiceAsync batchEmbeddingService = mockAsyncEmbeddingService(batchClient);
+        when(batchEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.failedFuture(rateLimitFailure()));
 
-        try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
-                "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "test-key", gatewaySettings())) {
+        try (OpenAiCompatibleEmbeddingClient clientAdapter =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
             assertThrows(
                     EmbeddingServiceUnavailableException.class,
                     () -> clientAdapter.embed(List.of("batch document"), LlmGatewayTier.BATCH));
-            assertEquals(1, requestCount.get());
 
-            requestCount.set(0);
+            assertThrows(OpenAiCompatibleEmbeddingClient.EmbeddingProbeDeferredException.class, clientAdapter::warmUp);
+            verify(batchEmbeddingService, times(1)).create(any(), any(RequestOptions.class));
+        }
+    }
+
+    @Test
+    void probeFailureFromProviderIsNotDeferred() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        EmbeddingServiceAsync batchEmbeddingService = mockAsyncEmbeddingService(batchClient);
+        when(batchEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("provider defect")));
+
+        try (OpenAiCompatibleEmbeddingClient clientAdapter =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
+            assertThrows(EmbeddingServiceUnavailableException.class, clientAdapter::warmUp);
+            verify(batchEmbeddingService, times(1)).create(any(), any(RequestOptions.class));
+        }
+    }
+
+    @Test
+    void batchRetryAfterCooldownDoesNotBlockLiveRequests() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        EmbeddingServiceAsync liveEmbeddingService = mockAsyncEmbeddingService(liveClient);
+        EmbeddingServiceAsync batchEmbeddingService = mockAsyncEmbeddingService(batchClient);
+        when(batchEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.failedFuture(rateLimitFailure()));
+        when(liveEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.completedFuture(successfulResponse()));
+
+        try (OpenAiCompatibleEmbeddingClient clientAdapter =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
+            assertThrows(
+                    EmbeddingServiceUnavailableException.class,
+                    () -> clientAdapter.embed(List.of("batch document"), LlmGatewayTier.BATCH));
+
+            assertEquals(
+                    1,
+                    clientAdapter
+                            .embed(List.of("live query"), LlmGatewayTier.LIVE)
+                            .size());
+            EmbeddingServiceUnavailableException batchCooldownFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
+                    () -> clientAdapter.embed(List.of("another batch document"), LlmGatewayTier.BATCH));
+
+            assertTrue(batchCooldownFailure.getMessage().contains("rate limited"));
+            verify(liveEmbeddingService).create(any(), any(RequestOptions.class));
+            verify(batchEmbeddingService).create(any(), any(RequestOptions.class));
+        }
+    }
+
+    @Test
+    void liveRetryAfterCooldownDoesNotBlockBatchRequests() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        EmbeddingServiceAsync liveEmbeddingService = mockAsyncEmbeddingService(liveClient);
+        EmbeddingServiceAsync batchEmbeddingService = mockAsyncEmbeddingService(batchClient);
+        when(liveEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.failedFuture(rateLimitFailure()));
+        when(batchEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.completedFuture(successfulResponse()));
+
+        try (OpenAiCompatibleEmbeddingClient clientAdapter =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
             assertThrows(
                     EmbeddingServiceUnavailableException.class,
                     () -> clientAdapter.embed(List.of("live query"), LlmGatewayTier.LIVE));
-            assertEquals(1, requestCount.get());
-        } finally {
-            server.stop(0);
+
+            assertEquals(
+                    1,
+                    clientAdapter
+                            .embed(List.of("batch document"), LlmGatewayTier.BATCH)
+                            .size());
+            EmbeddingServiceUnavailableException liveCooldownFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
+                    () -> clientAdapter.embed(List.of("another live query"), LlmGatewayTier.LIVE));
+
+            assertTrue(liveCooldownFailure.getMessage().contains("rate limited"));
+            verify(batchEmbeddingService).create(any(), any(RequestOptions.class));
+            verify(liveEmbeddingService).create(any(), any(RequestOptions.class));
+        }
+    }
+
+    @Test
+    void lateRateLimitAfterCallerInterruptionPublishesCooldownAndReleasesPermit() throws InterruptedException {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        EmbeddingServiceAsync liveEmbeddingService = mockAsyncEmbeddingService(liveClient);
+        CompletableFuture<CreateEmbeddingResponse> interruptedRequestFuture = new CompletableFuture<>();
+        CountDownLatch interruptedRequestDispatched = new CountDownLatch(1);
+        CountDownLatch interruptedRequestFinished = new CountDownLatch(1);
+        AtomicBoolean callerInterruptRestored = new AtomicBoolean();
+        when(liveEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenAnswer(invocation -> {
+                    interruptedRequestDispatched.countDown();
+                    return interruptedRequestFuture;
+                })
+                .thenReturn(CompletableFuture.completedFuture(successfulResponse()));
+        OpenAiCompatibleEmbeddingClient.GatewaySettings singlePermitSettings =
+                new OpenAiCompatibleEmbeddingClient.GatewaySettings(
+                        "qwen/qwen3-embedding-4b",
+                        EXPECTED_EMBEDDING_DIMENSION,
+                        new OpenAiCompatibleEmbeddingClient.RequestLimits(
+                                1, TEST_UNTHROTTLED_REQUESTS_PER_SECOND, TEST_SATURATED_LIVE_REQUEST_BUDGET),
+                        OpenAiCompatibleEmbeddingClient.RequestLimits.batch(
+                                TEST_BATCH_MAX_CONCURRENT_REQUESTS, TEST_UNTHROTTLED_REQUESTS_PER_SECOND));
+
+        try (OpenAiCompatibleEmbeddingClient embeddingClient =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, singlePermitSettings)) {
+            Thread interruptedCaller = Thread.ofVirtual().start(() -> {
+                try {
+                    embeddingClient.embed(List.of("interrupted query"), LlmGatewayTier.LIVE);
+                } catch (EmbeddingServiceTemporarilyUnavailableException expectedInterruption) {
+                    callerInterruptRestored.set(Thread.currentThread().isInterrupted());
+                } finally {
+                    interruptedRequestFinished.countDown();
+                }
+            });
+            assertTrue(interruptedRequestDispatched.await(5, TimeUnit.SECONDS));
+            interruptedCaller.interrupt();
+            assertTrue(interruptedRequestFinished.await(5, TimeUnit.SECONDS));
+            assertTrue(callerInterruptRestored.get());
+
+            RateLimitException lateRateLimitFailure = RateLimitException.builder()
+                    .headers(Headers.builder().put("Retry-After", "1").build())
+                    .build();
+            assertTrue(interruptedRequestFuture.completeExceptionally(lateRateLimitFailure));
+
+            long cooldownRejectionStartNanos = System.nanoTime();
+            assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
+                    () -> embeddingClient.embed(List.of("cooldown query"), LlmGatewayTier.LIVE));
+            Duration cooldownRejectionDelay = Duration.ofNanos(System.nanoTime() - cooldownRejectionStartNanos);
+
+            assertTrue(cooldownRejectionDelay.compareTo(Duration.ofMillis(250)) < 0);
+            verify(liveEmbeddingService, times(1)).create(any(), any(RequestOptions.class));
+
+            TimeUnit.MILLISECONDS.sleep(1_100);
+            assertEquals(
+                    1,
+                    embeddingClient
+                            .embed(List.of("recovered query"), LlmGatewayTier.LIVE)
+                            .size());
+            verify(liveEmbeddingService, times(2)).create(any(), any(RequestOptions.class));
         }
     }
 
@@ -640,6 +893,12 @@ class OpenAiCompatibleEmbeddingClientTest {
                         .index(0L)
                         .embedding(List.of(0.4f, 0.6f))
                         .build()))
+                .build();
+    }
+
+    private static RateLimitException rateLimitFailure() {
+        return RateLimitException.builder()
+                .headers(Headers.builder().put("Retry-After", "3600").build())
                 .build();
     }
 
@@ -664,14 +923,5 @@ class OpenAiCompatibleEmbeddingClientTest {
     private static void assertRemainingTransportBudget(Duration totalRequestBudget, Duration transportBudget) {
         assertTrue(transportBudget.compareTo(totalRequestBudget) <= 0);
         assertTrue(transportBudget.compareTo(totalRequestBudget.minusSeconds(1)) >= 0);
-    }
-
-    private static void respondWithRateLimit(HttpExchange exchange) throws IOException {
-        byte[] responseBody = "{\"error\":{\"message\":\"rate limited\"}}".getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().add("Content-Type", "application/json");
-        exchange.getResponseHeaders().add("Retry-After", "0");
-        exchange.sendResponseHeaders(429, responseBody.length);
-        exchange.getResponseBody().write(responseBody);
-        exchange.close();
     }
 }

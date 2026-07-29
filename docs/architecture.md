@@ -8,7 +8,7 @@ Java Chat is a Java-learning assistant focused on fast streaming answers and ver
 - **Backend**: Spring Boot (Web + WebFlux + Actuator)
 - **Streaming**: Server-Sent Events (SSE) with typed event payloads
 - **Retrieval**: Hybrid search (dense + BM25 sparse) across four Qdrant collections with RRF fusion
-- **LLM streaming**: OpenAI Java SDK (`OpenAIStreamingService`) supporting GitHub Models and OpenAI
+- **LLM streaming**: OpenAI Java SDK (`OpenAIStreamingService`) through the shared LLM gateway
 - **Embeddings**: Strict provider selection with no runtime fallback (see [configuration](configuration.md#embeddings))
 
 ## Request flow (chat)

@@ -71,7 +71,85 @@
         onJumpToBottom,
     }: Props = $props();
 
+    /**
+     * Minimum gap between layout and visual viewport height that indicates a
+     * virtual keyboard is open (toolbar show/hide deltas stay well below it).
+     */
+    const KEYBOARD_VIEWPORT_GAP_PX = 150;
+
     let messagesContainer: HTMLElement | null = $state(null);
+    let chatDialog: HTMLDialogElement | null = $state(null);
+    let chatTrigger: HTMLButtonElement | null = $state(null);
+
+    $effect(() => {
+        if (!chatDialog) {
+            return;
+        }
+
+        if (!isOpen) {
+            if (chatDialog.open) {
+                chatDialog.close();
+            }
+            return;
+        }
+
+        if (chatDialog.open) {
+            return;
+        }
+
+        chatDialog.showModal();
+    });
+
+    // iOS Safari resizes only the visual viewport when the software keyboard
+    // opens, leaving fixed bottom-anchored overlays behind the keyboard. Pin
+    // the drawer to the visual viewport while the keyboard covers the layout.
+    $effect(() => {
+        if (!isOpen || !chatDialog) {
+            return;
+        }
+        const visualViewport = window.visualViewport;
+        if (!visualViewport) {
+            return;
+        }
+
+        function pinDrawerAboveVirtualKeyboard(): void {
+            if (!chatDialog || !visualViewport) {
+                return;
+            }
+            const keyboardObscuredLayoutHeightPx =
+                window.innerHeight -
+                visualViewport.height * visualViewport.scale;
+            const keyboardCoversLayout =
+                keyboardObscuredLayoutHeightPx >
+                KEYBOARD_VIEWPORT_GAP_PX;
+            if (keyboardCoversLayout) {
+                const visualViewportBottomOffsetPx =
+                    visualViewport.offsetTop +
+                    visualViewport.height -
+                    window.innerHeight;
+                chatDialog.style.height = `${visualViewport.height}px`;
+                chatDialog.style.transform = `translateY(${visualViewportBottomOffsetPx}px)`;
+            } else {
+                chatDialog.style.height = "";
+                chatDialog.style.transform = "";
+            }
+        }
+
+        visualViewport.addEventListener("resize", pinDrawerAboveVirtualKeyboard);
+        visualViewport.addEventListener("scroll", pinDrawerAboveVirtualKeyboard);
+        pinDrawerAboveVirtualKeyboard();
+
+        return () => {
+            visualViewport.removeEventListener(
+                "resize",
+                pinDrawerAboveVirtualKeyboard,
+            );
+            visualViewport.removeEventListener(
+                "scroll",
+                pinDrawerAboveVirtualKeyboard,
+            );
+        };
+    });
 
     /** Exposes the messages container element for external scroll management. */
     export function getMessagesContainer(): HTMLElement | null {
@@ -81,10 +159,31 @@
     function handleJumpToBottom(): void {
         onJumpToBottom?.();
     }
+
+    function closeDialog(): void {
+        chatDialog?.close();
+    }
+
+    function handleDialogCancel(cancelEvent: Event): void {
+        cancelEvent.preventDefault();
+        closeDialog();
+    }
+
+    function handleDialogClose(): void {
+        onClose();
+        chatTrigger?.focus();
+    }
+
+    function handleDialogBackdropClick(mouseEvent: MouseEvent): void {
+        if (mouseEvent.target === chatDialog) {
+            closeDialog();
+        }
+    }
 </script>
 
 <!-- Mobile Chat FAB -->
 <button
+    bind:this={chatTrigger}
     type="button"
     class="chat-fab"
     onclick={onToggle}
@@ -110,14 +209,17 @@
 </button>
 
 <!-- Mobile Chat Drawer -->
-{#if isOpen}
-    <div
-        class="chat-drawer-backdrop"
-        onclick={onClose}
-        aria-hidden="true"
-    ></div>
-    <div class="chat-drawer" role="dialog" aria-label="Lesson chat">
-        <div class="chat-drawer-header">
+<dialog
+    bind:this={chatDialog}
+    class="chat-drawer"
+    aria-label="Lesson chat"
+    aria-modal="true"
+    oncancel={handleDialogCancel}
+    onclose={handleDialogClose}
+    onclick={handleDialogBackdropClick}
+>
+    {#if isOpen}
+    <div class="chat-drawer-header">
             <div class="chat-drawer-title">
                 <svg
                     viewBox="0 0 24 24"
@@ -157,7 +259,7 @@
                 <button
                     type="button"
                     class="drawer-close-btn"
-                    onclick={onClose}
+                    onclick={closeDialog}
                     aria-label="Close chat"
                 >
                     <svg
@@ -211,11 +313,11 @@
             />
         </div>
 
-        <div class="chat-drawer-input">
-            <ChatInput {onSend} disabled={isStreaming} {placeholder} />
-        </div>
+    <div class="chat-drawer-input">
+        <ChatInput {onSend} disabled={isStreaming} {placeholder} />
     </div>
-{/if}
+    {/if}
+</dialog>
 
 <style>
     /* Mobile Chat FAB - hidden on desktop, shown via media query */
@@ -292,13 +394,32 @@
     }
 
     /* Mobile Chat Drawer */
-    .chat-drawer-backdrop {
+    .chat-drawer::backdrop {
+        background: rgba(0, 0, 0, 0.5);
+        animation: fade-in var(--duration-fast) var(--ease-out);
+    }
+
+    .chat-drawer {
         display: none;
         position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.5);
-        z-index: 60;
-        animation: fade-in var(--duration-fast) var(--ease-out);
+        inset: auto 0 0;
+        width: 100%;
+        /* Reset the UA dialog default (calc(100% - 2em - 6px)) so the drawer
+           spans the full viewport width on phones. */
+        max-width: 100%;
+        height: 85vh;
+        height: 85dvh;
+        max-height: 85vh;
+        max-height: 85dvh;
+        margin: 0;
+        padding: 0;
+        background: var(--color-bg-primary);
+        border: none;
+        border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+        box-shadow: var(--shadow-xl);
+        z-index: 70;
+        flex-direction: column;
+        animation: slide-up var(--duration-normal) var(--ease-out);
     }
 
     @keyframes fade-in {
@@ -308,22 +429,6 @@
         to {
             opacity: 1;
         }
-    }
-
-    .chat-drawer {
-        display: none;
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        height: 85vh;
-        max-height: 85vh;
-        background: var(--color-bg-primary);
-        border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-        box-shadow: var(--shadow-xl);
-        z-index: 70;
-        flex-direction: column;
-        animation: slide-up var(--duration-normal) var(--ease-out);
     }
 
     @keyframes slide-up {
@@ -370,8 +475,8 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 36px;
-        height: 36px;
+        width: 44px;
+        height: 44px;
         padding: 0;
         background: transparent;
         border: none;
@@ -409,7 +514,7 @@
     .chat-drawer-input {
         flex-shrink: 0;
         border-top: 1px solid var(--color-border-subtle);
-        padding-bottom: env(safe-area-inset-bottom, 0);
+        padding-bottom: max(var(--space-3), env(safe-area-inset-bottom));
     }
 
     .chat-empty {
@@ -441,11 +546,7 @@
             justify-content: center;
         }
 
-        .chat-drawer-backdrop {
-            display: block;
-        }
-
-        .chat-drawer {
+        .chat-drawer[open] {
             display: flex;
         }
     }
@@ -465,7 +566,9 @@
 
         .chat-drawer {
             height: 90vh;
+            height: 90dvh;
             max-height: 90vh;
+            max-height: 90dvh;
         }
     }
 </style>

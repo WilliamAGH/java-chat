@@ -360,6 +360,7 @@ fetch_source() {
     local seed_source_prefix=""
     local seed_reject_regex=""
     local single_page_only="false"
+    local java25_specification_pdfs="false"
     local superseded_relative_mirror_path=""
 
     while [ "$#" -gt 0 ]; do
@@ -383,6 +384,7 @@ fetch_source() {
             --seed-source-prefix) seed_source_prefix="$2"; shift 2 ;;
             --seed-reject-regex) seed_reject_regex="$2"; shift 2 ;;
             --single-page) single_page_only="true"; shift ;;
+            --java25-specification-pdfs) java25_specification_pdfs="true"; shift ;;
             --superseded-mirror-path) superseded_relative_mirror_path="$2"; shift 2 ;;
             *) echo "Unknown documentation fetch option: $1" >&2; return 1 ;;
         esac
@@ -403,6 +405,11 @@ fetch_source() {
     fi
     if [ -n "$seed_reject_regex" ] && [ -z "$seed_discovery_url" ]; then
         echo "A discovery-only rejection requires structured discovery: $name" >&2
+        return 1
+    fi
+    if [ "$java25_specification_pdfs" = "true" ] \
+        && { [ "$java_release" != "25" ] || [ "$relative_mirror_path" != "java/java25-complete" ]; }; then
+        echo "Java 25 specification PDFs require the canonical Java 25 API source" >&2
         return 1
     fi
 
@@ -528,6 +535,12 @@ fetch_source() {
         return 1
     fi
 
+    if [ "$java25_specification_pdfs" = "true" ] \
+        && ! fetch_java25_specification_pdfs "$staging_directory" "$name"; then
+        quarantine_path "$staging_directory" "$name invalid Java 25 specifications"
+        return 1
+    fi
+
     if ! validate_staged_documentation_mirror \
         "$staging_directory" "$name" "$min_files" "$identity_regex" "$forbidden_identity_regex"; then
         quarantine_path "$staging_directory" "$name invalid staging"
@@ -579,7 +592,7 @@ fetch_named_official_source() {
         quarkus) "$source_dispatch" fetch_source --url "https://quarkus.io/guides/" --mirror-path "quarkus" --name "Quarkus Guides" --source-version "stable-current" --identity-regex "Quarkus" --cut-directories 1 --minimum-html-files 200 --reject-regex "%7[BbDd]" --seed-document-type html-links --seed-discovery-url "https://quarkus.io/guides/" --seed-source-prefix "https://quarkus.io/guides/" ;;
         java/java21-complete) "$source_dispatch" fetch_source --java-release 21 --url "https://docs.oracle.com/en/java/javase/21/docs/api/" --mirror-path "java/java21-complete" --name "Java 21 Complete API" --source-version "21-ga" --identity-regex "Overview \\(Java SE 21 &amp; JDK 21\\)" --required-identity-page "api/index.html" --required-identity-text "Overview (Java SE 21 & JDK 21)" --cut-directories 5 --minimum-html-files 5000 ;;
         java/java24-complete) "$source_dispatch" fetch_source --java-release 24 --url "https://docs.oracle.com/en/java/javase/24/docs/api/" --mirror-path "java/java24-complete" --name "Java 24 Complete API" --source-version "24-ga" --identity-regex "Overview \\(Java SE 24 &amp; JDK 24\\)" --required-identity-page "api/index.html" --required-identity-text "Overview (Java SE 24 & JDK 24)" --cut-directories 5 --minimum-html-files 5000 ;;
-        java/java25-complete) "$source_dispatch" fetch_source --java-release 25 --url "https://docs.oracle.com/en/java/javase/25/docs/api/" --mirror-path "java/java25-complete" --name "Java 25 Complete API" --source-version "25-ga" --identity-regex "Overview \\(Java SE 25 &amp; JDK 25\\)" --required-identity-page "api/index.html" --required-identity-text "Overview (Java SE 25 & JDK 25)" --cut-directories 5 --minimum-html-files 5000 ;;
+        java/java25-complete) "$source_dispatch" fetch_source --java-release 25 --url "https://docs.oracle.com/en/java/javase/25/docs/api/" --mirror-path "java/java25-complete" --name "Java 25 Complete API" --source-version "25-ga" --identity-regex "Overview \\(Java SE 25 &amp; JDK 25\\)" --required-identity-page "api/index.html" --required-identity-text "Overview (Java SE 25 & JDK 25)" --cut-directories 5 --minimum-html-files 5000 --java25-specification-pdfs ;;
         spring-ai-reference) "$source_dispatch" fetch_source --url "$SPRING_AI_REFERENCE_BASE" --mirror-path "spring-ai-reference" --name "Spring AI Reference (stable 1.1)" --source-version "1.1.8" --identity-regex "<meta name=\"version\" content=\"1\\.1\\.8\"" --forbidden-identity-regex "<meta name=\"version\" content=\"(2\\.|[^\"]*SNAPSHOT)|data-version=\"(2\\.|[^\"]*SNAPSHOT)" --expected-meta-version "1.1.8" --cut-directories 3 --minimum-html-files 80 --reject-regex "SNAPSHOT|/spring-ai/reference/(2\\.|next/)" --superseded-mirror-path "spring-ai-complete" ;;
         spring-ai-api-stable) "$source_dispatch" fetch_source --url "$SPRING_AI_API_STABLE_BASE" --mirror-path "spring-ai-api-stable" --name "Spring AI API 1.1.2" --source-version "1.1.2" --identity-regex "Spring AI Parent 1\\.1\\.2 API" --forbidden-identity-regex "Spring AI Parent (2\\.[^ ]*|[^ ]*SNAPSHOT) API" --cut-directories 4 --minimum-html-files 4000 --reject-regex "SNAPSHOT|/spring-ai/docs/2\\." ;;
         spring-framework-reference) "$source_dispatch" fetch_source --url "$SPRING_FRAMEWORK_REFERENCE_BASE" --mirror-path "spring-framework-reference" --name "Spring Framework Reference (current)" --source-version "stable-current" --identity-regex "Spring Framework" --cut-directories 2 --minimum-html-files 450 --reject-regex "/spring-framework/reference/[0-9]|/spring-framework/reference/[^/]*SNAPSHOT" --seed-document-type xml-sitemap --seed-discovery-url "https://docs.spring.io/spring-framework/reference/sitemap.xml" --seed-source-prefix "$SPRING_FRAMEWORK_REFERENCE_BASE" --superseded-mirror-path "spring-framework-complete" ;;

@@ -5,7 +5,7 @@
 # Shell and Build Tools
 # ============================================================================
 SHELL := /bin/bash
-GRADLEW := ./gradlew
+GRADLEW := ./gradlew -Dorg.gradle.vfs.watch=false  # override global ~/.gradle/gradle.properties and stale daemon
 LOCKED_GRADLEW := ./scripts/with_build_state_lock.sh $(GRADLEW)
 
 # ============================================================================
@@ -58,11 +58,11 @@ define load_env
 if [ -f .env ]; then source scripts/lib/env_loader.sh; preserve_process_env_then_source_file .env; fi
 endef
 
-# Validate API keys - exits with error if neither is set
+# Validate the shared-gateway chat credential.
 # Usage: $(call validate_api_keys)
 define validate_api_keys
-if [ -z "$$GITHUB_TOKEN" ] && [ -z "$$OPENAI_API_KEY" ]; then \
-  echo "ERROR: Set GITHUB_TOKEN or OPENAI_API_KEY. See README and docs/configuration.md." >&2; \
+if [ -z "$$OPENAI_API_KEY" ]; then \
+  echo "ERROR: Set OPENAI_API_KEY for the shared LLM gateway. See docs/configuration.md." >&2; \
   exit 1; \
 fi
 endef
@@ -78,28 +78,33 @@ fi; \
 echo $$port
 endef
 
-# Free a specific port by killing any process using it
-# Usage: $(call free_port,8085)
-define free_port
-PIDS=$$(lsof -ti tcp:$(1) 2>/dev/null || true); \
-if [ -n "$$PIDS" ]; then \
-  echo "Killing process(es) on port $(1): $$PIDS" >&2; \
-  kill -9 $$PIDS 2>/dev/null || true; \
-  sleep 1; \
+# Require a specific TCP port to be unoccupied before starting an owned service.
+# Usage: $(call require_port_available,8085)
+define require_port_available
+if ! command -v lsof >/dev/null 2>&1; then \
+  echo "ERROR: Cannot verify availability of port $(1): lsof is unavailable." >&2; \
+  exit 1; \
+fi; \
+PORT_INSPECTION_REPORT=$$(lsof -nP -tiTCP:$(1) -sTCP:LISTEN 2>&1); \
+PORT_INSPECTION_STATUS=$$?; \
+if [ "$$PORT_INSPECTION_STATUS" -ne 0 ] && [ -n "$$PORT_INSPECTION_REPORT" ]; then \
+  echo "ERROR: Unable to verify availability of port $(1): $$PORT_INSPECTION_REPORT" >&2; \
+  exit 1; \
+fi; \
+if [ "$$PORT_INSPECTION_STATUS" -gt 1 ]; then \
+  echo "ERROR: Unable to verify availability of port $(1); lsof exited with status $$PORT_INSPECTION_STATUS." >&2; \
+  exit 1; \
+fi; \
+if [ -n "$$PORT_INSPECTION_REPORT" ]; then \
+  echo "ERROR: Port $(1) is already in use by process ID(s): $$PORT_INSPECTION_REPORT. Stop the owning process and retry." >&2; \
+  exit 1; \
 fi
 endef
 
-# Build Spring app arguments based on available API keys
-# Sets APP_ARGS array with appropriate --spring.ai.* arguments
+# Build Spring application arguments.
 # Usage: $(call build_app_args,PORT)
 define build_app_args
-	APP_ARGS=(--server.port=$(1)); \
-	if [ -n "$$GITHUB_TOKEN" ]; then \
-	  APP_ARGS+=( \
-	    --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
-	    --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
-	  ); \
-	fi
+	APP_ARGS=(--server.port=$(1))
 endef
 
 # Allows local developer commands to bootstrap only a loopback Qdrant instance.

@@ -17,45 +17,18 @@
 
   let inputValue = $state('')
   let messageInput: HTMLTextAreaElement | null = $state(null)
-  let chatInputForm: HTMLFormElement | null = $state(null)
-  let previouslyDisabled = false
-  let submissionAwaitsDisabledTransition = false
-  let submissionOwnsDisabledTransition = false
-
-  $effect(() => {
-    const hasDisabledStateTransition = disabled !== previouslyDisabled
-
-    if (submissionAwaitsDisabledTransition && hasDisabledStateTransition && disabled) {
-      submissionOwnsDisabledTransition = true
-    }
-
-    if (submissionOwnsDisabledTransition && hasDisabledStateTransition && !disabled) {
-      if (canRestoreMessageInputFocus()) {
-        messageInput?.focus()
-      }
-      submissionAwaitsDisabledTransition = false
-      submissionOwnsDisabledTransition = false
-    }
-
-    previouslyDisabled = disabled
-  })
-
-  function canRestoreMessageInputFocus(): boolean {
-    const focusedElement = document.activeElement
-    return (
-      focusedElement === null ||
-      focusedElement === document.body ||
-      chatInputForm?.contains(focusedElement) === true
-    )
-  }
+  let previousInputLength = 0
+  // Owned by the `.input-field` CSS max-height; read once on mount so the
+  // resizer never hard-codes the cap.
+  let maxInputHeightPx = Number.POSITIVE_INFINITY
 
   function submitMessage(): void {
     const submittedMessage = inputValue.trim()
     if (!submittedMessage || disabled) return
 
-    submissionAwaitsDisabledTransition = true
     onSend(submittedMessage)
     inputValue = ''
+    previousInputLength = 0
     if (messageInput) {
       messageInput.style.height = 'auto'
     }
@@ -75,13 +48,34 @@
     }
   }
 
-  function autoResize() {
+  function autoResize(inputEvent: Event): void {
+    if (inputEvent instanceof InputEvent && inputEvent.isComposing) return
     if (!messageInput) return
-    messageInput.style.height = 'auto'
-    messageInput.style.height = `${Math.min(messageInput.scrollHeight, 200)}px`
+
+    const inputShrank = messageInput.value.length < previousInputLength
+    previousInputLength = messageInput.value.length
+
+    // Collapse to `auto` only when text was deleted. Growth measures cleanly
+    // from the current height, and skipping the collapse avoids the transient
+    // shrink that makes iOS Safari re-center the caret (the visible "jump").
+    if (inputShrank) {
+      messageInput.style.height = 'auto'
+    }
+
+    const targetHeightPx = Math.min(messageInput.scrollHeight, maxInputHeightPx)
+    if (messageInput.offsetHeight !== targetHeightPx) {
+      messageInput.style.height = `${targetHeightPx}px`
+    }
   }
 
   onMount(() => {
+    if (messageInput) {
+      const cssMaxHeightPx = Number.parseFloat(getComputedStyle(messageInput).maxHeight)
+      if (Number.isFinite(cssMaxHeightPx)) {
+        maxInputHeightPx = cssMaxHeightPx
+      }
+    }
+
     function handleGlobalKeyDown(keyboardEvent: KeyboardEvent) {
       if ((keyboardEvent.metaKey || keyboardEvent.ctrlKey) && keyboardEvent.key === 'k') {
         keyboardEvent.preventDefault()
@@ -90,12 +84,12 @@
       }
       if (keyboardEvent.key === 'Escape' && document.activeElement === messageInput) {
         inputValue = ''
+        previousInputLength = 0
         if (messageInput) messageInput.style.height = 'auto'
       }
     }
 
     document.addEventListener('keydown', handleGlobalKeyDown)
-    messageInput?.focus()
 
     return () => {
       document.removeEventListener('keydown', handleGlobalKeyDown)
@@ -105,7 +99,7 @@
 
 <div class="input-area">
   <div class="input-container">
-    <form bind:this={chatInputForm} class="input-wrapper" onsubmit={handleFormSubmit}>
+    <form class="input-wrapper" onsubmit={handleFormSubmit}>
       <textarea
         bind:this={messageInput}
         bind:value={inputValue}
@@ -113,7 +107,8 @@
         onkeydown={handleKeyDown}
         {placeholder}
         rows="1"
-        {disabled}
+        readonly={disabled}
+        enterkeyhint="send"
         class="input-field"
         aria-label="Message input"
       ></textarea>
@@ -189,7 +184,7 @@
     color: var(--color-text-muted);
   }
 
-  .input-field:disabled {
+  .input-field:read-only {
     opacity: 0.6;
     cursor: not-allowed;
   }
@@ -265,6 +260,15 @@
     box-shadow: 0 1px 0 var(--color-border-subtle);
   }
 
+  /* Touch devices (phones and tablets): 44px minimum touch target */
+  @media (max-width: 1024px) {
+    .send-btn {
+      width: 44px;
+      height: 44px;
+      min-width: 44px;
+    }
+  }
+
   /* Tablet */
   @media (max-width: 768px) {
     .input-area {
@@ -292,12 +296,6 @@
       display: none;
     }
 
-    .send-btn {
-      width: 44px;
-      height: 44px;
-      min-width: 44px; /* Touch target */
-    }
-
     .send-btn svg {
       width: 20px;
       height: 20px;
@@ -313,13 +311,6 @@
 
     .input-wrapper {
       border-radius: var(--radius-lg);
-    }
-
-    .send-btn {
-      width: 40px;
-      height: 40px;
-      min-width: 40px;
-      border-radius: var(--radius-md);
     }
   }
 </style>

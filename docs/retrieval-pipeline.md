@@ -107,7 +107,7 @@ QueryPoints {
 }
 ```
 
-All 4 requests fire asynchronously via `qdrantClient.queryAsync()` (returns `ListenableFuture`, converted to `CompletableFuture`). Each future is awaited with the configured timeout (default 5s).
+All 4 requests fire asynchronously via `qdrantClient.queryAsync()` (returns `ListenableFuture`, converted to `CompletableFuture`). Each future is awaited with the configured timeout (default 10s).
 
 The sparse prefetch is skipped if the sparse vector has no indices (empty query after tokenization).
 
@@ -119,7 +119,7 @@ As collection results merge, `mergePoints()` deduplicates by Qdrant point UUID i
 
 ### Strict mode
 
-When `app.qdrant.fail-on-partial-search-error=true` (default), any collection query failure throws `HybridSearchPartialFailureException`. When false, partial results are returned with notices.
+Any collection query failure throws `HybridSearchPartialFailureException`; retrieval never returns silently degraded context.
 
 ### Collections
 
@@ -172,7 +172,7 @@ Each document is presented as `[index] title | url` followed by the first 500 ch
 
 - Model: the configured chat provider and chat model
 - Temperature: `0.0` (deterministic)
-- Timeout: configurable via `app.rag.reranker-timeout` (default 30s)
+- Timeout: configurable via `app.rag.reranker-timeout` (default 8s)
 - Response format: `{"order": [0, 3, 1, 2, ...]}` (0-based indices)
 
 ### Response parsing
@@ -252,16 +252,16 @@ When the quality message contains "less relevant" or "keyword search", an additi
 
 ### Token budgets
 
-Token budgets are determined by `OpenAIStreamingService` based on the active model:
+The GPT-5.4 prompt budget is application-owned:
 
-| Model family | Token budget | Constant |
+| Provider/model | Token budget | Constant |
 |---|---|---|
-| GPT-5.x | 7,000 | `MAX_TOKENS_GPT5_INPUT` (`OpenAIStreamingService.java:54`) |
-| All others | 100,000 | `MAX_TOKENS_DEFAULT_INPUT` (`OpenAIStreamingService.java:57`) |
+| Shared gateway GPT-5.4 | 100,000 | `GPT54_INPUT_TOKEN_BUDGET` |
 
 Token estimation uses a conservative `(text.length() / 4) + 1` approximation (~4 characters per token for English text).
 
-For token-constrained models (GPT-5.x), RAG retrieval is also reduced upstream: max 3 documents (`RAG_LIMIT_CONSTRAINED`) with max 600 tokens each (`RAG_TOKEN_LIMIT_CONSTRAINED`), defined in `ModelConfiguration.java`.
+GPT-5.4 RAG retrieval is reduced upstream to max 3 documents (`RAG_LIMIT_CONSTRAINED`)
+with max 600 tokens each (`RAG_TOKEN_LIMIT_CONSTRAINED`), defined in `ModelConfiguration.java`.
 
 ---
 
@@ -277,8 +277,7 @@ All properties are bound via `AppProperties` (`@ConfigurationProperties(prefix =
 | `app.qdrant.sparse-vector-name` | `bm25` | Named vector key for sparse BM25 tokens |
 | `app.qdrant.prefetch-limit` | `20` | Per-stage candidate count for each dense/sparse prefetch before RRF fusion |
 | `app.qdrant.rrf-k` | `60` | RRF k parameter: `score = Sum(1 / (k + rank))` |
-| `app.qdrant.query-timeout` | `5s` | Timeout for hybrid search fan-out across all collections |
-| `app.qdrant.fail-on-partial-search-error` | `true` | Fail retrieval if any collection query fails |
+| `app.qdrant.query-timeout` | `10s` | Timeout for hybrid search fan-out across all collections |
 | `app.qdrant.ensure-payload-indexes` | `true` | Create payload indexes on startup for metadata filtering |
 | `app.qdrant.ensure-collections` | `false` | Validate existing collections without creating missing collections on normal startup |
 
@@ -299,7 +298,7 @@ All four must be non-blank and distinct (validated on startup).
 |---|---|---|---|
 | `app.rag.search-top-k` | `12` | Must be > 0 | Candidates fetched from hybrid search before reranking |
 | `app.rag.search-return-k` | `6` | Must be > 0, must be <= `search-top-k` | Results returned to the LLM after reranking |
-| `app.rag.reranker-timeout` | `30s` | Must be positive | Timeout for LLM reranking call |
+| `app.rag.reranker-timeout` | `8s` | Must be positive and less than `20s` | Timeout for LLM reranking call |
 | `app.rag.search-citations` | `3` | Must be >= 0 | Citation references included in the response |
 | `app.rag.search-mmr-lambda` | `0.5` | Must be in [0.0, 1.0] | MMR lambda (higher = relevance, lower = diversity) |
 | `app.rag.chunk-max-tokens` | `900` | Must be > 0 | Max tokens per ingested chunk (see [ingestion.md](ingestion.md)) |

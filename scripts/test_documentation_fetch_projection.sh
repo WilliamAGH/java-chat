@@ -51,6 +51,31 @@ assert_no_source_dispatch() {
     fi
 }
 
+write_java25_specification_byte_gate_stub() {
+    local downloaded_specification_path="$1"
+    local title_fragment="$2"
+    printf '%s\n' \
+        '%PDF-1.4' \
+        "$title_fragment" \
+        '%%EOF' > "$downloaded_specification_path"
+}
+
+write_java25_specification_parser_output() {
+    local parsed_title="$1"
+    local parsed_edition="$2"
+    case "$parsed_title" in
+        "The Java® Language Specification")
+            printf '%s\n' "The Java® Language" "Specification" "$parsed_edition"
+            ;;
+        "The Java® Virtual Machine Specification")
+            printf '%s\n' "The Java® Virtual" "Machine Specification" "$parsed_edition"
+            ;;
+        *)
+            printf '%s\n%s\n' "$parsed_title" "$parsed_edition"
+            ;;
+    esac
+}
+
 set --
 # shellcheck source=fetch_all_docs.sh
 source "$FETCH_SCRIPT"
@@ -469,7 +494,381 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     --cut-directories \
     5 \
     --minimum-html-files \
-    5000
+    5000 \
+    --java25-specification-pdfs
+
+JAVA25_INVALID_PDF="$TEST_WORK_DIRECTORY/java25-invalid.pdf"
+printf '<html>not a PDF</html>\n' > "$JAVA25_INVALID_PDF"
+if validate_java25_specification_pdf \
+    "$JAVA25_INVALID_PDF" \
+    "invalid Java 25 specification" \
+    "Language Specification" \
+    "The Java® Language Specification"; then
+    fail_documentation_fetch_test "non-PDF Java 25 specification content was accepted"
+fi
+
+JAVA25_PDF_PARSER_INPUT="$TEST_WORK_DIRECTORY/java25-parser-input.pdf"
+write_java25_specification_byte_gate_stub \
+    "$JAVA25_PDF_PARSER_INPUT" "Language Specification"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    mutool() {
+        case "$#" in
+            8)
+                [ "$1" = "draw" ] \
+                    && [ "$2" = "-q" ] \
+                    && [ "$3" = "-F" ] \
+                    && [ "$4" = "txt" ] \
+                    && [ "$5" = "-o" ] \
+                    && [ "$6" = "-" ] \
+                    && [ "$8" = "1" ] \
+                    || return 1
+                case "$JAVA25_PDF_PARSER_TEST_CASE" in
+                    java-se24)
+                        write_java25_specification_parser_output \
+                            "The Java® Language Specification" "Java SE 24 Edition"
+                        ;;
+                    wrong-specification)
+                        write_java25_specification_parser_output \
+                            "The Java® Virtual Machine Specification" "Java SE 25 Edition"
+                        ;;
+                    parse-failure) return 69 ;;
+                    full-parse-failure)
+                        write_java25_specification_parser_output \
+                            "The Java® Language Specification" "Java SE 25 Edition"
+                        ;;
+                    *) return 1 ;;
+                esac
+                ;;
+            7)
+                [ "$1" = "draw" ] \
+                    && [ "$2" = "-q" ] \
+                    && [ "$3" = "-F" ] \
+                    && [ "$4" = "txt" ] \
+                    && [ "$5" = "-o" ] \
+                    && [ "$6" = "/dev/null" ] \
+                    || return 1
+                [ "$JAVA25_PDF_PARSER_TEST_CASE" != "full-parse-failure" ] || return 70
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    JAVA25_PDF_PARSER_TEST_CASE="java-se24"
+    if validate_java25_specification_pdf \
+        "$JAVA25_PDF_PARSER_INPUT" \
+        "Java SE 24 language specification" \
+        "Language Specification" \
+        "The Java® Language Specification"; then
+        exit 1
+    fi
+    JAVA25_PDF_PARSER_TEST_CASE="wrong-specification"
+    if validate_java25_specification_pdf \
+        "$JAVA25_PDF_PARSER_INPUT" \
+        "wrong Java 25 specification" \
+        "Language Specification" \
+        "The Java® Language Specification"; then
+        exit 1
+    fi
+    JAVA25_PDF_PARSER_TEST_CASE="parse-failure"
+    if validate_java25_specification_pdf \
+        "$JAVA25_PDF_PARSER_INPUT" \
+        "unparseable Java 25 specification" \
+        "Language Specification" \
+        "The Java® Language Specification"; then
+        exit 1
+    fi
+    JAVA25_PDF_PARSER_TEST_CASE="full-parse-failure"
+    if validate_java25_specification_pdf \
+        "$JAVA25_PDF_PARSER_INPUT" \
+        "partially parseable Java 25 specification" \
+        "Language Specification" \
+        "The Java® Language Specification"; then
+        exit 1
+    fi
+); then
+    fail_documentation_fetch_test "Java 25 parser wrapper accepted a rejected specification"
+fi
+
+JAVA25_MISSING_PARSER_LOG="$TEST_WORK_DIRECTORY/java25-missing-parser.log"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        printf '%s\n' "$1" >> "$JAVA25_MISSING_PARSER_LOG"
+    }
+    command() {
+        if [ "$#" -eq 2 ] && [ "$1" = "-v" ] && [ "$2" = "mutool" ]; then
+            return 1
+        fi
+        builtin command "$@"
+    }
+    JAVA25_MISSING_PARSER_WGET_CALLS=0
+    wget() {
+        JAVA25_MISSING_PARSER_WGET_CALLS=$((JAVA25_MISSING_PARSER_WGET_CALLS + 1))
+        return 1
+    }
+    if fetch_java25_specification_pdfs \
+        "$TEST_WORK_DIRECTORY/java25-missing-parser-stage" "Java 25 Complete API"; then
+        exit 1
+    fi
+    [ "$JAVA25_MISSING_PARSER_WGET_CALLS" -eq 0 ]
+); then
+    fail_documentation_fetch_test "missing mutool did not fail before Java 25 specification downloads"
+fi
+if ! grep -Fq -- "brew install mupdf" "$JAVA25_MISSING_PARSER_LOG" \
+    || ! grep -Fq -- "apt install mupdf-tools" "$JAVA25_MISSING_PARSER_LOG"; then
+    fail_documentation_fetch_test "missing mutool did not report its installation command"
+fi
+
+JAVA25_PDF_SUCCESS_ROOT="$TEST_WORK_DIRECTORY/java25-pdf-success"
+JAVA25_PDF_SUCCESS_CAPTURE="$JAVA25_PDF_SUCCESS_ROOT/wget-arguments"
+JAVA25_PDF_SUCCESS_PARSER_CAPTURE="$JAVA25_PDF_SUCCESS_ROOT/mutool-arguments"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    DOCS_ROOT="$JAVA25_PDF_SUCCESS_ROOT/data/docs"
+    LOG_FILE="$JAVA25_PDF_SUCCESS_ROOT/fetch.log"
+    JAVA25_PDF_SUCCESS_STAGE="$JAVA25_PDF_SUCCESS_ROOT/stage"
+    log() {
+        :
+    }
+    create_documentation_fetch_staging_directory() {
+        mkdir -p "$JAVA25_PDF_SUCCESS_ROOT" "$JAVA25_PDF_SUCCESS_STAGE"
+        printf '%s\n' "$JAVA25_PDF_SUCCESS_STAGE"
+    }
+    generate_java_api_javadoc_seed() {
+        :
+    }
+    reconcile_java_api_seed_mirror() {
+        :
+    }
+    fetch_java_api_javadoc_seed() {
+        printf '<html>Java 25 API</html>\n' > "$1/index.html"
+        cd - > /dev/null
+    }
+    validate_staged_documentation_identity() {
+        :
+    }
+    wget() {
+        local wget_argument
+        local output_document=""
+        local requested_url=""
+        printf '%s\n' "$@" >> "$JAVA25_PDF_SUCCESS_CAPTURE"
+        for wget_argument in "$@"; do
+            case "$wget_argument" in
+                --output-document=*) output_document="${wget_argument#--output-document=}" ;;
+                --*) ;;
+                *) requested_url="$wget_argument" ;;
+            esac
+        done
+        case "$requested_url" in
+            https://docs.oracle.com/javase/specs/jls/se25/jls25.pdf)
+                write_java25_specification_byte_gate_stub \
+                    "$output_document" "Language Specification"
+                ;;
+            https://docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf)
+                write_java25_specification_byte_gate_stub \
+                    "$output_document" "Virtual Machine Specification"
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    mutool() {
+        case "$#" in
+            8)
+                [ "$1" = "draw" ] \
+                    && [ "$2" = "-q" ] \
+                    && [ "$3" = "-F" ] \
+                    && [ "$4" = "txt" ] \
+                    && [ "$5" = "-o" ] \
+                    && [ "$6" = "-" ] \
+                    && [ "$8" = "1" ] \
+                    || return 1
+                printf '%s\n' "$@" >> "$JAVA25_PDF_SUCCESS_PARSER_CAPTURE"
+                case "$7" in
+                    *jls25.pdf*)
+                        write_java25_specification_parser_output \
+                            "The Java® Language Specification" "Java SE 25 Edition"
+                        ;;
+                    *jvms25.pdf*)
+                        write_java25_specification_parser_output \
+                            "The Java® Virtual Machine Specification" "Java SE 25 Edition"
+                        ;;
+                    *) return 1 ;;
+                esac
+                ;;
+            7)
+                [ "$1" = "draw" ] \
+                    && [ "$2" = "-q" ] \
+                    && [ "$3" = "-F" ] \
+                    && [ "$4" = "txt" ] \
+                    && [ "$5" = "-o" ] \
+                    && [ "$6" = "/dev/null" ] \
+                    || return 1
+                printf '%s\n' "$@" >> "$JAVA25_PDF_SUCCESS_PARSER_CAPTURE"
+                case "$7" in
+                    *jls25.pdf*|*jvms25.pdf*) return 0 ;;
+                    *) return 1 ;;
+                esac
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    fetch_source \
+        --java-release 25 \
+        --java25-specification-pdfs \
+        --url "https://docs.oracle.com/en/java/javase/25/docs/api/" \
+        --mirror-path "java/java25-complete" \
+        --name "Java 25 Complete API" \
+        --source-version "25-ga" \
+        --cut-directories 5 \
+        --minimum-html-files 1
+); then
+    fail_documentation_fetch_test "Java 25 source refresh did not publish both specification PDFs"
+fi
+for JAVA25_SPECIFICATION_PATH in \
+    "$JAVA25_PDF_SUCCESS_ROOT/data/docs/java/java25-complete/docs.oracle.com/javase/specs/jls/se25/jls25.pdf" \
+    "$JAVA25_PDF_SUCCESS_ROOT/data/docs/java/java25-complete/docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf"; do
+    [ -f "$JAVA25_SPECIFICATION_PATH" ] \
+        || fail_documentation_fetch_test "Java 25 source refresh omitted $JAVA25_SPECIFICATION_PATH"
+done
+grep -Fxq -- "--max-redirect=0" "$JAVA25_PDF_SUCCESS_CAPTURE" \
+    || fail_documentation_fetch_test "Java 25 specification fetch accepted redirects"
+grep -Fxq -- "https://docs.oracle.com/javase/specs/jls/se25/jls25.pdf" "$JAVA25_PDF_SUCCESS_CAPTURE" \
+    || fail_documentation_fetch_test "Java 25 source refresh did not request the canonical JLS 25 PDF"
+grep -Fxq -- "https://docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf" "$JAVA25_PDF_SUCCESS_CAPTURE" \
+    || fail_documentation_fetch_test "Java 25 source refresh did not request the canonical JVMS 25 PDF"
+if [ "$(grep -Fxc -- "draw" "$JAVA25_PDF_SUCCESS_PARSER_CAPTURE")" -ne 8 ] \
+    || [ "$(grep -Fxc -- "/dev/null" "$JAVA25_PDF_SUCCESS_PARSER_CAPTURE")" -ne 4 ]; then
+    fail_documentation_fetch_test "Java 25 source refresh did not fully parse each staged and installed specification"
+fi
+
+JAVA25_PDF_FAILURE_ROOT="$TEST_WORK_DIRECTORY/java25-pdf-parse-failure"
+JAVA25_PDF_FAILURE_PARSER_CAPTURE="$JAVA25_PDF_FAILURE_ROOT/mutool-arguments"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    DOCS_ROOT="$JAVA25_PDF_FAILURE_ROOT/data/docs"
+    LOG_FILE="$JAVA25_PDF_FAILURE_ROOT/fetch.log"
+    JAVA25_PDF_FAILURE_STAGE="$JAVA25_PDF_FAILURE_ROOT/stage"
+    JAVA25_PDF_FAILURE_TARGET="$DOCS_ROOT/java/java25-complete"
+    mkdir -p "$JAVA25_PDF_FAILURE_TARGET"
+    printf '<html>active Java 25 API</html>\n' > "$JAVA25_PDF_FAILURE_TARGET/index.html"
+    log() {
+        :
+    }
+    create_documentation_fetch_staging_directory() {
+        mkdir -p "$JAVA25_PDF_FAILURE_STAGE"
+        printf '%s\n' "$JAVA25_PDF_FAILURE_STAGE"
+    }
+    generate_java_api_javadoc_seed() {
+        :
+    }
+    reconcile_java_api_seed_mirror() {
+        :
+    }
+    fetch_java_api_javadoc_seed() {
+        printf '<html>Java 25 API</html>\n' > "$1/index.html"
+        cd - > /dev/null
+    }
+    validate_staged_documentation_identity() {
+        :
+    }
+    wget() {
+        local wget_argument
+        local output_document=""
+        local requested_url=""
+        for wget_argument in "$@"; do
+            case "$wget_argument" in
+                --output-document=*) output_document="${wget_argument#--output-document=}" ;;
+                --*) ;;
+                *) requested_url="$wget_argument" ;;
+            esac
+        done
+        case "$requested_url" in
+            https://docs.oracle.com/javase/specs/jls/se25/jls25.pdf)
+                write_java25_specification_byte_gate_stub \
+                    "$output_document" "Language Specification"
+                ;;
+            https://docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf)
+                write_java25_specification_byte_gate_stub \
+                    "$output_document" "Virtual Machine Specification"
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    mutool() {
+        case "$#" in
+            8)
+                [ "$1" = "draw" ] \
+                    && [ "$2" = "-q" ] \
+                    && [ "$3" = "-F" ] \
+                    && [ "$4" = "txt" ] \
+                    && [ "$5" = "-o" ] \
+                    && [ "$6" = "-" ] \
+                    && [ "$8" = "1" ] \
+                    || return 1
+                printf '%s\n' "$@" >> "$JAVA25_PDF_FAILURE_PARSER_CAPTURE"
+                case "$7" in
+                    *jls25.pdf*)
+                        write_java25_specification_parser_output \
+                            "The Java® Language Specification" "Java SE 25 Edition"
+                        ;;
+                    *jvms25.pdf*)
+                        write_java25_specification_parser_output \
+                            "The Java® Virtual Machine Specification" "Java SE 25 Edition"
+                        ;;
+                    *) return 1 ;;
+                esac
+                ;;
+            7)
+                [ "$1" = "draw" ] \
+                    && [ "$2" = "-q" ] \
+                    && [ "$3" = "-F" ] \
+                    && [ "$4" = "txt" ] \
+                    && [ "$5" = "-o" ] \
+                    && [ "$6" = "/dev/null" ] \
+                    || return 1
+                printf '%s\n' "$@" >> "$JAVA25_PDF_FAILURE_PARSER_CAPTURE"
+                case "$7" in
+                    *jls25.pdf*) return 70 ;;
+                    *jvms25.pdf*) return 0 ;;
+                    *) return 1 ;;
+                esac
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    if fetch_source \
+        --java-release 25 \
+        --java25-specification-pdfs \
+        --url "https://docs.oracle.com/en/java/javase/25/docs/api/" \
+        --mirror-path "java/java25-complete" \
+        --name "Java 25 Complete API" \
+        --source-version "25-ga" \
+        --cut-directories 5 \
+        --minimum-html-files 1; then
+        exit 1
+    fi
+    [ "$(< "$JAVA25_PDF_FAILURE_TARGET/index.html")" = "<html>active Java 25 API</html>" ]
+    [ ! -e "$JAVA25_PDF_FAILURE_TARGET/docs.oracle.com/javase/specs/jls/se25/jls25.pdf" ]
+    [ ! -e "$JAVA25_PDF_FAILURE_TARGET/docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf" ]
+); then
+    fail_documentation_fetch_test "Java 25 specification parse failure replaced the active mirror"
+fi
+if [ "$(grep -Fxc -- "/dev/null" "$JAVA25_PDF_FAILURE_PARSER_CAPTURE")" -ne 1 ] \
+    || ! grep -Fq -- "jls25.pdf" "$JAVA25_PDF_FAILURE_PARSER_CAPTURE" \
+    || grep -Fq -- "jvms25.pdf" "$JAVA25_PDF_FAILURE_PARSER_CAPTURE"; then
+    fail_documentation_fetch_test "Java 25 specification pair continued after the JLS full-parse failure"
+fi
 
 if ! (
     set --

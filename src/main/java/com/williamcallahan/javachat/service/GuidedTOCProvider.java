@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
@@ -29,6 +30,11 @@ public class GuidedTOCProvider {
      */
     public GuidedTOCProvider(ObjectMapper objectMapper) {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
+    }
+
+    @PostConstruct
+    void initialize() {
+        getTOC();
     }
 
     /**

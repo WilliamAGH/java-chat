@@ -554,17 +554,21 @@ public class LocalDocsFileIngestionProcessor {
         try {
             storage.hybridVector().upsert(collectionKind, combinedDocuments);
         } catch (EmbeddingServiceUnavailableException embeddingException) {
-            log.error(
-                    "Embedding service unavailable during combined upsert (exception type: {})",
-                    embeddingException.getClass().getSimpleName());
-            DocumentProcessingRequest failedRequest = preparedFiles.getFirst();
-            outcomes.add(LocalDocsFileOutcome.failedFile(failureFactory.failure(
-                    failedRequest.markerContext().file(), "embedding-unavailable", embeddingException)));
+            log.error("Embedding service unavailable during combined upsert", embeddingException);
+            preparedFiles.stream()
+                    .map(DocumentProcessingRequest::markerContext)
+                    .map(MarkerContext::file)
+                    .map(documentationFile -> LocalDocsFileOutcome.failedFile(
+                            failureFactory.failure(documentationFile, "embedding-unavailable", embeddingException)))
+                    .forEach(outcomes::add);
             return false;
         } catch (RuntimeException vectorStorageException) {
-            DocumentProcessingRequest failedRequest = preparedFiles.getFirst();
-            outcomes.add(LocalDocsFileOutcome.failedFile(failureFactory.failure(
-                    failedRequest.markerContext().file(), "qdrant-replacement", vectorStorageException)));
+            preparedFiles.stream()
+                    .map(DocumentProcessingRequest::markerContext)
+                    .map(MarkerContext::file)
+                    .map(documentationFile -> LocalDocsFileOutcome.failedFile(
+                            failureFactory.failure(documentationFile, "qdrant-replacement", vectorStorageException)))
+                    .forEach(outcomes::add);
             return false;
         }
 
@@ -590,9 +594,7 @@ public class LocalDocsFileIngestionProcessor {
                     documents,
                     processingRequest.requiresFullReindex());
         } catch (EmbeddingServiceUnavailableException embeddingException) {
-            log.error(
-                    "Embedding service unavailable during upsert (exception type: {})",
-                    embeddingException.getClass().getSimpleName());
+            log.error("Embedding service unavailable during upsert", embeddingException);
             return LocalDocsFileOutcome.failedFile(
                     failureFactory.failure(markerContext.file(), "embedding-unavailable", embeddingException));
         } catch (RuntimeException vectorStorageException) {
@@ -715,7 +717,8 @@ public class LocalDocsFileIngestionProcessor {
             log.warn(
                     "Failed to quarantine invalid content (exception type: {})",
                     quarantineException.getClass().getSimpleName());
-            return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "content-guard", quarantineException));
+            return LocalDocsFileOutcome.failedFile(
+                    failureFactory.failure(file, "quarantine-write", quarantineException));
         }
     }
 

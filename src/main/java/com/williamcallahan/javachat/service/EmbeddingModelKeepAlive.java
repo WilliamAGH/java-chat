@@ -7,7 +7,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
@@ -25,17 +24,8 @@ import org.springframework.stereotype.Component;
 public class EmbeddingModelKeepAlive implements HealthIndicator {
     private static final Logger log = LoggerFactory.getLogger(EmbeddingModelKeepAlive.class);
 
-    /** Probe cadence below the 5-minute idle-unload default of common model servers. */
-    private static final long KEEP_ALIVE_INTERVAL_MILLIS = 240_000L;
-
-    /** Delay before the first probe so the provider warms up right after startup. */
-    private static final long STARTUP_WARMUP_DELAY_MILLIS = 5_000L;
-
     /** Probe latency above this marks a slow provider response without inferring its remote cause. */
     private static final long SLOW_PROBE_THRESHOLD_MILLIS = 5_000L;
-
-    /** Rechecks an unavailable provider before container health exhausts its retry budget. */
-    private static final long UNAVAILABLE_RECOVERY_INTERVAL_MILLIS = 30_000L;
 
     /** Escalates only after a probe condition repeats on the next observation. */
     private static final int REPEATED_PROBE_ALERT_COUNT = 2;
@@ -67,16 +57,16 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
      * <p>A failed probe is a monitoring signal, not a request failure: it is logged at WARN
      * and the next tick retries. Unexpected runtime failures propagate to the scheduler's
      * error handler rather than being swallowed here.</p>
+     *
+     * <p>A probe deferred before any provider contact (foreground work active, or a locally
+     * recorded provider cooldown) is not a failure: the last completed health observation is
+     * kept unchanged, because the deferral carries no signal about provider health.</p>
      */
-    // fixedRate keeps probe *starts* on the cadence: with fixedDelay a slow cold
-    // start would push the next probe past the provider's idle-unload TTL.
-    @Scheduled(initialDelay = STARTUP_WARMUP_DELAY_MILLIS, fixedRate = KEEP_ALIVE_INTERVAL_MILLIS)
     public void keepEmbeddingModelWarm() {
         probeEmbeddingModel();
     }
 
     /** Retries only unavailable providers so health can recover promptly after a transient outage. */
-    @Scheduled(initialDelay = UNAVAILABLE_RECOVERY_INTERVAL_MILLIS, fixedDelay = UNAVAILABLE_RECOVERY_INTERVAL_MILLIS)
     void retryUnavailableEmbeddingModel() {
         if (latestProbe.lifecycle() == EmbeddingProbeLifecycle.UNAVAILABLE) {
             probeEmbeddingModel();
@@ -87,8 +77,8 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
         long probeStartNanos = nanoTime.getAsLong();
         try {
             embeddingClient.warmUp();
-        } catch (OpenAiCompatibleEmbeddingClient.EmbeddingProbeDeferredException exception) {
-            recordDeferred(elapsedMillis(probeStartNanos));
+        } catch (OpenAiCompatibleEmbeddingClient.EmbeddingProbeDeferredException deferredProbe) {
+            recordDeferred(elapsedMillis(probeStartNanos), deferredProbe);
             return;
         } catch (EmbeddingServiceUnavailableException embeddingUnavailableException) {
             recordFailure(elapsedMillis(probeStartNanos), embeddingUnavailableException);
@@ -97,10 +87,13 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
         recordSuccess(elapsedMillis(probeStartNanos));
     }
 
-    private void recordDeferred(long probeDurationMillis) {
+    private void recordDeferred(
+            long probeDurationMillis, OpenAiCompatibleEmbeddingClient.EmbeddingProbeDeferredException deferredProbe) {
         String logSafeModelName = modelName.replace("\r", "\\r").replace("\n", "\\n");
+        String logSafeDeferralReason =
+                deferredProbe.getMessage().replace("\r", "\\r").replace("\n", "\\n");
         log.atDebug().log(() -> "event=embedding_model_probe_deferred outcome=deferred model=" + logSafeModelName
-                + " durationMs=" + probeDurationMillis + " reason=foreground_embedding_active");
+                + " durationMs=" + probeDurationMillis + " reason=" + logSafeDeferralReason);
     }
 
     /**

@@ -24,6 +24,7 @@ final class InlineListParser {
     private static final int COLON_BACKTRACK_OFFSET = 2;
     private static final Set<String> NON_TERMINAL_ABBREVIATIONS =
             Set.of("dr", "e.g", "i.e", "mr", "mrs", "ms", "prof", "vs");
+    private static final Set<String> CORPORATE_SUFFIX_ABBREVIATIONS = Set.of("corp", "inc");
 
     private InlineListParser() {}
 
@@ -368,7 +369,7 @@ final class InlineListParser {
                     if (!sawWhitespace || candidateStart >= rawEntryText.length()) {
                         continue;
                     }
-                    if (token == '.' && isNonTerminalAbbreviation(rawEntryText, index)) {
+                    if (token == '.' && isNonTerminalPeriod(rawEntryText, index, candidateStart)) {
                         continue;
                     }
                     return candidateStart;
@@ -377,7 +378,7 @@ final class InlineListParser {
             return -1;
         }
 
-        private static boolean isNonTerminalAbbreviation(String rawEntryText, int periodIndex) {
+        private static boolean isNonTerminalPeriod(String rawEntryText, int periodIndex, int candidateStart) {
             int abbreviationStart = periodIndex;
             while (abbreviationStart > 0 && !Character.isWhitespace(rawEntryText.charAt(abbreviationStart - 1))) {
                 abbreviationStart--;
@@ -390,7 +391,16 @@ final class InlineListParser {
                 firstLetterIndex++;
             }
             abbreviation = abbreviation.substring(firstLetterIndex);
-            return NON_TERMINAL_ABBREVIATIONS.contains(abbreviation);
+            if (NON_TERMINAL_ABBREVIATIONS.contains(abbreviation)) {
+                return true;
+            }
+            if (!CORPORATE_SUFFIX_ABBREVIATIONS.contains(abbreviation)) {
+                return false;
+            }
+            char continuationStart = rawEntryText.charAt(candidateStart);
+            return Character.isLowerCase(continuationStart)
+                    || Character.isDigit(continuationStart)
+                    || continuationStart == '(';
         }
     }
 

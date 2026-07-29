@@ -40,7 +40,7 @@ class GuidedSseIntegrationTest {
     @Test
     @DisplayName("Guided stream returns clean plain text without artifacts and server stores processed HTML")
     void guidedStreamProducesCleanText() {
-        boolean hasKey = System.getenv("OPENAI_API_KEY") != null || System.getenv("GITHUB_TOKEN") != null;
+        boolean hasKey = System.getenv("OPENAI_API_KEY") != null;
         Assumptions.assumeTrue(hasKey, "Skipping live integration test without API credentials");
 
         String slug = "introduction-to-java";

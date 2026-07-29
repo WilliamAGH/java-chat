@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -24,7 +25,6 @@ class ChatServiceTest {
 
     private static final String CITATION_QUERY = "Java records";
     private static final String VERSIONED_CONTEXT_QUERY = "Java 17 List.of";
-    private static final String NON_TOKEN_CONSTRAINED_MODEL = "gpt-4.1";
 
     @Test
     void citationsUseSparseDiscoveryConstrainedByEveryCanonicalOfficialSourceIdentity() {
@@ -71,21 +71,23 @@ class ChatServiceTest {
     }
 
     @Test
-    void versionedStructuredPromptUsesOfficialContextForTheDefaultTokenConstrainedModel() {
+    void versionedStructuredPromptUsesReducedOfficialContextForTheDefaultGpt54Model() {
         RetrievalService retrievalService = mock(RetrievalService.class);
         SystemPromptConfig systemPromptConfig = mock(SystemPromptConfig.class);
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         when(systemPromptConfig.getCoreSystemPrompt()).thenReturn("You are a Java tutor.");
         when(retrievalService.retrieveWithLimitOutcome(
                         eq(VERSIONED_CONTEXT_QUERY),
                         eq(ModelConfiguration.RAG_LIMIT_CONSTRAINED),
                         eq(ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED),
-                        any(RetrievalConstraint.class)))
+                        any(RetrievalConstraint.class),
+                        any(),
+                        anyLong()))
                 .thenReturn(new RetrievalService.RetrievalOutcome(List.of(), List.of()));
-        ChatService chatService = new ChatService(
-                mock(OpenAIStreamingService.class), retrievalService, systemPromptConfig, new AppProperties());
+        ChatService chatService =
+                new ChatService(streamingService, retrievalService, systemPromptConfig, new AppProperties());
 
-        chatService.buildStructuredPromptWithContextOutcome(
-                List.of(), VERSIONED_CONTEXT_QUERY, ModelConfiguration.DEFAULT_MODEL);
+        chatService.buildStructuredPromptWithContextOutcome(List.of(), VERSIONED_CONTEXT_QUERY);
 
         ArgumentCaptor<RetrievalConstraint> constraintCaptor = ArgumentCaptor.forClass(RetrievalConstraint.class);
         verify(retrievalService)
@@ -93,28 +95,9 @@ class ChatServiceTest {
                         eq(VERSIONED_CONTEXT_QUERY),
                         eq(ModelConfiguration.RAG_LIMIT_CONSTRAINED),
                         eq(ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED),
-                        constraintCaptor.capture());
-        RetrievalConstraint answerContextConstraint = constraintCaptor.getValue();
-        assertEquals("official", answerContextConstraint.sourceKind());
-        assertEquals(DocsSourceRegistry.officialDocumentationSourceIdentities(), answerContextConstraint.docSet());
-        verify(retrievalService, never()).discoverCitations(anyString(), any(RetrievalConstraint.class));
-    }
-
-    @Test
-    void versionedStructuredPromptUsesOfficialContextForNonTokenConstrainedModels() {
-        RetrievalService retrievalService = mock(RetrievalService.class);
-        SystemPromptConfig systemPromptConfig = mock(SystemPromptConfig.class);
-        when(systemPromptConfig.getCoreSystemPrompt()).thenReturn("You are a Java tutor.");
-        when(retrievalService.retrieveOutcome(eq(VERSIONED_CONTEXT_QUERY), any(RetrievalConstraint.class)))
-                .thenReturn(new RetrievalService.RetrievalOutcome(List.of(), List.of()));
-        ChatService chatService = new ChatService(
-                mock(OpenAIStreamingService.class), retrievalService, systemPromptConfig, new AppProperties());
-
-        chatService.buildStructuredPromptWithContextOutcome(
-                List.of(), VERSIONED_CONTEXT_QUERY, NON_TOKEN_CONSTRAINED_MODEL);
-
-        ArgumentCaptor<RetrievalConstraint> constraintCaptor = ArgumentCaptor.forClass(RetrievalConstraint.class);
-        verify(retrievalService).retrieveOutcome(eq(VERSIONED_CONTEXT_QUERY), constraintCaptor.capture());
+                        constraintCaptor.capture(),
+                        any(),
+                        anyLong());
         RetrievalConstraint answerContextConstraint = constraintCaptor.getValue();
         assertEquals("official", answerContextConstraint.sourceKind());
         assertEquals(DocsSourceRegistry.officialDocumentationSourceIdentities(), answerContextConstraint.docSet());

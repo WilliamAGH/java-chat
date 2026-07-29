@@ -18,6 +18,18 @@ set --
 # shellcheck source=process_all_to_qdrant.sh
 source "$POSTCONDITION_TEST_SCRIPT_DIRECTORY/process_all_to_qdrant.sh"
 
+export DOCS_PARSED_DIR="$POSTCONDITION_TEST_WORK_DIRECTORY/parsed"
+export DOCS_INDEX_DIR="$POSTCONDITION_TEST_WORK_DIRECTORY/index"
+mkdir -p "$DOCS_PARSED_DIR" "$DOCS_INDEX_DIR"
+if [ "$(corpus_indexed_summary)" != "0 indexed / 0 parsed" ]; then
+    fail_postcondition_test "empty marker directory did not report zero indexed files"
+fi
+touch "$DOCS_PARSED_DIR/chunk.txt"
+touch "$DOCS_INDEX_DIR/$(printf 'a%.0s' {1..64})"
+if [ "$(corpus_indexed_summary)" != "1 indexed / 1 parsed" ]; then
+    fail_postcondition_test "hash marker and parsed-file summary was not exact"
+fi
+
 qdrant_rest_base_url() {
     printf '%s\n' "http://qdrant.test"
 }

@@ -5,6 +5,8 @@ const SSE_STREAM_RESPONSE_STATUS = 200;
 const HTTP_SERVICE_UNAVAILABLE_STATUS = 503;
 const FETCH_FAILURE_MESSAGE = "Network request failed";
 const STREAM_READ_FAILURE_MESSAGE = "Unable to read the SSE stream";
+const NETWORK_FAILURE_MESSAGE = "Couldn't reach the server";
+const NETWORK_FAILURE_DETAILS = "Check your connection and try again.";
 const SERVER_EVENT_ERROR_MESSAGE = "The provider ended the stream";
 const CITATION_WARNING_MESSAGE = "Some citations could not be loaded";
 const CITATION_WARNING_DETAILS = "Citations could not be loaded";
@@ -54,7 +56,7 @@ describe("streamSse transport handling", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
-  it("reports and rejects a non-abort fetch failure exactly once", async () => {
+  it("reports and rejects a non-abort fetch failure as a retryable network failure", async () => {
     const fetchFailure = new Error(FETCH_FAILURE_MESSAGE);
     const fetchMock = vi.fn().mockRejectedValue(fetchFailure);
     vi.stubGlobal("fetch", fetchMock);
@@ -64,15 +66,24 @@ describe("streamSse transport handling", () => {
 
     await expect(
       streamSse("/api/test/stream", { hello: "world" }, { onText, onError }, "sse.test.ts"),
-    ).rejects.toBe(fetchFailure);
+    ).rejects.toMatchObject({
+      name: "StreamFailureError",
+      message: NETWORK_FAILURE_MESSAGE,
+      details: NETWORK_FAILURE_DETAILS,
+      retryable: true,
+    });
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(onText).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledOnce();
-    expect(onError).toHaveBeenCalledWith({ message: FETCH_FAILURE_MESSAGE });
+    expect(onError).toHaveBeenCalledWith({
+      message: NETWORK_FAILURE_MESSAGE,
+      details: NETWORK_FAILURE_DETAILS,
+      retryable: true,
+    });
   });
 
-  it("reports and rejects a non-abort GET fetch failure exactly once", async () => {
+  it("reports and rejects a non-abort GET fetch failure as a retryable network failure", async () => {
     const fetchFailure = new Error(FETCH_FAILURE_MESSAGE);
     const fetchMock = vi.fn().mockRejectedValue(fetchFailure);
     vi.stubGlobal("fetch", fetchMock);
@@ -80,14 +91,23 @@ describe("streamSse transport handling", () => {
     const onText = vi.fn();
     const onError = vi.fn();
 
-    await expect(streamSseGet("/api/test/stream", { onText, onError }, "sse.test.ts")).rejects.toBe(
-      fetchFailure,
-    );
+    await expect(
+      streamSseGet("/api/test/stream", { onText, onError }, "sse.test.ts"),
+    ).rejects.toMatchObject({
+      name: "StreamFailureError",
+      message: NETWORK_FAILURE_MESSAGE,
+      details: NETWORK_FAILURE_DETAILS,
+      retryable: true,
+    });
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(onText).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledOnce();
-    expect(onError).toHaveBeenCalledWith({ message: FETCH_FAILURE_MESSAGE });
+    expect(onError).toHaveBeenCalledWith({
+      message: NETWORK_FAILURE_MESSAGE,
+      details: NETWORK_FAILURE_DETAILS,
+      retryable: true,
+    });
   });
 
   it("reports a non-OK GET response exactly once", async () => {
@@ -191,7 +211,7 @@ describe("streamSse transport handling", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
-  it("reports and rejects a stream-read failure exactly once", async () => {
+  it("reports and rejects a stream-read failure as a retryable network failure", async () => {
     const streamReadFailure = new Error(STREAM_READ_FAILURE_MESSAGE);
     const sseStreamBody = new ReadableStream<Uint8Array>({
       start(streamController) {
@@ -211,12 +231,21 @@ describe("streamSse transport handling", () => {
 
     await expect(
       streamSse("/api/test/stream", { hello: "world" }, { onText, onError }, "sse.test.ts"),
-    ).rejects.toBe(streamReadFailure);
+    ).rejects.toMatchObject({
+      name: "StreamFailureError",
+      message: NETWORK_FAILURE_MESSAGE,
+      details: NETWORK_FAILURE_DETAILS,
+      retryable: true,
+    });
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(onText).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledOnce();
-    expect(onError).toHaveBeenCalledWith({ message: STREAM_READ_FAILURE_MESSAGE });
+    expect(onError).toHaveBeenCalledWith({
+      message: NETWORK_FAILURE_MESSAGE,
+      details: NETWORK_FAILURE_DETAILS,
+      retryable: true,
+    });
   });
 });
 

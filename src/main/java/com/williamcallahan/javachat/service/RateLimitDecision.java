@@ -25,8 +25,8 @@ record RateLimitDecision(Instant resetTime, long retryAfterSeconds) {
      * Creates a decision from an explicit Retry-After header value.
      */
     static RateLimitDecision fromRetryAfterSeconds(long retryAfterSeconds) {
-        if (retryAfterSeconds <= 0) {
-            throw new IllegalArgumentException("retryAfterSeconds must be positive");
+        if (retryAfterSeconds < 0) {
+            throw new IllegalArgumentException("retryAfterSeconds must be non-negative");
         }
         Instant resetTime = Instant.now().plusSeconds(retryAfterSeconds);
         return new RateLimitDecision(resetTime, retryAfterSeconds);

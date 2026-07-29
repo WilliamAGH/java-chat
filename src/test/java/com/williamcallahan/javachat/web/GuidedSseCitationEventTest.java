@@ -9,9 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -36,6 +38,7 @@ import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -60,7 +63,7 @@ import reactor.core.publisher.Mono;
  * {@code [1]} instead of emitting structured citation payloads.</p>
  */
 @WebMvcTest(controllers = GuidedLearningController.class)
-@Import({AppProperties.class, WebMvcConfig.class, SseSupport.class})
+@Import({AppProperties.class, WebMvcConfig.class, SseSupport.class, SimpleMeterRegistry.class})
 @org.springframework.security.test.context.support.WithMockUser
 class GuidedSseCitationEventTest {
 
@@ -105,17 +108,21 @@ class GuidedSseCitationEventTest {
                 .build();
         given(guidedLearningService.getLesson("intro")).willReturn(Optional.of(listedLesson("intro")));
         given(openAIStreamingService.isAvailable()).willReturn(true);
+        given(openAIStreamingService.canAttemptRequest()).willReturn(true);
         given(chatMemoryService.getHistory(anyString())).willReturn(List.of());
+        GuidedLearningService.GuidedChatPromptOutcome promptOutcome = new GuidedLearningService.GuidedChatPromptOutcome(
+                StructuredPrompt.fromRawPrompt("test", 1),
+                List.of(lessonContextDocument, truncatedLessonContextDocument));
         given(openAIStreamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .willReturn(Mono.just(new StreamingResult(
                         Flux.just("Hello"),
                         RateLimitService.ApiProvider.OPENAI,
                         List.of(lessonContextDocument.getId()))));
-        given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
-                .willReturn(new GuidedLearningService.GuidedChatPromptOutcome(
-                        StructuredPrompt.fromRawPrompt("test", 1),
-                        List.of(lessonContextDocument, truncatedLessonContextDocument)));
-        given(guidedLearningService.citationOutcomeForContextDocuments(eq(List.of(lessonContextDocument))))
+        given(guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        anyList(), anyString(), anyString(), any(), anyLong()))
+                .willReturn(promptOutcome);
+        given(guidedLearningService.citationOutcomeForRetainedContext(
+                        eq(promptOutcome), eq(List.of(lessonContextDocument.getId()))))
                 .willReturn(new RetrievalService.CitationOutcome(
                         List.of(new Citation("https://example.com", "Example", "", "")), 0));
 
@@ -138,6 +145,8 @@ class GuidedSseCitationEventTest {
         assertTrue(
                 aggregated.contains("https://example.com"),
                 "Citation payload should include the citation URL. Response was:\n" + aggregated);
+        verify(guidedLearningService)
+                .citationOutcomeForRetainedContext(promptOutcome, List.of(lessonContextDocument.getId()));
     }
 
     @Test
@@ -149,16 +158,20 @@ class GuidedSseCitationEventTest {
                 .build();
         given(guidedLearningService.getLesson("intro")).willReturn(Optional.of(listedLesson("intro")));
         given(openAIStreamingService.isAvailable()).willReturn(true);
+        given(openAIStreamingService.canAttemptRequest()).willReturn(true);
         given(chatMemoryService.getHistory(anyString())).willReturn(List.of());
+        GuidedLearningService.GuidedChatPromptOutcome promptOutcome = new GuidedLearningService.GuidedChatPromptOutcome(
+                StructuredPrompt.fromRawPrompt("test", 1), List.of(lessonContextDocument));
         given(openAIStreamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .willReturn(Mono.just(new StreamingResult(
                         Flux.just("Hello"),
                         RateLimitService.ApiProvider.OPENAI,
                         List.of(lessonContextDocument.getId()))));
-        given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
-                .willReturn(new GuidedLearningService.GuidedChatPromptOutcome(
-                        StructuredPrompt.fromRawPrompt("test", 1), List.of(lessonContextDocument)));
-        given(guidedLearningService.citationOutcomeForContextDocuments(eq(List.of(lessonContextDocument))))
+        given(guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        anyList(), anyString(), anyString(), any(), anyLong()))
+                .willReturn(promptOutcome);
+        given(guidedLearningService.citationOutcomeForRetainedContext(
+                        eq(promptOutcome), eq(List.of(lessonContextDocument.getId()))))
                 .willReturn(new RetrievalService.CitationOutcome(
                         List.of(new Citation("https://example.com", "Example", "", "")), 1));
 

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Page not found | Java Chat</title>
+    <link rel="stylesheet" href="/theme.css">
+    <link rel="icon" href="/favicon.ico">
+    <style>
+        .container { max-width: 720px; margin: 0 auto; padding: 3rem 1.5rem; }
+        .back-link { display: inline-flex; align-items: center; gap: 0.5rem; color: hsl(var(--surface-muted-foreground)); text-decoration: none; font-size: 0.95rem; margin-top: 2rem; }
+        .back-link:hover { color: hsl(var(--surface-foreground)); }
+        .header { margin-bottom: 2rem; }
+        .error-type { font-size: 2rem; font-weight: 600; color: hsl(var(--surface-foreground)); margin: 0 0 0.5rem; }
+        .status-badge { display: inline-flex; padding: 0.35rem 0.75rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; font-family: "SFMono-Regular", Consolas, monospace; margin-bottom: 1rem; }
+        .status-4xx { background: rgba(251, 191, 36, 0.15); color: rgb(180, 83, 9); }
+        @media (prefers-color-scheme: dark) { .status-4xx { background: rgba(251, 191, 36, 0.2); color: rgb(253, 224, 71); } }
+        .description { color: hsl(var(--surface-muted-foreground)); font-size: 1.1rem; line-height: 1.6; margin: 0; }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <header class="header">
+            <span class="status-badge status-4xx">404 Not Found</span>
+            <h1 class="error-type">Java Chat could not find that page</h1>
+            <p class="description">The address may be incorrect, or the page may have moved.</p>
+            <a href="/" class="back-link">&larr; Return to Java Chat</a>
+        </header>
+    </main>
+</body>
+</html>

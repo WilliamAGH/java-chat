@@ -18,9 +18,9 @@ import org.springframework.ai.document.Document;
 /** Verifies bounded document embedding batches preserve the provider contract exactly. */
 class EmbeddingBatchEmbedderTest {
     private static final int EMBEDDING_DIMENSIONS = 2;
-    private static final int THREE_BATCH_DOCUMENT_COUNT = 65;
+    private static final int THREE_BATCH_DOCUMENT_COUNT = EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE * 2 + 1;
     private static final int REPRESENTATIVE_JAVA_CORPUS_CHUNK_COUNT = 177_000;
-    private static final int MAX_REPRESENTATIVE_JAVA_CORPUS_REQUEST_COUNT = 6_000;
+    private static final int MAX_REPRESENTATIVE_JAVA_CORPUS_REQUEST_COUNT = 45_000;
     private static final float[] EMBEDDING_VECTOR = new float[] {0.25f, 0.75f};
 
     @Test
@@ -75,7 +75,10 @@ class EmbeddingBatchEmbedderTest {
                 () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(documentCount)));
 
         assertTrue(mismatchFailure.getMessage().contains("expected 1 but received 0"));
-        assertTrue(mismatchFailure.getMessage().contains("batch [32..32]"));
+        assertTrue(mismatchFailure
+                .getMessage()
+                .contains("batch [" + EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE + ".."
+                        + EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE + "]"));
         assertEquals(2, embeddingClient.requestedTextBatches.size());
     }
 
@@ -97,9 +100,14 @@ class EmbeddingBatchEmbedderTest {
                 () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(documentCount)));
 
         assertSame(providerFailure, batchFailure.getCause());
-        assertTrue(batchFailure.getMessage().contains("batch [32..63]"));
-        assertTrue(batchFailure.getMessage().contains("firstUrl=https://docs.example.com/java/32"));
-        assertTrue(batchFailure.getMessage().contains("lastUrl=https://docs.example.com/java/63"));
+        int secondBatchStartIndex = EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE;
+        int secondBatchEndIndex = EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE * 2 - 1;
+        assertTrue(batchFailure
+                .getMessage()
+                .contains("batch [" + secondBatchStartIndex + ".." + secondBatchEndIndex + "]"));
+        assertTrue(
+                batchFailure.getMessage().contains("firstUrl=https://docs.example.com/java/" + secondBatchStartIndex));
+        assertTrue(batchFailure.getMessage().contains("lastUrl=https://docs.example.com/java/" + secondBatchEndIndex));
         assertEquals(2, embeddingClient.requestedTextBatches.size());
     }
 
@@ -133,8 +141,11 @@ class EmbeddingBatchEmbedderTest {
         assertEquals(REPRESENTATIVE_JAVA_CORPUS_CHUNK_COUNT, embeddingVectors.size());
         assertEquals(expectedRequestCount, embeddingClient.requestedTextBatches.size());
         assertTrue(expectedRequestCount <= MAX_REPRESENTATIVE_JAVA_CORPUS_REQUEST_COUNT);
+        int expectedFinalBatchSize = Math.floorMod(
+                        REPRESENTATIVE_JAVA_CORPUS_CHUNK_COUNT - 1, EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE)
+                + 1;
         assertEquals(
-                REPRESENTATIVE_JAVA_CORPUS_CHUNK_COUNT % EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE,
+                expectedFinalBatchSize,
                 embeddingClient.requestedTextBatches.getLast().size());
     }
 
@@ -178,6 +189,11 @@ class EmbeddingBatchEmbedderTest {
             requestedTextBatches.add(List.copyOf(texts));
             requestedTiers.add(requestTier);
             return batchEmbeddingFunction.apply(requestIndex, texts);
+        }
+
+        @Override
+        public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier, java.time.Duration requestTimeout) {
+            return embed(texts, requestTier);
         }
 
         @Override

@@ -1,13 +1,10 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.application.ingestion.DocumentationIngestionUseCase;
-import com.williamcallahan.javachat.application.ingestion.FileLimit;
 import com.williamcallahan.javachat.application.ingestion.PageLimit;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
-import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
 import com.williamcallahan.javachat.service.ingestion.JavaPackageExtractor;
-import com.williamcallahan.javachat.service.ingestion.LocalDocsDirectoryIngestionService;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -30,8 +27,7 @@ import org.springframework.stereotype.Service;
 /**
  * Ingests documentation content into Qdrant with chunking and local snapshots.
  *
- * <p>Remote crawling is owned by this service. Local directory ingestion is delegated to
- * {@link LocalDocsDirectoryIngestionService} to keep responsibilities narrow and files small.</p>
+ * <p>Remote crawling is owned by this service.</p>
  */
 @Service
 public class DocsIngestionService implements DocumentationIngestionUseCase {
@@ -52,7 +48,6 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
     private final ContentHasher contentHasher;
     private final LocalStoreService localStore;
     private final HtmlContentExtractor htmlExtractor;
-    private final LocalDocsDirectoryIngestionService localDirectoryIngestionService;
 
     /**
      * Wires ingestion dependencies.
@@ -63,7 +58,6 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
      * @param contentHasher derives deterministic point UUIDs from chunk hashes
      * @param localStore local snapshot and chunk storage
      * @param htmlExtractor HTML content extractor
-     * @param localDirectoryIngestionService local directory ingestion delegate
      */
     public DocsIngestionService(
             AppProperties appProperties,
@@ -71,8 +65,7 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
             ChunkProcessingService chunkProcessingService,
             ContentHasher contentHasher,
             LocalStoreService localStore,
-            HtmlContentExtractor htmlExtractor,
-            LocalDocsDirectoryIngestionService localDirectoryIngestionService) {
+            HtmlContentExtractor htmlExtractor) {
         AppProperties requiredAppProperties = Objects.requireNonNull(appProperties, "appProperties");
         this.crawlBoundary = CrawlBoundary.from(requiredAppProperties.getDocs().getRootUrl());
         this.hybridVectorService = Objects.requireNonNull(hybridVectorService, "hybridVectorService");
@@ -80,8 +73,6 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
         this.contentHasher = Objects.requireNonNull(contentHasher, "contentHasher");
         this.localStore = Objects.requireNonNull(localStore, "localStore");
         this.htmlExtractor = Objects.requireNonNull(htmlExtractor, "htmlExtractor");
-        this.localDirectoryIngestionService =
-                Objects.requireNonNull(localDirectoryIngestionService, "localDirectoryIngestionService");
     }
 
     /**
@@ -95,38 +86,53 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
     void crawlAndIngest(PageLimit pageLimit, CrawlPageFetcher crawlPageFetcher) throws IOException {
         PageLimit requiredPageLimit = Objects.requireNonNull(pageLimit, "pageLimit");
         CrawlPageFetcher requiredPageFetcher = Objects.requireNonNull(crawlPageFetcher, "crawlPageFetcher");
-        Set<String> visitedSourceUrls = new LinkedHashSet<>();
+        Set<String> seenRequestedUrls = new LinkedHashSet<>();
+        Set<String> attemptedFinalUrls = new LinkedHashSet<>();
+        Set<String> successfullyProcessedFinalUrls = new LinkedHashSet<>();
         Deque<String> pendingSourceUrls = new ArrayDeque<>();
         pendingSourceUrls.add(crawlBoundary.rootUrl());
-        while (!pendingSourceUrls.isEmpty() && visitedSourceUrls.size() < requiredPageLimit.maximumPages()) {
+        int fetchedPageCount = 0;
+        while (!pendingSourceUrls.isEmpty() && fetchedPageCount < requiredPageLimit.maximumPages()) {
             String sourceUrl = pendingSourceUrls.poll();
-            if (!crawlBoundary.contains(sourceUrl) || !visitedSourceUrls.add(sourceUrl)) {
+            if (!crawlBoundary.contains(sourceUrl) || !seenRequestedUrls.add(sourceUrl)) {
                 continue;
             }
 
             CrawlPageSnapshot pageSnapshot = requiredPageFetcher.fetch(sourceUrl);
-            crawlBoundary.requireContainsRedirectTarget(pageSnapshot.finalUrl());
+            fetchedPageCount++;
+            String finalSourceUrl = pageSnapshot.finalUrl();
+            crawlBoundary.requireContainsRedirectTarget(finalSourceUrl);
+            seenRequestedUrls.add(finalSourceUrl);
+            if (!attemptedFinalUrls.add(finalSourceUrl)) {
+                if (successfullyProcessedFinalUrls.contains(finalSourceUrl)) {
+                    deleteRedirectSourceIfNeeded(sourceUrl, finalSourceUrl);
+                }
+                continue;
+            }
             Document sourceDocument = pageSnapshot.document();
             String title = Optional.ofNullable(sourceDocument.title()).orElse("");
 
-            localStore.saveHtml(sourceUrl, pageSnapshot.rawHtml());
+            localStore.saveHtml(finalSourceUrl, pageSnapshot.rawHtml());
 
             for (String candidateSourceUrl : pageSnapshot.discoveredLinks()) {
-                if (crawlBoundary.contains(candidateSourceUrl) && !visitedSourceUrls.contains(candidateSourceUrl)) {
+                if (crawlBoundary.contains(candidateSourceUrl) && !seenRequestedUrls.contains(candidateSourceUrl)) {
                     pendingSourceUrls.add(candidateSourceUrl);
                 }
             }
 
-            if (JavaPackageExtractor.isJavaApiUrl(sourceUrl)) {
+            if (JavaPackageExtractor.isJavaApiUrl(finalSourceUrl)) {
                 JavaApiPageExtraction javaApiExtraction = htmlExtractor.extractJavaApiPage(sourceDocument);
                 if (javaApiExtraction.excluded()) {
-                    hybridVectorService.deleteByUrl(QdrantCollectionKind.DOCS, sourceUrl);
+                    hybridVectorService.deleteByUrl(QdrantCollectionKind.DOCS, finalSourceUrl);
+                    successfullyProcessedFinalUrls.add(finalSourceUrl);
+                    deleteRedirectSourceIfNeeded(sourceUrl, finalSourceUrl);
                     INDEXING_LOG.debug("[INDEXING] Skipping class-use Java API page content");
                     continue;
                 }
-                String packageName = JavaPackageExtractor.extractPackage(sourceUrl, javaApiExtraction.combinedText());
+                String packageName =
+                        JavaPackageExtractor.extractPackage(finalSourceUrl, javaApiExtraction.combinedText());
                 ChunkProcessingService.JavaApiPage javaApiPage = javaApiPageFor(
-                                sourceUrl, title, packageName, javaApiExtraction)
+                                finalSourceUrl, title, packageName, javaApiExtraction)
                         .orElseThrow();
                 ChunkProcessingService.ChunkProcessingOutcome initialChunkingOutcome =
                         chunkProcessingService.processAndStoreJavaApiPage(javaApiPage);
@@ -137,8 +143,10 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
                 if (initialChunkingOutcome.skippedAllChunks()
                         && hybridVectorService.hasExactPointIdsForUrl(
                                 QdrantCollectionKind.DOCS,
-                                sourceUrl,
+                                finalSourceUrl,
                                 expectedPointUuids(initialChunkingOutcome.allChunkHashes()))) {
+                    successfullyProcessedFinalUrls.add(finalSourceUrl);
+                    deleteRedirectSourceIfNeeded(sourceUrl, finalSourceUrl);
                     INDEXING_LOG.debug("[INDEXING] Skipping unchanged Java API page with complete vector coverage");
                     continue;
                 }
@@ -152,14 +160,16 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
                     replacementDocuments = requireCompleteReplacement(replacementChunkingOutcome);
                 }
                 applyJavaApiDocumentType(replacementDocuments);
-                replaceAndMarkDocuments(sourceUrl, replacementDocuments);
+                replaceAndMarkDocuments(finalSourceUrl, replacementDocuments);
+                successfullyProcessedFinalUrls.add(finalSourceUrl);
+                deleteRedirectSourceIfNeeded(sourceUrl, finalSourceUrl);
                 continue;
             }
 
             String extractedText = htmlExtractor.extractCleanContent(sourceDocument);
-            String packageName = JavaPackageExtractor.extractPackage(sourceUrl, extractedText);
+            String packageName = JavaPackageExtractor.extractPackage(finalSourceUrl, extractedText);
             ChunkProcessingService.ChunkProcessingOutcome chunkingOutcome =
-                    chunkProcessingService.processAndStoreChunks(extractedText, sourceUrl, title, packageName);
+                    chunkProcessingService.processAndStoreChunks(extractedText, finalSourceUrl, title, packageName);
             if (chunkingOutcome.generatedNoChunks()) {
                 INDEXING_LOG.debug("[INDEXING] No chunks generated for URL");
                 continue;
@@ -167,8 +177,10 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
             if (chunkingOutcome.skippedAllChunks()
                     && hybridVectorService.hasExactPointIdsForUrl(
                             QdrantCollectionKind.DOCS,
-                            sourceUrl,
+                            finalSourceUrl,
                             expectedPointUuids(chunkingOutcome.allChunkHashes()))) {
+                successfullyProcessedFinalUrls.add(finalSourceUrl);
+                deleteRedirectSourceIfNeeded(sourceUrl, finalSourceUrl);
                 INDEXING_LOG.debug("[INDEXING] Skipping URL with exact vector identity coverage");
                 continue;
             }
@@ -181,20 +193,20 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
                 replacementDocuments = requireCompleteReplacement(chunkingOutcome);
             } else {
                 ChunkProcessingService.ChunkProcessingOutcome replacementChunkingOutcome =
-                        chunkProcessingService.processAndStoreChunksForce(extractedText, sourceUrl, title, packageName);
+                        chunkProcessingService.processAndStoreChunksForce(
+                                extractedText, finalSourceUrl, title, packageName);
                 replacementDocuments = requireCompleteReplacement(replacementChunkingOutcome);
             }
-            replaceAndMarkDocuments(sourceUrl, replacementDocuments);
+            replaceAndMarkDocuments(finalSourceUrl, replacementDocuments);
+            successfullyProcessedFinalUrls.add(finalSourceUrl);
+            deleteRedirectSourceIfNeeded(sourceUrl, finalSourceUrl);
         }
     }
 
-    /**
-     * Ingests HTML/PDF files from a local directory mirror (for example, {@code data/docs/**}).
-     */
-    @Override
-    public IngestionLocalOutcome ingestLocalDirectory(String rootDirectory, FileLimit fileLimit) throws IOException {
-        FileLimit requiredFileLimit = Objects.requireNonNull(fileLimit, "fileLimit");
-        return localDirectoryIngestionService.ingestLocalDirectory(rootDirectory, requiredFileLimit.maximumFiles());
+    private void deleteRedirectSourceIfNeeded(String requestedSourceUrl, String finalSourceUrl) throws IOException {
+        if (!requestedSourceUrl.equals(finalSourceUrl)) {
+            hybridVectorService.deleteByUrl(QdrantCollectionKind.DOCS, requestedSourceUrl);
+        }
     }
 
     private void replaceAndMarkDocuments(

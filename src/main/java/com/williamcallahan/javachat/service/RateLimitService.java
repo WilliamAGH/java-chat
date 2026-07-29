@@ -22,20 +22,8 @@ public class RateLimitService {
 
     private static final Logger log = LoggerFactory.getLogger(RateLimitService.class);
 
-    /** OpenAI tier-1 daily request cap used for local protective throttling. */
-    private static final int OPENAI_DAILY_LIMIT = 500;
-
-    /** GitHub Models preview daily cap used for local protective throttling. */
-    private static final int GITHUB_MODELS_DAILY_LIMIT = 150;
-
     /** OpenAI rate-limit persistence window key. */
     private static final String OPENAI_RATE_LIMIT_WINDOW = "1m";
-
-    /** GitHub Models rate-limit persistence window key. */
-    private static final String GITHUB_MODELS_RATE_LIMIT_WINDOW = "24h";
-
-    /** Maximum exponential backoff multiplier used by in-memory circuit state. */
-    private static final int MAX_BACKOFF_MULTIPLIER = 32;
 
     private final RateLimitState rateLimitState;
     private final Map<String, ProviderCircuitState> endpointStates = new ConcurrentHashMap<>();
@@ -46,20 +34,14 @@ public class RateLimitService {
      * Describes supported providers and their persistence/rate-limit metadata.
      */
     public enum ApiProvider {
-        /** OpenAI provider. */
-        OPENAI("openai", OPENAI_DAILY_LIMIT, OPENAI_RATE_LIMIT_WINDOW),
-        /** GitHub Models provider. */
-        GITHUB_MODELS("github_models", GITHUB_MODELS_DAILY_LIMIT, GITHUB_MODELS_RATE_LIMIT_WINDOW),
-        /** Local model provider without network rate limits. */
-        LOCAL("local", Integer.MAX_VALUE, null);
+        /** Shared OpenAI-compatible gateway provider. */
+        OPENAI("openai", OPENAI_RATE_LIMIT_WINDOW);
 
         private final String name;
-        private final int dailyLimit;
         private final String typicalRateLimitWindow;
 
-        ApiProvider(String name, int dailyLimit, String typicalRateLimitWindow) {
+        ApiProvider(String name, String typicalRateLimitWindow) {
             this.name = name;
-            this.dailyLimit = dailyLimit;
             this.typicalRateLimitWindow = typicalRateLimitWindow;
         }
 
@@ -100,8 +82,8 @@ public class RateLimitService {
         }
 
         ProviderCircuitState state = getOrCreateEndpointState(requiredProvider);
-        if (!state.isAvailable(requiredProvider.dailyLimit)) {
-            log.debug("[{}] Circuit or daily request limit prevents admission", providerName);
+        if (!state.isAvailable()) {
+            log.debug("[{}] Provider-declared retry window prevents admission", providerName);
             return false;
         }
 
@@ -110,9 +92,6 @@ public class RateLimitService {
 
     /**
      * Atomically reserves one provider request immediately before SDK dispatch.
-     *
-     * <p>Every granted reservation consumes the daily limit even when the dispatched request
-     * subsequently fails, preventing retries from evading the protective cap.</p>
      */
     public boolean tryReserveRequest(ApiProvider provider) {
         ApiProvider requiredProvider = Objects.requireNonNull(provider, "provider");
@@ -123,8 +102,8 @@ public class RateLimitService {
         }
 
         ProviderCircuitState state = getOrCreateEndpointState(requiredProvider);
-        if (!state.tryReserveRequest(requiredProvider.dailyLimit)) {
-            log.warn("[{}] Circuit or daily request limit denied admission", providerName);
+        if (!state.tryReserveRequest()) {
+            log.warn("[{}] Provider-declared retry window denied admission", providerName);
             return false;
         }
 
@@ -203,24 +182,20 @@ public class RateLimitService {
     }
 
     private boolean isProviderConfigured(ApiProvider provider) {
-        return switch (provider) {
-            case OPENAI -> hasText(env.getProperty("OPENAI_API_KEY"));
-            case GITHUB_MODELS -> hasText(env.getProperty("GITHUB_TOKEN"));
-            case LOCAL -> true;
-        };
+        Objects.requireNonNull(provider, "provider");
+        return hasText(env.getProperty("OPENAI_API_KEY"));
     }
 
     private ProviderCircuitState getOrCreateEndpointState(ApiProvider provider) {
         String providerName = providerName(provider);
-        return endpointStates.computeIfAbsent(
-                providerName, ignoredKey -> new ProviderCircuitState(MAX_BACKOFF_MULTIPLIER));
+        return endpointStates.computeIfAbsent(providerName, ignoredKey -> new ProviderCircuitState());
     }
 
     private void applyRateLimit(ApiProvider provider, RateLimitDecision decision) {
         String providerName = providerName(provider);
         ProviderCircuitState state = getOrCreateEndpointState(provider);
 
-        state.recordRateLimit(decision.retryAfterSeconds());
+        state.recordRateLimit(decision.resetTime());
         rateLimitState.recordRateLimit(providerName, decision.resetTime(), provider.getTypicalRateLimitWindow());
 
         log.warn("[{}] Rate limited (retryAfterSeconds={})", providerName, decision.retryAfterSeconds());

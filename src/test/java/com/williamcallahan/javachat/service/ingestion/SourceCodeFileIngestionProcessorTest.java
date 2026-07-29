@@ -32,6 +32,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
@@ -45,6 +46,59 @@ import org.springframework.ai.document.Document;
 class SourceCodeFileIngestionProcessorTest {
     private static final String PRIOR_COLLECTION_NAME = "prior-collection";
     private static final String TARGET_COLLECTION_NAME = "target-collection";
+
+    @Test
+    void missingMarkerWithExistingVectorsReplacesUrlDocuments(@TempDir Path temporaryDirectory) throws IOException {
+        SourceIngestionScenario ingestionScenario = sourceIngestionScenario(temporaryDirectory);
+        Document indexedDocument = new Document("point-1", "package demo; class Main {}", new HashMap<>());
+        indexedDocument.getMetadata().put(QdrantPayloadFieldSchema.HASH_FIELD, "newhash");
+        when(ingestionScenario
+                        .chunkProcessingService()
+                        .processAndStoreChunksForce(
+                                anyString(), eq(ingestionScenario.sourceUrl()), eq("Main.java"), anyString()))
+                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(
+                        List.of(indexedDocument), List.of("newhash"), 1, 0));
+
+        SourceFileProcessingResult sourceFileProcessing = ingestionScenario
+                .ingestionProcessor()
+                .process(
+                        ingestionScenario.repositoryContext(Set.of(ingestionScenario.sourceUrl())),
+                        ingestionScenario.sourceFilePath());
+
+        assertTrue(sourceFileProcessing.outcome().processed());
+        verify(ingestionScenario.chunkProcessingService())
+                .processAndStoreChunksForce(
+                        anyString(), eq(ingestionScenario.sourceUrl()), eq("Main.java"), anyString());
+        verify(ingestionScenario.hybridVectorService())
+                .replaceUrlDocuments(TARGET_COLLECTION_NAME, ingestionScenario.sourceUrl(), List.of(indexedDocument));
+        verify(ingestionScenario.hybridVectorService(), never())
+                .upsertToCollection(eq(TARGET_COLLECTION_NAME), Mockito.anyList());
+        verify(ingestionScenario.hybridVectorService(), never()).countPointsForUrl(anyString(), anyString());
+    }
+
+    @Test
+    void missingMarkerWithoutExistingVectorsUsesNormalUpsert(@TempDir Path temporaryDirectory) throws IOException {
+        SourceIngestionScenario ingestionScenario = sourceIngestionScenario(temporaryDirectory);
+        Document indexedDocument = new Document("point-1", "package demo; class Main {}", new HashMap<>());
+        indexedDocument.getMetadata().put(QdrantPayloadFieldSchema.HASH_FIELD, "newhash");
+        when(ingestionScenario
+                        .chunkProcessingService()
+                        .processAndStoreChunks(
+                                anyString(), eq(ingestionScenario.sourceUrl()), eq("Main.java"), anyString()))
+                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(
+                        List.of(indexedDocument), List.of("newhash"), 1, 0));
+
+        SourceFileProcessingResult sourceFileProcessing = ingestionScenario
+                .ingestionProcessor()
+                .process(ingestionScenario.repositoryContext(Set.of()), ingestionScenario.sourceFilePath());
+
+        assertTrue(sourceFileProcessing.outcome().processed());
+        verify(ingestionScenario.hybridVectorService())
+                .upsertToCollection(TARGET_COLLECTION_NAME, List.of(indexedDocument));
+        verify(ingestionScenario.hybridVectorService(), never())
+                .replaceUrlDocuments(eq(TARGET_COLLECTION_NAME), eq(ingestionScenario.sourceUrl()), Mockito.anyList());
+        verify(ingestionScenario.hybridVectorService(), never()).countPointsForUrl(anyString(), anyString());
+    }
 
     @Test
     void changedFileReplacesBeforePruningLocalState(@TempDir Path temporaryDirectory) throws IOException {
@@ -102,7 +156,7 @@ class SourceCodeFileIngestionProcessorTest {
                 .thenReturn(chunkProcessingOutcome);
 
         SourceFileProcessingResult sourceFileProcessing =
-                ingestionProcessor.process(repositoryRoot, sourceFilePath, repositoryMetadata, TARGET_COLLECTION_NAME);
+                ingestionProcessor.process(repositoryContext(repositoryRoot, repositoryMetadata), sourceFilePath);
 
         assertTrue(sourceFileProcessing.outcome().processed());
         assertEquals(sourceUrl, sourceFileProcessing.fileUrl());
@@ -178,7 +232,7 @@ class SourceCodeFileIngestionProcessorTest {
                 .pruneObsoleteLocalStateAfterReplacement(sourceUrl, previousFileRecord, List.of("newhash"));
 
         SourceFileProcessingResult sourceFileProcessing =
-                ingestionProcessor.process(repositoryRoot, sourceFilePath, repositoryMetadata, TARGET_COLLECTION_NAME);
+                ingestionProcessor.process(repositoryContext(repositoryRoot, repositoryMetadata), sourceFilePath);
 
         assertFalse(sourceFileProcessing.outcome().processed());
         assertEquals(
@@ -252,7 +306,7 @@ class SourceCodeFileIngestionProcessorTest {
                 .thenReturn(chunkProcessingOutcome);
 
         SourceFileProcessingResult sourceFileProcessing =
-                ingestionProcessor.process(repositoryRoot, sourceFilePath, repositoryMetadata, TARGET_COLLECTION_NAME);
+                ingestionProcessor.process(repositoryContext(repositoryRoot, repositoryMetadata), sourceFilePath);
 
         assertTrue(sourceFileProcessing.outcome().processed());
         verify(ingestedFilePruneService)
@@ -311,7 +365,7 @@ class SourceCodeFileIngestionProcessorTest {
                 .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
 
         SourceFileProcessingResult sourceFileProcessing =
-                ingestionProcessor.process(repositoryRoot, sourceFilePath, repositoryMetadata, TARGET_COLLECTION_NAME);
+                ingestionProcessor.process(repositoryContext(repositoryRoot, repositoryMetadata), sourceFilePath);
 
         assertEquals(
                 "collection-generation",
@@ -363,7 +417,7 @@ class SourceCodeFileIngestionProcessorTest {
         when(fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl))
                 .thenReturn(Optional.of(unboundIngestionRecord));
         SourceFileProcessingResult sourceFileProcessing =
-                ingestionProcessor.process(repositoryRoot, sourceFilePath, repositoryMetadata, TARGET_COLLECTION_NAME);
+                ingestionProcessor.process(repositoryContext(repositoryRoot, repositoryMetadata), sourceFilePath);
 
         assertFalse(sourceFileProcessing.outcome().processed());
         assertEquals(
@@ -424,7 +478,7 @@ class SourceCodeFileIngestionProcessorTest {
                 .thenReturn(2L);
 
         SourceFileProcessingResult sourceFileProcessing =
-                ingestionProcessor.process(repositoryRoot, sourceFilePath, repositoryMetadata, TARGET_COLLECTION_NAME);
+                ingestionProcessor.process(repositoryContext(repositoryRoot, repositoryMetadata), sourceFilePath);
 
         assertFalse(sourceFileProcessing.outcome().processed());
         assertTrue(sourceFileProcessing.outcome().failure().isEmpty());
@@ -487,7 +541,7 @@ class SourceCodeFileIngestionProcessorTest {
                 .thenReturn(1L);
 
         SourceFileProcessingResult sourceFileProcessing =
-                ingestionProcessor.process(repositoryRoot, sourceFilePath, repositoryMetadata, TARGET_COLLECTION_NAME);
+                ingestionProcessor.process(repositoryContext(repositoryRoot, repositoryMetadata), sourceFilePath);
 
         assertFalse(sourceFileProcessing.outcome().processed());
         assertTrue(sourceFileProcessing.outcome().failure().isEmpty());
@@ -534,9 +588,80 @@ class SourceCodeFileIngestionProcessorTest {
                 "");
 
         SourceFileProcessingResult sourceFileProcessing =
-                ingestionProcessor.process(repositoryRoot, sourceFilePath, repositoryMetadata, TARGET_COLLECTION_NAME);
+                ingestionProcessor.process(repositoryContext(repositoryRoot, repositoryMetadata), sourceFilePath);
 
         assertFalse(sourceFileProcessing.outcome().processed());
         assertTrue(sourceFileProcessing.fileUrl().startsWith("https://github.com/owner/repo/blob/main/src/Empty.java"));
+    }
+
+    private static SourceCodeFileIngestionProcessor.RepositoryIngestionContext repositoryContext(
+            Path repositoryRoot, GitHubRepoMetadata repositoryMetadata) {
+        return new SourceCodeFileIngestionProcessor.RepositoryIngestionContext(
+                repositoryRoot, repositoryMetadata, Set.of());
+    }
+
+    private static SourceIngestionScenario sourceIngestionScenario(Path temporaryDirectory) throws IOException {
+        ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
+        HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
+        LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
+        FileIngestionMarkerStore fileIngestionMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
+        ContentHasher contentHasher = Mockito.mock(ContentHasher.class);
+        ProgressTracker progressTracker = Mockito.mock(ProgressTracker.class);
+        IngestedFilePruneService ingestedFilePruneService = Mockito.mock(IngestedFilePruneService.class);
+        SourceCodeFileIngestionProcessor ingestionProcessor = new SourceCodeFileIngestionProcessor(
+                new IngestionStorageServices(
+                        hybridVectorService,
+                        chunkProcessingService,
+                        contentHasher,
+                        localStoreService,
+                        fileIngestionMarkerStore,
+                        Mockito.mock(QdrantCollectionRouter.class)),
+                progressTracker,
+                ingestedFilePruneService);
+        Path repositoryRoot = temporaryDirectory.resolve("repository");
+        Path sourceFilePath = repositoryRoot.resolve("src/Main.java");
+        Files.createDirectories(Objects.requireNonNull(sourceFilePath.getParent(), "sourceFilePath parent"));
+        Files.writeString(sourceFilePath, "package demo; class Main {}", StandardCharsets.UTF_8);
+        GitHubRepoMetadata repositoryMetadata = new GitHubRepoMetadata(
+                repositoryRoot.toString(),
+                GitHubRepositoryIdentity.of("openai", "java-chat"),
+                TARGET_COLLECTION_NAME,
+                "main",
+                "abcdef123456",
+                "MIT",
+                "Example repository");
+        String sourceUrl = "https://github.com/openai/java-chat/blob/main/src/Main.java";
+        when(contentHasher.sha256(sourceFilePath)).thenReturn("new-fingerprint");
+        when(fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.empty());
+        when(progressTracker.formatPercent()).thenReturn("100%");
+        return new SourceIngestionScenario(
+                ingestionProcessor,
+                chunkProcessingService,
+                hybridVectorService,
+                localStoreService,
+                fileIngestionMarkerStore,
+                ingestedFilePruneService,
+                repositoryRoot,
+                sourceFilePath,
+                repositoryMetadata,
+                sourceUrl);
+    }
+
+    private record SourceIngestionScenario(
+            SourceCodeFileIngestionProcessor ingestionProcessor,
+            ChunkProcessingService chunkProcessingService,
+            HybridVectorService hybridVectorService,
+            LocalStoreService localStoreService,
+            FileIngestionMarkerStore fileIngestionMarkerStore,
+            IngestedFilePruneService ingestedFilePruneService,
+            Path repositoryRoot,
+            Path sourceFilePath,
+            GitHubRepoMetadata repositoryMetadata,
+            String sourceUrl) {
+        private SourceCodeFileIngestionProcessor.RepositoryIngestionContext repositoryContext(
+                Set<String> storedFileUrls) {
+            return new SourceCodeFileIngestionProcessor.RepositoryIngestionContext(
+                    repositoryRoot, repositoryMetadata, storedFileUrls);
+        }
     }
 }
