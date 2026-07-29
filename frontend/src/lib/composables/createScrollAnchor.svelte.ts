@@ -6,7 +6,7 @@
  * - An explicit jump follows the active stream until the user scrolls away again
  * - Settled final content is revealed while the user follows the newest message
  * - User scroll position is always respected
- * - Indicator appears when new content streams off-screen
+ * - Indicator appears only when new content arrives after a genuine scroll-away
  * - Indicator disappears when user scrolls to ~95% of content
  *
  * This approach eliminates "scroll fighting" by disabling default streaming
@@ -487,12 +487,14 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
     /**
      * Called when a new message starts streaming.
      *
-     * Increments the unseen message count (not chunk count) when user
-     * is scrolled away from bottom. Call this once per new assistant
-     * message, not on every streaming chunk.
+     * Increments the unseen message count (not chunk count) only when the user
+     * genuinely scrolled away and follow disengaged. Content growth alone never
+     * counts: the send flow re-engages follow via `scrollOnce()`, so a geometry
+     * dip during its smooth scroll must not surface the indicator. Call this
+     * once per new assistant message, not on every streaming chunk.
      */
     onNewMessageStarted(): void {
-      if (!isNearBottom()) {
+      if (!followsNewestContent && !isNearBottom()) {
         unseenCount++;
         updateIndicatorVisibility();
       }
@@ -503,8 +505,10 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      *
      * Waits for the streamed DOM update. After an explicit indicator jump, it
      * follows the active stream until genuine user scroll intent moves away.
-     * Otherwise, it claims the active message once when content first grows
-     * off-screen and keeps that message count stable for subsequent chunks.
+     * Otherwise, it claims the active message once when content grows while
+     * follow is disengaged and keeps that count stable for subsequent chunks.
+     * While follow is engaged the viewport belongs to the stream, so growth
+     * past the bottom edge never surfaces the indicator.
      */
     async onContentAdded(): Promise<void> {
       const contentContainer = container;
@@ -543,10 +547,10 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
           return;
         }
       }
-      if (!isNearBottom()) {
+      if (!followsNewestContent && !isNearBottom()) {
         claimUnseenContent();
       }
-      // User at bottom - no need for indicator
+      // Follow engaged or user at bottom - no need for indicator
     },
 
     /**
