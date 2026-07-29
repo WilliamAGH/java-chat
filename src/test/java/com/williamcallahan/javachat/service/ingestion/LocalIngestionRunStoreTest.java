@@ -126,15 +126,7 @@ class LocalIngestionRunStoreTest {
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         AtomicInteger checkpointReadCount = new AtomicInteger();
         AtomicReference<Runnable> ownerCompletion = new AtomicReference<>(() -> {});
-        ObjectMapper racingObjectMapper = new ObjectMapper() {
-            @Override
-            public <T> T readValue(File checkpointFile, Class<T> checkpointType) throws IOException {
-                if (checkpointReadCount.incrementAndGet() == ABANDONED_LOCK_RE_READ_SEQUENCE) {
-                    ownerCompletion.get().run();
-                }
-                return super.readValue(checkpointFile, checkpointType);
-            }
-        };
+        ObjectMapper racingObjectMapper = new OwnerCompletionRacingObjectMapper(checkpointReadCount, ownerCompletion);
         LocalIngestionRunStore runStore = runStore(temporaryDirectory, meterRegistry, racingObjectMapper);
         Path documentationDirectory = temporaryDirectory.resolve("docs").toAbsolutePath();
         IngestionBacklogStatus runningBacklog =
@@ -196,5 +188,30 @@ class LocalIngestionRunStoreTest {
                 null);
         ReflectionTestUtils.invokeMethod(localStoreService, "createStoreDirectories");
         return new LocalIngestionRunStore(localStoreService, objectMapper, meterRegistry);
+    }
+
+    /**
+     * Simulates the original run owner persisting a COMPLETE checkpoint between the reconciler's
+     * unlocked read and its under-lock re-read.
+     */
+    private static final class OwnerCompletionRacingObjectMapper extends ObjectMapper {
+        private static final long serialVersionUID = 1L;
+
+        private final AtomicInteger checkpointReadCount;
+        private final AtomicReference<Runnable> ownerCompletion;
+
+        private OwnerCompletionRacingObjectMapper(
+                AtomicInteger checkpointReadCount, AtomicReference<Runnable> ownerCompletion) {
+            this.checkpointReadCount = checkpointReadCount;
+            this.ownerCompletion = ownerCompletion;
+        }
+
+        @Override
+        public <T> T readValue(File checkpointFile, Class<T> checkpointType) throws IOException {
+            if (checkpointReadCount.incrementAndGet() == ABANDONED_LOCK_RE_READ_SEQUENCE) {
+                ownerCompletion.get().run();
+            }
+            return super.readValue(checkpointFile, checkpointType);
+        }
     }
 }
