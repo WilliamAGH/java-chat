@@ -18,7 +18,10 @@ import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.CurrentQuerySegment;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.domain.prompt.SystemSegment;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
+import java.util.Properties;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
@@ -32,11 +35,11 @@ import org.springframework.context.annotation.Lazy;
  * Verifies startup configuration and OpenAI-compatible request construction.
  */
 class OpenAiRequestFactoryTest {
-    private static final int GPT54_TEST_INPUT_TOKEN_BUDGET = 100_000;
+    private static final int CHAT_TEST_INPUT_TOKEN_BUDGET = 100_000;
     private static final int TEST_COMPLETION_OUTPUT_TOKEN_BUDGET = 768;
 
     @Test
-    void universalChatModelDefaultIsGpt54() {
+    void defaultGatewayChatModelIsGpt54() {
         assertEquals("gpt-5.4", ModelConfiguration.DEFAULT_MODEL);
     }
 
@@ -66,6 +69,18 @@ class OpenAiRequestFactoryTest {
     }
 
     @Test
+    void everyUniversalReasoningEffortIsForwarded() {
+        for (String configuredEffort : List.of("none", "minimal", "low", "medium", "high", "xhigh", "max")) {
+            ResponseCreateParams reasoningRequestParams =
+                    createRequestFactory(configuredEffort).buildCompletionRequest("Explain Java streams", 0.4);
+
+            assertEquals(
+                    ReasoningEffort.of(configuredEffort),
+                    reasoningRequestParams.reasoning().orElseThrow().effort().orElseThrow());
+        }
+    }
+
+    @Test
     void reasoningEffortConfigurationIsCaseInsensitive() {
         OpenAiRequestFactory requestFactory = createRequestFactory("HIGH");
 
@@ -74,30 +89,6 @@ class OpenAiRequestFactoryTest {
 
         assertEquals(
                 ReasoningEffort.HIGH,
-                reasoningRequestParams.reasoning().orElseThrow().effort().orElseThrow());
-    }
-
-    @Test
-    void maximumReasoningEffortUsesTheUniversalGatewayVocabulary() {
-        OpenAiRequestFactory requestFactory = createRequestFactory("max");
-
-        ResponseCreateParams reasoningRequestParams =
-                requestFactory.buildCompletionRequest("Explain Java streams", 0.4);
-
-        assertEquals(
-                ReasoningEffort.MAX,
-                reasoningRequestParams.reasoning().orElseThrow().effort().orElseThrow());
-    }
-
-    @Test
-    void minimalReasoningEffortUsesTheUniversalGatewayVocabulary() {
-        OpenAiRequestFactory requestFactory = createRequestFactory("minimal");
-
-        ResponseCreateParams reasoningRequestParams =
-                requestFactory.buildCompletionRequest("Explain Java streams", 0.4);
-
-        assertEquals(
-                ReasoningEffort.MINIMAL,
                 reasoningRequestParams.reasoning().orElseThrow().effort().orElseThrow());
     }
 
@@ -130,6 +121,20 @@ class OpenAiRequestFactoryTest {
                 requestFactory.buildCompletionRequest("Explain Java streams", 0.4);
 
         assertTrue(reasoningRequestParams.reasoning().isEmpty());
+    }
+
+    @Test
+    void applicationDefaultsLeaveReasoningEffortUnset() throws IOException {
+        Properties applicationProperties = new Properties();
+        InputStream applicationPropertiesStream =
+                OpenAiRequestFactoryTest.class.getResourceAsStream("/application.properties");
+
+        assertNotNull(applicationPropertiesStream);
+        try (applicationPropertiesStream) {
+            applicationProperties.load(applicationPropertiesStream);
+        }
+
+        assertFalse(applicationProperties.containsKey("app.llm.reasoning-effort"));
     }
 
     @Test
@@ -176,50 +181,32 @@ class OpenAiRequestFactoryTest {
                 IllegalArgumentException.class,
                 () -> new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), " ", appProperties("")));
 
-        assertTrue(configurationFailure.getMessage().contains("OPENAI_MODEL must be gpt-5.4"));
+        assertTrue(configurationFailure.getMessage().contains("OPENAI_MODEL must be a non-blank gateway model alias"));
     }
 
     @Test
-    void staleOpenAiModelFailsConstruction() {
-        IllegalArgumentException configurationFailure = assertThrows(
-                IllegalArgumentException.class,
-                () -> new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5", appProperties("")));
+    void gatewayAliasReceivesReasoningWithoutModelInspection() {
+        String gatewayAlias = "unlisted-reasoning-route";
+        OpenAiRequestFactory requestFactory =
+                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), gatewayAlias, appProperties("xhigh"));
 
-        assertTrue(configurationFailure.getMessage().contains("OPENAI_MODEL must be gpt-5.4"));
-    }
+        ResponseCreateParams responseCreateParams = requestFactory.buildCompletionRequest("Explain Java streams", 0.4);
 
-    @Test
-    void providerQualifiedGpt54ModelFailsConstruction() {
-        IllegalArgumentException configurationFailure = assertThrows(
-                IllegalArgumentException.class,
-                () -> new OpenAiRequestFactory(
-                        new Chunker(), new PromptTruncator(), "provider/gpt-5.4", appProperties("")));
-
-        assertTrue(configurationFailure.getMessage().contains("OPENAI_MODEL must be gpt-5.4"));
-    }
-
-    @Test
-    void caseChangedGpt54ModelFailsConstruction() {
-        IllegalArgumentException configurationFailure = assertThrows(
-                IllegalArgumentException.class,
-                () -> new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "GPT-5.4", appProperties("")));
-
-        assertTrue(configurationFailure.getMessage().contains("OPENAI_MODEL must be gpt-5.4"));
-    }
-
-    @Test
-    void paddedGpt54ModelFailsConstruction() {
-        IllegalArgumentException configurationFailure = assertThrows(
-                IllegalArgumentException.class,
-                () -> new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), " gpt-5.4 ", appProperties("")));
-
-        assertTrue(configurationFailure.getMessage().contains("OPENAI_MODEL must be gpt-5.4"));
+        assertEquals(gatewayAlias, requestFactory.configuredModelId());
+        assertEquals(gatewayAlias, responseCreateParams.model().orElseThrow().asString());
+        assertEquals(
+                TEST_COMPLETION_OUTPUT_TOKEN_BUDGET,
+                responseCreateParams.maxOutputTokens().orElseThrow());
+        assertEquals(0.4, responseCreateParams.temperature().orElseThrow());
+        assertEquals(
+                ReasoningEffort.XHIGH,
+                responseCreateParams.reasoning().orElseThrow().effort().orElseThrow());
     }
 
     @Test
     void buildCompletionRequestAppliesCallerOutputBudget() {
-        OpenAiRequestFactory requestFactory =
-                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.4", appProperties(""));
+        OpenAiRequestFactory requestFactory = new OpenAiRequestFactory(
+                new Chunker(), new PromptTruncator(), ModelConfiguration.DEFAULT_MODEL, appProperties(""));
 
         ResponseCreateParams responseCreateParams =
                 requestFactory.buildCompletionRequest("Rank these documents", 0.0, 128);
@@ -229,8 +216,8 @@ class OpenAiRequestFactoryTest {
 
     @Test
     void buildJsonCompletionRequestDeclaresJsonObjectOutput() {
-        OpenAiRequestFactory requestFactory =
-                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.4", appProperties(""));
+        OpenAiRequestFactory requestFactory = new OpenAiRequestFactory(
+                new Chunker(), new PromptTruncator(), ModelConfiguration.DEFAULT_MODEL, appProperties(""));
 
         ResponseCreateParams responseCreateParams =
                 requestFactory.buildJsonCompletionRequest("Rank these documents", 0.0, 128);
@@ -241,9 +228,9 @@ class OpenAiRequestFactoryTest {
     }
 
     @Test
-    void buildCompletionRequestKeepsPromptWithinGpt54InputBudget() {
-        OpenAiRequestFactory requestFactory =
-                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.4", appProperties(""));
+    void buildCompletionRequestKeepsPromptWithinApplicationInputBudget() {
+        OpenAiRequestFactory requestFactory = new OpenAiRequestFactory(
+                new Chunker(), new PromptTruncator(), ModelConfiguration.DEFAULT_MODEL, appProperties(""));
         String prompt = "context ".repeat(1_000);
 
         ResponseCreateParams responseCreateParams = requestFactory.buildCompletionRequest(prompt, 0.4);
@@ -252,10 +239,10 @@ class OpenAiRequestFactoryTest {
     }
 
     @Test
-    void buildCompletionRequestTruncatesPromptBeyondGpt54InputBudget() {
+    void buildCompletionRequestTruncatesPromptBeyondApplicationInputBudget() {
         Chunker chunker = new Chunker();
-        OpenAiRequestFactory requestFactory =
-                new OpenAiRequestFactory(chunker, new PromptTruncator(), "gpt-5.4", appProperties(""));
+        OpenAiRequestFactory requestFactory = new OpenAiRequestFactory(
+                chunker, new PromptTruncator(), ModelConfiguration.DEFAULT_MODEL, appProperties(""));
         String prompt = "context ".repeat(110_000);
 
         ResponseCreateParams responseCreateParams = requestFactory.buildCompletionRequest(prompt, 0.4);
@@ -263,7 +250,7 @@ class OpenAiRequestFactoryTest {
         String truncatedPrompt = responseCreateParams.input().orElseThrow().asText();
         assertTrue(truncatedPrompt.startsWith("[Context truncated due to model input limit]"));
         assertTrue(truncatedPrompt.length() < prompt.length());
-        assertTrue(chunker.countTokens(truncatedPrompt) <= GPT54_TEST_INPUT_TOKEN_BUDGET);
+        assertTrue(chunker.countTokens(truncatedPrompt) <= CHAT_TEST_INPUT_TOKEN_BUDGET);
     }
 
     private static void assertInputMessage(
@@ -276,7 +263,10 @@ class OpenAiRequestFactoryTest {
 
     private OpenAiRequestFactory createRequestFactory(String reasoningEffortSetting) {
         return new OpenAiRequestFactory(
-                new Chunker(), new PromptTruncator(), "gpt-5.4", appProperties(reasoningEffortSetting));
+                new Chunker(),
+                new PromptTruncator(),
+                ModelConfiguration.DEFAULT_MODEL,
+                appProperties(reasoningEffortSetting));
     }
 
     private AppProperties appProperties(String reasoningEffortSetting) {

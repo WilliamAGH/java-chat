@@ -1,7 +1,5 @@
 package com.williamcallahan.javachat.config;
 
-import com.williamcallahan.javachat.support.AsciiTextNormalizer;
-
 /**
  * Owns the chat model default and RAG context policy.
  *
@@ -11,10 +9,6 @@ import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 public final class ModelConfiguration {
     /** Default model identifier when none is configured. */
     public static final String DEFAULT_MODEL = "gpt-5.4";
-
-    private static final char MODEL_VERSION_SEPARATOR = '.';
-    private static final String GPT5_FAMILY_PREFIX =
-            DEFAULT_MODEL.substring(0, DEFAULT_MODEL.lastIndexOf(MODEL_VERSION_SEPARATOR));
 
     /** Estimated characters per token for conservative token counting. */
     public static final int ESTIMATED_CHARS_PER_TOKEN = 4;
@@ -27,23 +21,5 @@ public final class ModelConfiguration {
 
     private ModelConfiguration() {
         // Utility class
-    }
-
-    /**
-     * Determines whether a provider-qualified or bare model identifier belongs to the GPT-5 family.
-     *
-     * @param modelId provider-qualified or bare model identifier
-     * @return true when the canonical model name belongs to the GPT-5 family
-     */
-    public static boolean isGpt5Family(String modelId) {
-        if (modelId == null || modelId.isBlank()) {
-            return false;
-        }
-        String normalizedModelId = AsciiTextNormalizer.toLowerAscii(modelId.trim());
-        int providerSeparatorIndex = normalizedModelId.lastIndexOf('/');
-        String canonicalModelName = providerSeparatorIndex < 0
-                ? normalizedModelId
-                : normalizedModelId.substring(providerSeparatorIndex + 1);
-        return canonicalModelName.startsWith(GPT5_FAMILY_PREFIX);
     }
 }
