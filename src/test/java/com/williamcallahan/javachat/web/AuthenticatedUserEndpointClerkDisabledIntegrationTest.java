@@ -14,7 +14,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * Verifies the production posture where Clerk is not configured: no JWKS
+ * Verifies the fail-closed posture of an environment where Clerk is not
+ * configured (the dev and prod profiles each bind their own instance): no JWKS
  * property means no resource server, so the identity endpoint deterministically
  * denies everything while the public chat surface stays reachable.
  */

@@ -138,7 +138,7 @@ public class SecurityConfig {
                 .headers(h -> h.frameOptions(fo -> fo.sameOrigin()))
                 .httpBasic(b -> b.disable())
                 .formLogin(f -> f.disable());
-        // Clerk is enabled per environment (dev profile only for now): without the
+        // Clerk is enabled per environment (dev and prod profiles): without the
         // decoder bean there is no resource server, and /api/me's authenticated()
         // rule deterministically denies every request in that deployment.
         JwtDecoder activeClerkJwtDecoder = clerkJwtDecoder.getIfAvailable();
@@ -152,9 +152,10 @@ public class SecurityConfig {
      * Verifies Clerk session tokens against the instance JWKS with issuer and
      * authorized-party validation.
      *
-     * <p>Created only when the JWKS URI property exists — the dev profile today —
-     * so production, which has no Clerk configuration yet, runs without a
-     * resource server and rejects all {@code /api/me} traffic.
+     * <p>Created only when the JWKS URI property exists — the dev and prod
+     * profiles each bind their own Clerk instance — so an environment without
+     * Clerk configuration runs without a resource server and rejects all
+     * {@code /api/me} traffic.
      *
      * <p>Built from the JWKS URI (not OIDC discovery) so application startup
      * never performs a network call; keys are fetched lazily on the first
