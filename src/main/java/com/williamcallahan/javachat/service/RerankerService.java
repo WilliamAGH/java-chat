@@ -252,16 +252,21 @@ public class RerankerService {
     }
 
     /**
-     * Reports whether the failure chain contains a deadline timeout, the only failure a fresh
-     * attempt owned by a caller with remaining budget can outlive; permanent failures such as
-     * empty or unparsable rerank responses must keep propagating unchanged.
+     * Reports whether the failure chain contains a caller stage-deadline timeout, the only
+     * failure a fresh attempt owned by a caller with remaining budget can outlive; permanent
+     * failures such as empty or unparsable rerank responses must keep propagating unchanged.
+     *
+     * <p>Provider transport timeouts converted by {@link #preserveProviderTimeout} also surface
+     * as {@link TimeoutException}, but they carry their OkHttp timeout markers in the cause
+     * chain. They are excluded here so a waiter never issues a second billable rerank call after
+     * a genuine provider timeout.</p>
      */
     private static boolean causedByDeadlineTimeout(Throwable failure) {
         Set<Throwable> inspectedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
         Throwable failureInChain = failure;
         while (failureInChain != null && inspectedFailures.add(failureInChain)) {
             if (failureInChain instanceof TimeoutException) {
-                return true;
+                return !containsProviderTransportTimeout(failureInChain.getCause());
             }
             failureInChain = failureInChain.getCause();
         }
@@ -295,20 +300,32 @@ public class RerankerService {
     }
 
     private static Throwable preserveProviderTimeout(RuntimeException providerFailure, Duration requestTimeout) {
+        if (containsProviderTransportTimeout(providerFailure)) {
+            TimeoutException timeoutFailure =
+                    new TimeoutException("Reranking request exceeded timeout " + requestTimeout);
+            timeoutFailure.initCause(providerFailure);
+            return timeoutFailure;
+        }
+        return providerFailure;
+    }
+
+    /**
+     * Reports whether the failure chain carries the provider transport-timeout markers the
+     * OpenAI SDK raises for an expired OkHttp call, distinguishing a genuine provider timeout
+     * from a caller-owned stage-deadline timeout.
+     */
+    private static boolean containsProviderTransportTimeout(Throwable failure) {
         Set<Throwable> inspectedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
-        Throwable failureInChain = providerFailure;
+        Throwable failureInChain = failure;
         while (failureInChain != null && inspectedFailures.add(failureInChain)) {
             if (failureInChain instanceof SocketTimeoutException
                     || (failureInChain.getClass().equals(InterruptedIOException.class)
                             && OK_HTTP_CALL_TIMEOUT_MESSAGE.equals(failureInChain.getMessage()))) {
-                TimeoutException timeoutFailure =
-                        new TimeoutException("Reranking request exceeded timeout " + requestTimeout);
-                timeoutFailure.initCause(providerFailure);
-                return timeoutFailure;
+                return true;
             }
             failureInChain = failureInChain.getCause();
         }
-        return providerFailure;
+        return false;
     }
 
     /**

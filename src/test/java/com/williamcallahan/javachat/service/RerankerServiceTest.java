@@ -21,6 +21,7 @@ import com.openai.errors.OpenAIIoException;
 import com.williamcallahan.javachat.config.AppProperties;
 import java.io.InterruptedIOException;
 import java.time.Duration;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -34,6 +35,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.document.Document;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.concurrent.ConcurrentMapCache;
 import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import reactor.core.publisher.Mono;
 
@@ -47,6 +51,8 @@ class RerankerServiceTest {
     private static final Duration CACHE_TEST_COMPLETION_TIMEOUT = Duration.ofSeconds(5);
     private static final double TEST_RERANKER_TEMPERATURE = 0.2;
     private static final int TEST_RERANKER_OUTPUT_TOKEN_BUDGET = 384;
+    private static final String RERANKER_CACHE_NAME = "reranker-cache";
+    private static final int OWNER_POST_ADMISSION_CACHE_LOOKUP = 2;
 
     @Test
     void rerankPreservesAtomicProviderAdmissionFailure() {
@@ -322,7 +328,71 @@ class RerankerServiceTest {
     }
 
     @Test
-    void waiterWithRemainingBudgetRecoversWhenCoalescedOwnerTimesOut()
+    void waiterRetriesWhenCoalescedOwnerDiesOnItsStageDeadline()
+            throws InterruptedException, ExecutionException, TimeoutException {
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        AtomicInteger dispatchCount = new AtomicInteger();
+        when(streamingService.completeJsonObject(
+                        anyString(),
+                        eq(TEST_RERANKER_TEMPERATURE),
+                        eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
+                        any(Duration.class)))
+                .thenAnswer(invocation -> {
+                    dispatchCount.incrementAndGet();
+                    return Mono.just("{\"order\":[1,0]}");
+                });
+        CountDownLatch ownerLookupBlocked = new CountDownLatch(1);
+        CountDownLatch releaseOwnerLookup = new CountDownLatch(1);
+        AtomicInteger cacheLookupCount = new AtomicInteger();
+        Cache deadlineBlockingCache = new ConcurrentMapCache(RERANKER_CACHE_NAME) {
+            @Override
+            protected Object lookup(Object key) {
+                if (cacheLookupCount.incrementAndGet() == OWNER_POST_ADMISSION_CACHE_LOOKUP) {
+                    ownerLookupBlocked.countDown();
+                    try {
+                        releaseOwnerLookup.await();
+                    } catch (InterruptedException interruptedWait) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                return super.lookup(key);
+            }
+        };
+        RerankerService rerankerService = new RerankerService(
+                streamingService,
+                new ObjectMapper(),
+                configuredRerankerProperties(),
+                singleCacheManager(deadlineBlockingCache));
+        List<Document> sourceDocuments = List.of(new Document("first"), new Document("second"));
+        ExecutorService rerankerExecutor = Executors.newFixedThreadPool(2);
+        try {
+            Future<List<Document>> ownerRerank = rerankerExecutor.submit(() -> rerankerService.rerank(
+                    "query", sourceDocuments, 2, stageDeadlineNanos(CACHE_WAIT_DEADLINE_TEST_TIMEOUT)));
+            assertTrue(ownerLookupBlocked.await(CACHE_TEST_COMPLETION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+            Future<List<Document>> waitingRerank = rerankerExecutor.submit(() -> rerankerService.rerank(
+                    "query", sourceDocuments, 2, stageDeadlineNanos(REMAINING_STAGE_BUDGET_TEST_TIMEOUT)));
+            TimeUnit.MILLISECONDS.sleep(CACHE_WAIT_DEADLINE_TEST_TIMEOUT.toMillis() * 2);
+
+            releaseOwnerLookup.countDown();
+
+            assertEquals(
+                    List.of(sourceDocuments.get(1), sourceDocuments.get(0)),
+                    waitingRerank.get(CACHE_TEST_COMPLETION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+            ExecutionException ownerFailure = assertThrows(
+                    ExecutionException.class,
+                    () -> ownerRerank.get(CACHE_TEST_COMPLETION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+            RerankingFailureException ownerRerankingFailure =
+                    assertInstanceOf(RerankingFailureException.class, ownerFailure.getCause());
+            assertInstanceOf(TimeoutException.class, ownerRerankingFailure.getCause());
+            assertEquals(1, dispatchCount.get(), "Only the retrying waiter dispatches a rerank call");
+        } finally {
+            releaseOwnerLookup.countDown();
+            rerankerExecutor.shutdownNow();
+        }
+    }
+
+    @Test
+    void waiterInheritsProviderTimeoutOwnerFailureWithoutRetrying()
             throws InterruptedException, ExecutionException, TimeoutException {
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         CountDownLatch ownerDispatchStarted = new CountDownLatch(1);
@@ -335,24 +405,21 @@ class RerankerServiceTest {
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         any(Duration.class)))
                 .thenAnswer(invocation -> Mono.defer(() -> {
-                    if (dispatchCount.incrementAndGet() == 1) {
-                        ownerDispatchStarted.countDown();
-                        try {
-                            releaseOwnerTimeout.await();
-                        } catch (InterruptedException interruptedWait) {
-                            Thread.currentThread().interrupt();
-                        }
-                        return Mono.error(
-                                new OpenAIIoException("Request failed", new InterruptedIOException("timeout")));
+                    dispatchCount.incrementAndGet();
+                    ownerDispatchStarted.countDown();
+                    try {
+                        releaseOwnerTimeout.await();
+                    } catch (InterruptedException interruptedWait) {
+                        Thread.currentThread().interrupt();
                     }
-                    return Mono.just("{\"order\":[1,0]}");
+                    return Mono.error(new OpenAIIoException("Request failed", new InterruptedIOException("timeout")));
                 }));
         RerankerService rerankerService = createRerankerService(streamingService);
         List<Document> sourceDocuments = List.of(new Document("first"), new Document("second"));
         ExecutorService rerankerExecutor = Executors.newFixedThreadPool(2);
         try {
             Future<List<Document>> ownerRerank = rerankerExecutor.submit(() -> rerankerService.rerank(
-                    "query", sourceDocuments, 2, stageDeadlineNanos(NEARLY_EXHAUSTED_STAGE_BUDGET)));
+                    "query", sourceDocuments, 2, stageDeadlineNanos(REMAINING_STAGE_BUDGET_TEST_TIMEOUT)));
             assertTrue(ownerDispatchStarted.await(CACHE_TEST_COMPLETION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
             Future<List<Document>> waitingRerank = rerankerExecutor.submit(() -> {
                 waiterCoalesced.countDown();
@@ -364,21 +431,22 @@ class RerankerServiceTest {
 
             releaseOwnerTimeout.countDown();
 
-            assertEquals(
-                    List.of(sourceDocuments.get(1), sourceDocuments.get(0)),
-                    waitingRerank.get(CACHE_TEST_COMPLETION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+            ExecutionException waitingFailure = assertThrows(
+                    ExecutionException.class,
+                    () -> waitingRerank.get(CACHE_TEST_COMPLETION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+            RerankingFailureException waiterRerankingFailure =
+                    assertInstanceOf(RerankingFailureException.class, waitingFailure.getCause());
+            TimeoutException providerTimeout =
+                    assertInstanceOf(TimeoutException.class, waiterRerankingFailure.getCause());
+            assertInstanceOf(OpenAIIoException.class, providerTimeout.getCause());
             ExecutionException ownerFailure = assertThrows(
                     ExecutionException.class,
                     () -> ownerRerank.get(CACHE_TEST_COMPLETION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
-            RerankingFailureException ownerRerankingFailure =
-                    assertInstanceOf(RerankingFailureException.class, ownerFailure.getCause());
-            assertInstanceOf(TimeoutException.class, ownerRerankingFailure.getCause());
-            assertEquals(2, dispatchCount.get());
+            assertInstanceOf(RerankingFailureException.class, ownerFailure.getCause());
             assertEquals(
-                    List.of(sourceDocuments.get(1), sourceDocuments.get(0)),
-                    rerankerService.rerank(
-                            "query", sourceDocuments, 2, stageDeadlineNanos(REMAINING_STAGE_BUDGET_TEST_TIMEOUT)));
-            assertEquals(2, dispatchCount.get(), "The recovered rerank must be cached exactly once");
+                    1,
+                    dispatchCount.get(),
+                    "A provider-timeout owner failure must not trigger a second billable rerank call");
         } finally {
             releaseOwnerTimeout.countDown();
             rerankerExecutor.shutdownNow();
@@ -506,7 +574,21 @@ class RerankerServiceTest {
                 streamingService,
                 new ObjectMapper(),
                 configuredRerankerProperties(),
-                new ConcurrentMapCacheManager("reranker-cache"));
+                new ConcurrentMapCacheManager(RERANKER_CACHE_NAME));
+    }
+
+    private static CacheManager singleCacheManager(Cache rerankerCache) {
+        return new CacheManager() {
+            @Override
+            public Cache getCache(String name) {
+                return rerankerCache;
+            }
+
+            @Override
+            public Collection<String> getCacheNames() {
+                return List.of(RERANKER_CACHE_NAME);
+            }
+        };
     }
 
     private static AppProperties configuredRerankerProperties() {
