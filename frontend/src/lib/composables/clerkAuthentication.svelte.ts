@@ -43,10 +43,11 @@ export async function loadClerkAuthentication(): Promise<void> {
   }
   const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
   if (!publishableKey) {
-    const missingKeyMessage =
-      "Sign-in is unavailable: VITE_CLERK_PUBLISHABLE_KEY is not configured.";
-    pushToast(missingKeyMessage);
-    throw new Error(missingKeyMessage);
+    // Deliberate per-deployment switch, not an error: production builds omit
+    // VITE_CLERK_PUBLISHABLE_KEY until Clerk launches there, so auth controls
+    // stay hidden. Dev deployments and local .env.local provide the key.
+    console.info("Clerk authentication disabled: no VITE_CLERK_PUBLISHABLE_KEY in this build.");
+    return;
   }
   // Dynamic imports keep the ~700 kB Clerk SDK out of the first-paint chunk;
   // auth controls appear once loaded, the chat itself never waits on them.
