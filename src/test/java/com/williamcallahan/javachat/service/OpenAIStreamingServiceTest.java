@@ -72,6 +72,9 @@ class OpenAIStreamingServiceTest {
     private static final Duration INVISIBLE_PROVIDER_DELTA_INTERVAL = Duration.ofSeconds(3);
     private static final Duration VISIBLE_OUTPUT_DEADLINE_REMAINDER = Duration.ofSeconds(2);
     private static final Duration MID_RESPONSE_VISIBLE_OUTPUT_PAUSE = Duration.ofSeconds(21);
+    private static final long STREAMING_REQUEST_TIMEOUT_SECONDS = 20L;
+    private static final long DERIVED_WATCHDOG_REQUEST_TIMEOUT_SECONDS = 5L;
+    private static final Duration DERIVED_WATCHDOG_REMAINDER = Duration.ofSeconds(2);
 
     private OpenAIStreamingService createStreamingService() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
@@ -192,6 +195,8 @@ class OpenAIStreamingServiceTest {
     @Test
     void invisibleProviderDeltasCannotResetTheVisibleOutputDeadline() {
         OpenAIStreamingService streamingService = createStreamingService();
+        ReflectionTestUtils.setField(
+                streamingService, "streamingRequestTimeoutSeconds", STREAMING_REQUEST_TIMEOUT_SECONDS);
         AtomicBoolean upstreamCancelled = new AtomicBoolean();
 
         StepVerifier.withVirtualTime(() -> {
@@ -230,6 +235,21 @@ class OpenAIStreamingServiceTest {
                 .thenAwait(MID_RESPONSE_VISIBLE_OUTPUT_PAUSE)
                 .expectNext("visible chunk after pause")
                 .verifyComplete();
+    }
+
+    @Test
+    void visibleOutputDeadlineFollowsTheConfiguredRequestTimeout() {
+        OpenAIStreamingService streamingService = createStreamingService();
+        ReflectionTestUtils.setField(
+                streamingService, "streamingRequestTimeoutSeconds", DERIVED_WATCHDOG_REQUEST_TIMEOUT_SECONDS);
+
+        StepVerifier.withVirtualTime(() -> streamingService.enforceVisibleOutputDeadline(
+                        Flux.interval(INVISIBLE_PROVIDER_DELTA_INTERVAL).map(ignoredTick -> INVISIBLE_PROVIDER_DELTA)))
+                .thenAwait(INVISIBLE_PROVIDER_DELTA_INTERVAL)
+                .expectNext(INVISIBLE_PROVIDER_DELTA)
+                .thenAwait(DERIVED_WATCHDOG_REMAINDER)
+                .expectError(TimeoutException.class)
+                .verify();
     }
 
     @Test
