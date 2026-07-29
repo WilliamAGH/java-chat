@@ -234,16 +234,18 @@ When the quality message contains "less relevant" or "keyword search", an additi
 |---|---|---|
 | CRITICAL | System prompt | Never truncated |
 | HIGH | Current user query | Never truncated |
+| HIGH | Authoritative context documents (e.g. curated lessons) | Retained before conversation history |
 | MEDIUM | Conversation history | Oldest turns removed first |
-| LOW | Context documents | Least relevant removed first |
+| LOW | Ordinary retrieved context documents | Least relevant removed first |
 
 **Algorithm** (lines 49-101):
 
 1. Reserve tokens for system prompt + current query (non-negotiable)
 2. If those alone exceed the budget, return minimal prompt (system + query only)
-3. Fit conversation history newest-first into remaining budget
-4. Fit context documents in reranker order (most relevant first) into remaining budget
-5. Re-index surviving documents with sequential `[CTX N]` markers
+3. Fit HIGH priority context documents (e.g. curated lesson context) into remaining budget
+4. Fit conversation history newest-first into remaining budget
+5. Fit LOW priority context documents in reranker order (most relevant first) into remaining budget
+6. Re-index surviving documents with sequential `[CTX N]` markers
 
 ### Token budgets
 
