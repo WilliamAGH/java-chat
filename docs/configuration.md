@@ -20,7 +20,7 @@ Common variables:
 - `OPENAI_API_KEY` (shared-gateway auth)
 - `OPENAI_BASE_URL` (`https://api.llm-gateway.iocloudhost.net/v1` for Java Chat deployments)
 - `OPENAI_MODEL` (required value `gpt-5.4`; any other value fails startup)
-- `OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS` (default `90`; bounds the complete SDK call while Java Chat enforces a 20-second visible-output deadline)
+- `OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS` (default `90`; bounds the complete SDK call and the visible-output deadline, which shares this same budget)
 
 Non-secret generation policy is owned by `app.llm` in `application.properties`: `temperature`, `reasoning-effort`, `completion-output-token-budget`, `enrichment-output-token-budget`, `reranker-temperature`, `reranker-output-token-budget`, and `configured-provider-backoff-seconds`. Invalid values fail startup. Supported reasoning-effort subsets vary by model, so check the [OpenAI model page](https://developers.openai.com/api/docs/models) for the configured model.
 
