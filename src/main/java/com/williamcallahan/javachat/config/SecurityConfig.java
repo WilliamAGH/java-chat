@@ -106,7 +106,8 @@ public class SecurityConfig {
             HttpSecurity http,
             CorsConfigurationSource corsConfigurationSource,
             ObjectMapper objectMapper,
-            ObjectProvider<JwtDecoder> clerkJwtDecoder)
+            ObjectProvider<JwtDecoder> clerkJwtDecoder,
+            AppProperties appProperties)
             throws Exception {
         CookieCsrfTokenRepository csrfTokenRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
         csrfTokenRepository.setCookieCustomizer(csrfCookie -> csrfCookie.sameSite("Lax"));
@@ -135,7 +136,10 @@ public class SecurityConfig {
                         .anyRequest()
                         .permitAll())
                 // Allow same-origin iframes (used by tab shell loading chat.html/guided.html)
-                .headers(h -> h.frameOptions(fo -> fo.sameOrigin()))
+                // and enforce the per-profile Content-Security-Policy on every response.
+                .headers(headers -> headers.frameOptions(frameOptions -> frameOptions.sameOrigin())
+                        .contentSecurityPolicy(contentSecurityPolicy ->
+                                contentSecurityPolicy.policyDirectives(appProperties.getContentSecurityPolicy())))
                 .httpBasic(b -> b.disable())
                 .formLogin(f -> f.disable());
         // Clerk is enabled per environment (dev and prod profiles): without the

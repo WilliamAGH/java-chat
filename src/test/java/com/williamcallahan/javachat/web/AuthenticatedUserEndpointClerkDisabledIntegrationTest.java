@@ -1,6 +1,8 @@
 package com.williamcallahan.javachat.web;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.williamcallahan.javachat.service.EmbeddingClient;
@@ -46,5 +48,11 @@ class AuthenticatedUserEndpointClerkDisabledIntegrationTest {
     @Test
     void publicChatSurfaceStaysAnonymous() throws Exception {
         mockMvc.perform(get("/api/security/csrf")).andExpect(status().isOk());
+    }
+
+    @Test
+    void everyResponseCarriesContentSecurityPolicy() throws Exception {
+        mockMvc.perform(get("/api/security/csrf"))
+                .andExpect(header().string("Content-Security-Policy", containsString("default-src 'self'")));
     }
 }

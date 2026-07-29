@@ -4,6 +4,9 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 const SIMPLE_ANALYTICS_QUEUE_ORIGIN = "https://queue.simpleanalyticscdn.com";
 const SIMPLE_ANALYTICS_HOSTNAME = "javachat.ai";
 const SIMPLE_ANALYTICS_SCRIPT_URL = "https://scripts.simpleanalyticscdn.com/latest.js";
+// Emitted as a standalone asset (not an inline script) so the backend's
+// Content-Security-Policy can stay at script-src 'self' without hash pinning.
+const SIMPLE_ANALYTICS_GUARD_ASSET_PATH = "assets/simple-analytics-guard.js";
 const SIMPLE_ANALYTICS_RUNTIME_GUARD_SCRIPT = `;(function () {
   if (globalThis.location.hostname !== '${SIMPLE_ANALYTICS_HOSTNAME}') {
     return
@@ -26,7 +29,10 @@ function buildSimpleAnalyticsTags(mode: string): HtmlTagDescriptor[] {
   return [
     {
       tag: "script",
-      children: SIMPLE_ANALYTICS_RUNTIME_GUARD_SCRIPT,
+      attrs: {
+        src: `/${SIMPLE_ANALYTICS_GUARD_ASSET_PATH}`,
+        async: true,
+      },
       injectTo: "body",
     },
     {
@@ -51,6 +57,16 @@ export default defineConfig(({ mode }) => ({
     svelte(),
     {
       name: "simple-analytics",
+      generateBundle() {
+        if (mode !== "production") {
+          return;
+        }
+        this.emitFile({
+          type: "asset",
+          fileName: SIMPLE_ANALYTICS_GUARD_ASSET_PATH,
+          source: SIMPLE_ANALYTICS_RUNTIME_GUARD_SCRIPT,
+        });
+      },
       transformIndexHtml() {
         return buildSimpleAnalyticsTags(mode);
       },
