@@ -106,7 +106,7 @@ See [pipeline-commands.md](pipeline-commands.md#hybrid-qdrant-setup) for the col
 - `QDRANT_COLLECTION_PDFS` (default `java-chat-qwen3-embedding-4b-2560-pdfs`)
 - `QDRANT_DENSE_VECTOR_NAME` (default `dense`) — named vector for dense embeddings
 - `QDRANT_SPARSE_VECTOR_NAME` (default `bm25`) — named vector for BM25 sparse tokens
-- `HYBRID_PREFETCH_LIMIT` (default `20`) — per-stage prefetch limit for RRF fusion queries
+- `HYBRID_PREFETCH_LIMIT` (default `14`) — per-stage prefetch limit for RRF fusion queries
 - `HYBRID_RRF_K` (default `60`) — reciprocal-rank-fusion k parameter used by Qdrant query fusion
 - `HYBRID_QUERY_TIMEOUT` (default `10s`) — timeout for hybrid search queries
 - `APP_QDRANT_ENSURE_PAYLOAD_INDEXES` (default `true`) — create payload indexes on startup

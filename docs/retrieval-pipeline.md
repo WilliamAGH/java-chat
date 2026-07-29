@@ -275,7 +275,7 @@ All properties are bound via `AppProperties` (`@ConfigurationProperties(prefix =
 |---|---|---|
 | `app.qdrant.dense-vector-name` | `dense` | Named vector key for dense embeddings |
 | `app.qdrant.sparse-vector-name` | `bm25` | Named vector key for sparse BM25 tokens |
-| `app.qdrant.prefetch-limit` | `20` | Per-stage candidate count for each dense/sparse prefetch before RRF fusion |
+| `app.qdrant.prefetch-limit` | `14` | Per-stage candidate count for each dense/sparse prefetch before RRF fusion |
 | `app.qdrant.rrf-k` | `60` | RRF k parameter: `score = Sum(1 / (k + rank))` |
 | `app.qdrant.query-timeout` | `10s` | Timeout for hybrid search fan-out across all collections |
 | `app.qdrant.ensure-payload-indexes` | `true` | Create payload indexes on startup for metadata filtering |
@@ -296,7 +296,7 @@ All four must be non-blank and distinct (validated on startup).
 
 | Property | Default | Validation | Description |
 |---|---|---|---|
-| `app.rag.search-top-k` | `12` | Must be > 0 | Candidates fetched from hybrid search before reranking |
+| `app.rag.search-top-k` | `8` | Must be > 0 | Candidates fetched from hybrid search before reranking |
 | `app.rag.search-return-k` | `6` | Must be > 0, must be <= `search-top-k` | Results returned to the LLM after reranking |
 | `app.rag.reranker-timeout` | `8s` | Must be positive and less than `20s` | Timeout for LLM reranking call |
 | `app.rag.search-citations` | `3` | Must be >= 0 | Citation references included in the response |
