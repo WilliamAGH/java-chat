@@ -45,24 +45,19 @@ Matches: `Java 25`, `JDK 24`, `java25`, `jdk-25`, `Java SE 24`, `JavaSE 25`.
 
 ### Query boosting
 
-`boostQueryWithVersionContext()` prepends synonym expansions to the raw query:
+`boostQueryWithVersionContext()` prepends synonym expansions to the raw query, one per requested release:
 
 ```
-JDK 25 Java SE 25 Java 25 release features documentation: <original query>
+JDK 25 Java SE 25 Java 25 release documentation: <original query>
 ```
 
-This improves dense-embedding recall by injecting version-related terms the embedding model can anchor on.
+For multi-release comparison queries such as `Java 21 vs 24`, each requested release contributes its own synonym prefix separated by `; `. This improves dense-embedding recall by injecting version-related terms the embedding model can anchor on.
 
 ### Metadata filter generation
 
-`extractFilterPatterns()` returns URL and text tokens used for both server-side Qdrant filtering and client-side post-filtering:
+`extractVersionNumbers()` returns every requested Java release in encounter order, expanding comparison shorthand such as `Java 21/24` or `JDK 21 vs 24` against the configured Java API release list.
 
-- **URL tokens**: `java25`, `jdk25`, `java-25`, `jdk-25`, `/javase/25`, `/java/javase/25`, `/java/se/25`
-- **Text tokens**: `java se 25`, `jdk 25`
-
-If a version is detected, `RetrievalService` builds a `RetrievalConstraint.forDocVersion(versionNumber)` that pushes a `docVersion` keyword filter to Qdrant server-side via `QdrantRetrievalConstraintBuilder`. When the constraint is server-side, client-side filtering is skipped; otherwise `VersionFilterPatterns.matchesMetadata(url, title)` applies as a fallback.
-
-**Orchestration**: `RetrievalService.retrieveOutcome()` lines 105-107.
+For each requested release, `RetrievalService` builds a `RetrievalConstraint` whose `docVersions` is an any-of `docVersion` keyword filter pushed to Qdrant server-side via `QdrantRetrievalConstraintBuilder` (`matchKeywords`). Multi-release queries fan out one exact-`docVersion` search per requested release; each release must return at least one official documentation hit or retrieval fails fast. There is no client-side URL/title post-filter fallback.
 
 ---
 
@@ -143,10 +138,10 @@ Three-layer dedup, applied in sequence:
 | Layer | Location | Key | Winner |
 |---|---|---|---|
 | UUID | `HybridSearchService.mergePoints()` | Qdrant point UUID | Highest score |
-| Content hash | `RetrievalService.dedupeByHashThenUrl()` | `hash` metadata (SHA-256) | First seen |
+| Content hash | `RetrievalService.dedupeByHashThenUrl()` | `docVersion + hash` (SHA-256) | First seen |
 | URL | `RetrievalService.dedupeByHashThenUrl()` | `url` metadata | First seen |
 
-Both hash and URL dedup use `LinkedHashMap.putIfAbsent` to preserve reranker ordering. Documents with neither hash nor URL are kept unconditionally (with a warning log).
+Both hash and URL dedup use `LinkedHashMap.putIfAbsent` to preserve reranker ordering. Content-hash dedup is keyed by `docVersion + hash` so the same chunk can appear once per requested Java release in a multi-release comparison. Documents with neither hash nor URL are kept unconditionally (with a warning log).
 
 **File**: `RetrievalService.java` lines 182-213.
 
