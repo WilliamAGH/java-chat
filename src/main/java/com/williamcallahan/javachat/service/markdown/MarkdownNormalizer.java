@@ -118,10 +118,11 @@ final class MarkdownNormalizer {
                 return true;
             }
         }
-        // A lone word after the marker is an info string, and per CommonMark an info-string
-        // fence only opens a block and can never close one, so it is never trailing prose
-        // regardless of letter case (```Java is an info string exactly like ```java).
-        return false;
+        // A capitalized lone word is the compact-prose repair case only when this candidate
+        // terminates an attached fence. A real opening fence still owns its info string, while
+        // appendAttachedClosingFenceWithProse preserves this line as literal code whenever a
+        // later structural closing fence proves that the active block continues.
+        return Character.isUpperCase(firstVisibleCharacter);
     }
 
     private static boolean isBalancedParentheticalProse(String markdownText, int firstVisibleIndex, int lineEndIndex) {

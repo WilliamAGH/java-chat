@@ -96,7 +96,7 @@ class MarkdownPreprocessingTest {
 
     @Test
     void testCompactAttachedClosingFenceSuffixesRemainProse() {
-        for (String trailingText : java.util.List.of("(note)", "two words")) {
+        for (String trailingText : java.util.List.of("Done", "(note)", "two words")) {
             String input = "Here's an example:```java\nint x = 10 % 3;\n```" + trailingText;
             String html = markdownService.processStructured(input).html();
 
@@ -108,16 +108,14 @@ class MarkdownPreprocessingTest {
     }
 
     @Test
-    void testCapitalizedSingleWordFenceSuffixParsesAsInfoString() {
-        // Per CommonMark a lone word after a fence marker is an info string regardless of case,
-        // so a capitalized word can never pose as an attached closing fence plus prose.
-        for (String trailingText : java.util.List.of("Done", "done")) {
-            String input = "Here's an example:```java\nint x = 10 % 3;\n```" + trailingText;
+    void testCapitalizedInfoStringOnAttachedOpeningFenceRemainsTheCodeLanguage() {
+        for (String infoString : java.util.List.of("Java", "JavaScript")) {
+            String input = "Here's an example:```" + infoString + "\nint x = 10 % 3;\n```";
             String html = markdownService.processStructured(input).html();
 
             assertTrue(
-                    html.contains("<code class=\"language-" + trailingText + "\">"),
-                    trailingText + " must open a fence with its own info string, not pose as closing-fence prose");
+                    html.contains("<code class=\"language-" + infoString + "\">"),
+                    infoString + " must remain the attached opening fence's info string");
         }
     }
 
