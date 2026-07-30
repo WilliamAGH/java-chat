@@ -29,7 +29,30 @@ describe("MessageBubble", () => {
     });
 
     expect(container.querySelector(".bubble-actions")).not.toBeNull();
-    expect(getByRole("button", { name: /copy message/i, hidden: true })).toBeInTheDocument();
+    const copyButton = getByRole("button", { name: /copy message/i });
+    expect(copyButton).toBeVisible();
+
+    copyButton.focus();
+    expect(copyButton).toHaveFocus();
+  });
+
+  it("reserves the copy action layout without exposing it while an assistant message is streaming", () => {
+    const { container, getByRole, queryByRole } = render(MessageBubble, {
+      props: {
+        message: {
+          messageId: "msg-test-streaming-assistant",
+          role: "assistant",
+          messageText: "Partial answer",
+          timestamp: 1,
+        },
+        index: 0,
+        isStreaming: true,
+      },
+    });
+
+    expect(container.querySelector(".bubble-actions")).not.toBeNull();
+    expect(queryByRole("button", { name: /copy message/i })).toBeNull();
+    expect(getByRole("button", { name: /copy message/i, hidden: true })).toBeDisabled();
   });
 
   it("renders refresh button for CSRF assistant errors", () => {

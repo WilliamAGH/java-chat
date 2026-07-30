@@ -100,12 +100,13 @@
   </div>
 
   {#if message.role === 'assistant' && !message.isError}
-    <div class="bubble-actions">
+    <div class="bubble-actions" aria-hidden={isStreaming}>
       <button
         type="button"
         class="action-btn"
         class:action-btn--success={copyState === 'success'}
         class:action-btn--error={copyState === 'error'}
+        disabled={isStreaming}
         onclick={() => copyToClipboard(message.messageText)}
         title={copyState === 'success' ? 'Copied!' : copyState === 'error' ? 'Copy failed' : 'Copy message'}
         aria-label={copyState === 'success' ? 'Copied to clipboard' : copyState === 'error' ? 'Failed to copy' : 'Copy message'}
@@ -242,26 +243,25 @@
     background: var(--color-bg-hover);
   }
 
-  /* Actions - desktop hover only (never on touch / narrow viewports).
-     In-flow flex sibling of the bubble so the layout always reserves its
-     width; an absolutely positioned overlay would be clipped by the chat
-     panel's overflow-x: hidden in narrow containers. */
+  /* Keep actions visible on touch and narrow viewports where hover cannot
+     reveal them. The in-flow sibling reserves its width so it cannot be
+     clipped by the chat panel's overflow-x behavior. */
   .bubble-actions {
-    display: none;
+    display: block;
     align-self: flex-start;
     margin-top: var(--space-2);
-    /* Bridge the flex gap so hover travels from bubble edge to button hit area. */
     margin-left: calc(-1 * var(--space-3));
     padding-left: var(--space-3);
-    opacity: 0;
-    pointer-events: none;
+    opacity: 1;
+    pointer-events: auto;
     transition: opacity var(--duration-fast) var(--ease-out);
   }
 
-  /* Only show hover actions on wide viewports with a fine pointer (mouse/trackpad). */
+  /* Fine pointers retain the quieter desktop hover treatment. */
   @media (hover: hover) and (pointer: fine) and (min-width: 641px) {
     .bubble-actions {
-      display: block;
+      opacity: 0;
+      pointer-events: none;
     }
 
     .message:hover .bubble-actions,
@@ -271,6 +271,22 @@
       opacity: 1;
       pointer-events: auto;
     }
+  }
+
+  /* Hybrid devices keep touch actions discoverable even when their primary
+     pointer also supports desktop hover. */
+  @media (any-pointer: coarse) {
+    .bubble-actions {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+
+  /* Preserve the action slot while streaming so completion does not reflow
+     the response, but do not expose a partial answer as copyable. */
+  .message.streaming .bubble-actions {
+    visibility: hidden;
+    pointer-events: none;
   }
 
   .action-btn {
