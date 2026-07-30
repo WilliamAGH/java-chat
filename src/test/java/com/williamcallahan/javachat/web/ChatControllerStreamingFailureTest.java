@@ -32,7 +32,10 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.openai.core.http.Headers;
 import com.openai.errors.InternalServerException;
+import com.openai.errors.UnprocessableEntityException;
+import com.openai.models.ErrorObject;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ReactorHooksConfig;
@@ -201,6 +204,56 @@ class ChatControllerStreamingFailureTest {
                 "user-facing message must not leak the exception class name");
         assertFalse(serializedError.contains(RerankingFailureException.class.getSimpleName()));
         assertFalse(serializedError.contains("Reranking service unavailable"));
+    }
+
+    @Test
+    void unpreservableReasoningIntentNamesTheEffortAndTheOwningSetting() throws JsonProcessingException {
+        AppProperties appProperties = new AppProperties();
+        appProperties.getLlm().setReasoningEffort("xhigh");
+
+        List<ServerSentEvent<String>> streamEvents =
+                streamFailure(unprocessableEntityFailure("unpreservable_reasoning_intent"), false, appProperties);
+
+        ServerSentEvent<String> errorEvent = streamEvents.stream()
+                .filter(streamEvent -> "error".equals(streamEvent.event()))
+                .findFirst()
+                .orElseThrow();
+        String serializedError = Objects.requireNonNull(errorEvent.data(), "error event data");
+        SseSupport.SseEventPayload reasoningErrorEvent =
+                objectMapper.readValue(serializedError, SseSupport.SseEventPayload.class);
+        assertTrue(reasoningErrorEvent.message().contains("xhigh"));
+        assertTrue(reasoningErrorEvent.message().contains("app.llm.reasoning-effort"));
+        assertTrue(reasoningErrorEvent.message().contains("unpreservable_reasoning_intent"));
+        assertEquals(Boolean.FALSE, reasoningErrorEvent.retryable());
+    }
+
+    @Test
+    void otherUnprocessableEntityFailuresKeepTheGenericMessage() throws JsonProcessingException {
+        List<ServerSentEvent<String>> streamEvents =
+                streamFailure(unprocessableEntityFailure("invalid_request"), false);
+
+        ServerSentEvent<String> errorEvent = streamEvents.stream()
+                .filter(streamEvent -> "error".equals(streamEvent.event()))
+                .findFirst()
+                .orElseThrow();
+        SseSupport.SseEventPayload genericErrorEvent = objectMapper.readValue(
+                Objects.requireNonNull(errorEvent.data(), "error event data"), SseSupport.SseEventPayload.class);
+        assertEquals(
+                "Something went wrong while generating this response. Please try again.", genericErrorEvent.message());
+        assertEquals(Boolean.FALSE, genericErrorEvent.retryable());
+    }
+
+    private static UnprocessableEntityException unprocessableEntityFailure(String gatewayErrorCode) {
+        ErrorObject gatewayError = ErrorObject.builder()
+                .message("gateway rejected the request")
+                .type("invalid_request_error")
+                .code(gatewayErrorCode)
+                .param((String) null)
+                .build();
+        return UnprocessableEntityException.builder()
+                .headers(Headers.builder().build())
+                .error(gatewayError)
+                .build();
     }
 
     @Test
@@ -776,6 +829,11 @@ class ChatControllerStreamingFailureTest {
     }
 
     private List<ServerSentEvent<String>> streamFailure(Throwable streamingFailure, boolean retryable) {
+        return streamFailure(streamingFailure, retryable, new AppProperties());
+    }
+
+    private List<ServerSentEvent<String>> streamFailure(
+            Throwable streamingFailure, boolean retryable, AppProperties appProperties) {
         ChatService chatService = mock(ChatService.class);
         ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
@@ -787,7 +845,7 @@ class ChatControllerStreamingFailureTest {
                 retrievalService,
                 createSseSupport(),
                 new ExceptionResponseBuilder(),
-                new AppProperties());
+                appProperties);
 
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any(), anyLong()))

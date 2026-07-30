@@ -30,7 +30,7 @@ import org.springframework.stereotype.Service;
  * Builds OpenAI-compatible request payloads while enforcing model-specific prompt limits.
  *
  * <p>Centralizing request construction keeps model normalization, truncation behavior,
- * and reasoning options consistent between streaming and non-streaming calls.</p>
+ * and reasoning options consistent between streaming and non-streaming chat calls.</p>
  */
 @Service
 @Lazy(false)
@@ -237,8 +237,13 @@ public final class OpenAiRequestFactory {
         if (Double.isFinite(temperature)) {
             builder.temperature(temperature);
         }
-        reasoningEffort.ifPresent(
-                effort -> builder.reasoning(Reasoning.builder().effort(effort).build()));
+        // The reasoning-effort override is a chat-generation knob. JSON-object completions own
+        // small output budgets (reranker/enrichment) whose visible JSON answer reasoning tokens
+        // would starve, so those calls inherit the gateway/model default instead.
+        if (!requireJsonObject) {
+            reasoningEffort.ifPresent(effort ->
+                    builder.reasoning(Reasoning.builder().effort(effort).build()));
+        }
 
         return builder.build();
     }
