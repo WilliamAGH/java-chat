@@ -27,6 +27,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.autoconfigure.web.servlet.MockMvcPrint;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -36,6 +38,7 @@ import reactor.core.publisher.Flux;
 
 /** Verifies guided content HTTP contracts resolve only authoritative curated lesson markdown. */
 @WebMvcTest(controllers = GuidedLearningController.class)
+@AutoConfigureMockMvc(print = MockMvcPrint.NONE)
 @Import({AppProperties.class, WebMvcConfig.class, SseSupport.class, SimpleMeterRegistry.class})
 @org.springframework.security.test.context.support.WithMockUser
 class GuidedLearningControllerCuratedContentTest {
