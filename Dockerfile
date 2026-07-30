@@ -11,7 +11,7 @@
 # ================================
 # FRONTEND BUILD STAGE
 # ================================
-FROM public.ecr.aws/docker/library/node:24.15.0-bookworm-slim AS frontend-builder
+FROM public.ecr.aws/docker/library/node:24.18.0-bookworm-slim AS frontend-builder
 WORKDIR /app/frontend
 
 # Copy dependency definitions first for cache layer
