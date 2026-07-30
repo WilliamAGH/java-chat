@@ -46,6 +46,7 @@ lint-frontend: ## Run frontend linting (oxlint + ast-grep + svelte-check)
 
 lint-ast: ## Run ast-grep rules for Java naming and type safety
 	@$(call require_cmd,ast-grep,brew install ast-grep)
+	@$(call require_cmd,ruby,brew install ruby)
 	@echo "$(CYAN)Running ast-grep rules...$(NC)"
 	@ast-grep test -c config/sgconfig.yml --skip-snapshot-tests
 	@ast-grep scan -c config/sgconfig.yml src/main/java/

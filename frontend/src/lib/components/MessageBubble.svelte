@@ -180,6 +180,9 @@
     background: var(--color-accent);
     color: white;
     border-bottom-right-radius: var(--radius-sm);
+    /* Cap tall pastes (stack traces, logs) so one message cannot monopolize the viewport. */
+    max-height: 40vh;
+    overflow-y: auto;
   }
 
   .message.assistant .bubble {

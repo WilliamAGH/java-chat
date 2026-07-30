@@ -340,6 +340,33 @@ class RetrievalServiceCitationTest {
     }
 
     @Test
+    void bareDotAndMethodReferenceQueriesEmitOnlyTheRequestedMemberFamily() {
+        Document staticFormatDocument = javadocMemberCitationDocument(
+                "static-format", "Formats with a format string.", "format(java.lang.String,java.lang.Object...)");
+        Document formattedDocument = javadocMemberCitationDocument(
+                "formatted", "Formats this string with arguments.", "formatted(java.lang.Object...)");
+        List<Document> promptDocuments = List.of(staticFormatDocument, formattedDocument);
+
+        List<String> dotSyntaxAnchors =
+                citationService()
+                        .toCitationsForQuery("Explain Java 25 String.formatted", promptDocuments)
+                        .citations()
+                        .stream()
+                        .map(Citation::getAnchor)
+                        .toList();
+        List<String> methodReferenceAnchors =
+                citationService()
+                        .toCitationsForQuery("Show Java 25 String::formatted", promptDocuments)
+                        .citations()
+                        .stream()
+                        .map(Citation::getAnchor)
+                        .toList();
+
+        assertEquals(List.of("formatted(java.lang.Object...)"), dotSyntaxAnchors);
+        assertEquals(dotSyntaxAnchors, methodReferenceAnchors);
+    }
+
+    @Test
     void nonexactQueriesPreservePromptDocumentCitationOrder() {
         Document threeArgumentOverload = listOverloadDocument("three-argument", "of(E,E,E)");
         Document twoArgumentOverload = listOverloadDocument("two-argument", "of(E,E)");
@@ -395,6 +422,7 @@ class RetrievalServiceCitationTest {
                 .metadata(QdrantPayloadFieldSchema.URL_FIELD, javaLangStringJavadocUrl())
                 .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.lang")
                 .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .metadata(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, "String.html")
                 .metadata(QdrantPayloadFieldSchema.ANCHOR_FIELD, exactAnchor)
                 .build();
     }

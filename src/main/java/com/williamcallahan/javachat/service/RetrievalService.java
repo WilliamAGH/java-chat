@@ -205,10 +205,10 @@ public class RetrievalService {
         RetrievalConstraint combinedRetrievalConstraint = scopedRetrievalConstraint.withDocVersions(requestedVersions);
         List<Document> citationSearchDocuments = searchCitationCandidates(
                 query, citationCandidateLimit, combinedRetrievalConstraint, requestedVersions, stageDeadlineNanos);
-        List<Document> orderedCitationCandidates =
-                CitationCandidateRanker.orderForCitationQuery(query, citationSearchDocuments);
+        List<Document> orderedCitationCandidates = CitationCandidateRanker.selectPromptContextForCitationQuery(
+                query, CitationCandidateRanker.orderForCitationQuery(query, citationSearchDocuments));
         List<Document> limitedCitationCandidates = retainRequestedVersionCoverage(
-                orderedCitationCandidates, citationSearchDocuments, requestedVersions, citationLimit);
+                orderedCitationCandidates, orderedCitationCandidates, requestedVersions, citationLimit);
         CitationOutcome candidateCitationOutcome = toCitations(limitedCitationCandidates);
         List<Citation> limitedCitations = candidateCitationOutcome.citations().stream()
                 .limit(citationLimit)
@@ -306,14 +306,14 @@ public class RetrievalService {
 
         int returnDocumentLimit = appProperties.getRag().getSearchReturnK();
         List<Document> promptDocuments;
-        if (requiresExactJavaOverloadEvidence(query, retrievalConstraint)) {
-            List<Document> exactOverloadDocuments =
+        if (requiresJavaMemberEvidence(query, retrievalConstraint)) {
+            List<Document> javaMemberDocuments =
                     CitationCandidateRanker.selectPromptContextForCitationQuery(query, candidateRetrieval.documents());
-            requireExactOverloadEvidence(exactOverloadDocuments, requestedVersions);
+            requireJavaMemberEvidence(javaMemberDocuments, requestedVersions);
             promptDocuments = requestedVersions.isEmpty()
-                    ? exactOverloadDocuments.stream().limit(returnDocumentLimit).toList()
+                    ? javaMemberDocuments.stream().limit(returnDocumentLimit).toList()
                     : retainRequestedVersionCoverage(
-                            exactOverloadDocuments, exactOverloadDocuments, requestedVersions, returnDocumentLimit);
+                            javaMemberDocuments, javaMemberDocuments, requestedVersions, returnDocumentLimit);
         } else {
             progressListener.accept(
                     new RetrievalNotice(RETRIEVAL_RERANK_STATUS_SUMMARY, RETRIEVAL_RERANK_STATUS_DETAILS));
@@ -345,14 +345,14 @@ public class RetrievalService {
         int baseTopK = Math.max(1, appProperties.getRag().getSearchTopK());
         List<Document> retrievedDocuments = new ArrayList<>();
         List<RetrievalNotice> retrievalNotices = new ArrayList<>();
-        if (requiresExactJavaOverloadEvidence(query, retrievalConstraint)) {
+        if (requiresJavaMemberEvidence(query, retrievalConstraint)) {
             List<Document> citationCandidates = searchCitationCandidates(
                     query, baseTopK, retrievalConstraint, requestedVersions, stageDeadlineNanos);
-            List<Document> exactOverloadDocuments =
-                    CitationCandidateRanker.orderForCitationQuery(query, citationCandidates);
-            requireExactOverloadEvidence(exactOverloadDocuments, requestedVersions);
+            List<Document> javaMemberDocuments = CitationCandidateRanker.selectPromptContextForCitationQuery(
+                    query, CitationCandidateRanker.orderForCitationQuery(query, citationCandidates));
+            requireJavaMemberEvidence(javaMemberDocuments, requestedVersions);
             return new CandidateRetrieval(
-                    deduplicateByVersionAndContentHashThenHashlessCanonicalUrl(exactOverloadDocuments), List.of());
+                    deduplicateByVersionAndContentHashThenHashlessCanonicalUrl(javaMemberDocuments), List.of());
         }
         if (requestedVersions.isEmpty()) {
             appendSearchOutcome(
@@ -378,7 +378,16 @@ public class RetrievalService {
     }
 
     private static boolean requiresExactJavaOverloadEvidence(String query, RetrievalConstraint retrievalConstraint) {
-        return JavaApiMethodSelector.uniqueExactOverloadFromQuery(query).isPresent()
+        return JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery(query)
+                        .flatMap(JavaApiMethodSelector::exactOverloadAnchor)
+                        .isPresent()
+                && DocsSourceRegistry.javaApiDocumentationSources().stream()
+                        .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
+                        .anyMatch(retrievalConstraint.docSet()::contains);
+    }
+
+    private static boolean requiresJavaMemberEvidence(String query, RetrievalConstraint retrievalConstraint) {
+        return JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery(query).isPresent()
                 && DocsSourceRegistry.javaApiDocumentationSources().stream()
                         .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
                         .anyMatch(retrievalConstraint.docSet()::contains);
@@ -409,13 +418,12 @@ public class RetrievalService {
         return retrievalConstraint.withDocSetScope(currentJavaApiDocSets);
     }
 
-    private static void requireExactOverloadEvidence(
-            List<Document> exactOverloadDocuments, List<String> requestedVersions) {
-        if (exactOverloadDocuments.isEmpty()) {
-            throw new IllegalStateException("No official Java API evidence found for the requested exact overload");
+    private static void requireJavaMemberEvidence(List<Document> javaMemberDocuments, List<String> requestedVersions) {
+        if (javaMemberDocuments.isEmpty()) {
+            throw new IllegalStateException("No official Java API evidence found for the requested member");
         }
         for (String requestedVersion : requestedVersions) {
-            requireRequestedVersionEvidence(requestedVersion, exactOverloadDocuments);
+            requireRequestedVersionEvidence(requestedVersion, javaMemberDocuments);
         }
     }
 
@@ -816,11 +824,12 @@ public class RetrievalService {
     }
 
     /**
-     * Converts prompt-context documents with exact Java overload selection when canonical metadata permits it.
+     * Converts prompt-context documents with authoritative Java member selection when canonical metadata permits it.
      *
-     * <p>Ordinary, runtime-value, incomplete, and multi-selector queries preserve the supplied
-     * context order. Sole exact syntax retains only canonical matching metadata; without it, no
-     * citation is emitted. Every emitted source therefore remains grounded in the model prompt.</p>
+     * <p>One explicit Java API member retains only canonical stored anchors for that member family;
+     * an exact signature narrows the family to one anchor. Non-Java, malformed, chained, and
+     * multi-selector queries preserve the supplied context order. Every emitted source therefore
+     * remains grounded in the model prompt without substituting a sibling Java member.</p>
      */
     public CitationOutcome toCitationsForQuery(String query, List<Document> promptDocuments) {
         if (query == null || promptDocuments == null || promptDocuments.isEmpty()) {

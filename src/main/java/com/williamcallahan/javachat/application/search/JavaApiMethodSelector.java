@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * Identifies an explicitly named Java API type method within a natural-language query.
@@ -28,7 +30,9 @@ public final class JavaApiMethodSelector {
     private static final String THREAD_BUILDER_START_PARAMETER_CLAUSE = "(java.lang.Runnable)";
     private static final String JAVA_LANG_PACKAGE = "java.lang";
     private static final int MINIMUM_TYPE_METHOD_SEGMENT_COUNT = 2;
-    private static final Set<String> NON_METHOD_TERMINALS = Set.of("class", "super", "this", "java", "html");
+    private static final Set<String> NON_METHOD_TERMINALS = Set.of("class", "super", "this", "java", "html", "new");
+    private static final ConcurrentMap<PlatformMemberLookup, Optional<String>> JAVA_PLATFORM_MEMBER_PACKAGE_CACHE =
+            new ConcurrentHashMap<>();
     private final String packageName;
     private final String typePageName;
     private final String methodName;
@@ -74,6 +78,52 @@ public final class JavaApiMethodSelector {
     }
 
     /**
+     * Extracts one member selector only when the query names exactly one Java API member.
+     *
+     * <p>Deterministic documentation retrieval uses this stricter form so comparison questions do
+     * not discard evidence for later selectors.</p>
+     *
+     * @param query learner query text
+     * @return sole Java API member selector, or empty when none or multiple are present
+     */
+    public static Optional<JavaApiMethodSelector> uniqueMemberFromQuery(String query) {
+        List<SelectorOccurrence> selectorOccurrences = selectorOccurrences(query);
+        if (selectorOccurrences.size() != 1) {
+            return Optional.empty();
+        }
+        SelectorOccurrence selectorOccurrence = selectorOccurrences.getFirst();
+        if (selectorOccurrence.supportsInvocationSignature()
+                && hasInvocationAt(query, selectorOccurrence.methodEndIndex())) {
+            if (hasUnsupportedMemberFamilyInvocation(query, selectorOccurrence.methodEndIndex())
+                    || chainedMethodStartIndexAfterInvocation(query, selectorOccurrence.methodEndIndex()) >= 0) {
+                return Optional.empty();
+            }
+        }
+        return Optional.of(selectorOccurrence.selector());
+    }
+
+    /**
+     * Extracts one member only when the query explicitly identifies the Java platform API.
+     *
+     * <p>A qualified or unqualified selector is authoritative only when its top-level type resolves
+     * from an exported package in a Java platform module. Package-name prefixes, general Java or
+     * Javadoc prose, and parameter syntax cannot make a third-party type pass that platform-owned
+     * resolution check.</p>
+     *
+     * @param query learner query text
+     * @return sole explicitly Java-platform member selector, or empty otherwise
+     */
+    public static Optional<JavaApiMethodSelector> uniqueExplicitJavaApiMemberFromQuery(String query) {
+        Optional<JavaApiMethodSelector> exactSelector = uniqueExactOverloadFromQuery(query);
+        Optional<JavaApiMethodSelector> exactPlatformSelector =
+                exactSelector.flatMap(JavaApiMethodSelector::withResolvedJavaPlatformPackage);
+        if (exactPlatformSelector.isPresent()) {
+            return exactPlatformSelector;
+        }
+        return uniqueMemberFromQuery(query).flatMap(JavaApiMethodSelector::withResolvedJavaPlatformPackage);
+    }
+
+    /**
      * Extracts an exact overload selector only when one selector has an unambiguous type signature.
      *
      * <p>Comparisons and value-expression invocations retain broad relevance ordering because this
@@ -88,6 +138,9 @@ public final class JavaApiMethodSelector {
             return Optional.empty();
         }
         SelectorOccurrence selectorOccurrence = selectorOccurrences.getFirst();
+        if (!selectorOccurrence.supportsInvocationSignature()) {
+            return Optional.empty();
+        }
         JavaInvocationSignature invocationSignature =
                 JavaInvocationSignature.afterMethodName(query, selectorOccurrence.methodEndIndex());
         int chainedMethodStartIndex =
@@ -175,13 +228,39 @@ public final class JavaApiMethodSelector {
                     }
                     int chainedMethodEndIndex = readIdentifierEnd(query, chainedMethodStartIndex);
                     int chainedInvocationIndex = skipWhitespace(query, chainedMethodEndIndex);
-                    return chainedInvocationIndex < query.length() && query.charAt(chainedInvocationIndex) == '('
-                            ? chainedMethodStartIndex
-                            : -1;
+                    if (chainedInvocationIndex < query.length() && query.charAt(chainedInvocationIndex) == '(') {
+                        return chainedMethodStartIndex;
+                    }
+                    return Character.isLowerCase(query.charAt(chainedMethodStartIndex)) ? chainedMethodStartIndex : -1;
                 }
             }
         }
         return -1;
+    }
+
+    private static boolean hasInvocationAt(String query, int methodEndIndex) {
+        int openingParenthesisIndex = skipWhitespace(query, methodEndIndex);
+        return openingParenthesisIndex < query.length() && query.charAt(openingParenthesisIndex) == '(';
+    }
+
+    private static boolean hasUnsupportedMemberFamilyInvocation(String query, int methodEndIndex) {
+        int openingParenthesisIndex = skipWhitespace(query, methodEndIndex);
+        int invocationDepth = 0;
+        for (int currentIndex = openingParenthesisIndex; currentIndex < query.length(); currentIndex++) {
+            char currentCharacter = query.charAt(currentIndex);
+            if (currentCharacter == '<' || currentCharacter == '>') {
+                return true;
+            }
+            if (currentCharacter == '(') {
+                invocationDepth++;
+            } else if (currentCharacter == ')') {
+                invocationDepth--;
+                if (invocationDepth == 0) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private static int skipExplicitMethodTypeArguments(String query, int openingTypeArgumentIndex) {
@@ -213,29 +292,33 @@ public final class JavaApiMethodSelector {
             }
             ParsedQualifiedName parsedQualifiedName = parseQualifiedName(query, queryIndex);
             fromQualifiedName(parsedQualifiedName.segments())
-                    .ifPresent(selector ->
-                            selectorOccurrences.add(new SelectorOccurrence(selector, parsedQualifiedName.endIndex())));
+                    .ifPresent(selector -> selectorOccurrences.add(new SelectorOccurrence(
+                            selector, parsedQualifiedName.endIndex(), !parsedQualifiedName.methodReference())));
             queryIndex = parsedQualifiedName.endIndex() - 1;
         }
         return List.copyOf(selectorOccurrences);
     }
 
     /**
-     * Adds component terms for an explicit selector while retaining its punctuated spelling.
+     * Builds a sparse citation query around an explicit selector.
      *
-     * <p>Lucene's {@code StandardAnalyzer} keeps {@code List.of} as one lexical term in the
-     * original query. Adding only {@code List} (or {@code Map.Entry}) recalls its declaring page
-     * without adding noisy common method terms such as {@code of}. Document-vector encoding remains
-     * unchanged.</p>
+     * <p>A uniquely validated Java platform member uses only its declaring type and method terms.
+     * The corresponding official-document query is constrained by type-page metadata, so unrelated
+     * answer-formatting prose cannot dilute member recall and common method names cannot introduce
+     * cross-type results. Unverified and multi-member queries retain their original text while
+     * receiving component terms for broad relevance. Document-vector encoding remains unchanged.</p>
      *
-     * @param citationQuery original sparse citation query
-     * @return original query plus selector component terms when a selector is present
+     * @param citationQuery original citation query
+     * @return selector-focused query for a validated Java member, otherwise the original query with
+     *     broad selector component terms
      */
-    public static String expandForSparseCitationQuery(String citationQuery) {
+    public static String sparseCitationQuery(String citationQuery) {
         Objects.requireNonNull(citationQuery, "citationQuery");
-        return fromQuery(citationQuery)
-                .map(selector -> citationQuery + " " + selector.sparseQueryTerms())
-                .orElse(citationQuery);
+        return uniqueExplicitJavaApiMemberFromQuery(citationQuery)
+                .map(JavaApiMethodSelector::sparseQueryTerms)
+                .orElseGet(() -> fromQuery(citationQuery)
+                        .map(selector -> citationQuery + " " + selector.sparseQueryTerms())
+                        .orElse(citationQuery));
     }
 
     /**
@@ -299,7 +382,25 @@ public final class JavaApiMethodSelector {
      * @return declaring type syntax, including nested-type delimiters when present
      */
     public String sparseQueryTerms() {
-        return typePageName;
+        return typePageName + " " + methodName;
+    }
+
+    /**
+     * Determines whether a persisted Javadoc anchor belongs to this selector's method family.
+     *
+     * <p>The method name is matched exactly while every overload remains eligible. The selector
+     * never infers a parameter signature from learner prose.</p>
+     *
+     * @param candidateAnchor persisted Javadoc member anchor
+     * @return true when the anchor declares the requested method name
+     */
+    public boolean matchesMethodAnchor(String candidateAnchor) {
+        if (candidateAnchor == null || candidateAnchor.isBlank()) {
+            return false;
+        }
+        int parameterClauseStartIndex = candidateAnchor.indexOf('(');
+        return parameterClauseStartIndex > 0
+                && methodName.equals(candidateAnchor.substring(0, parameterClauseStartIndex));
     }
 
     /**
@@ -322,6 +423,61 @@ public final class JavaApiMethodSelector {
         return JavaPackageName.from(candidatePackageName);
     }
 
+    private Optional<JavaApiMethodSelector> withResolvedJavaPlatformPackage() {
+        PlatformMemberLookup platformMemberLookup = new PlatformMemberLookup(packageName, typePageName, methodName);
+        return JAVA_PLATFORM_MEMBER_PACKAGE_CACHE
+                .computeIfAbsent(platformMemberLookup, JavaApiMethodSelector::resolveUniqueExportedJavaPlatformPackage)
+                .map(resolvedPackageName -> resolvedPackageName.equals(packageName)
+                        ? this
+                        : new JavaApiMethodSelector(
+                                resolvedPackageName, typePageName, methodName, invocationSignature));
+    }
+
+    private static Optional<String> resolveUniqueExportedJavaPlatformPackage(
+            PlatformMemberLookup platformMemberLookup) {
+        List<String> matchingPackageNames = new ArrayList<>();
+        for (Module platformModule : ModuleLayer.boot().modules()) {
+            if (!isJavaPlatformModule(platformModule)) {
+                continue;
+            }
+            for (String exportedPackageName : platformModule.getPackages()) {
+                if (!platformModule.isExported(exportedPackageName)
+                        || (!platformMemberLookup.packageName().isBlank()
+                                && !platformMemberLookup.packageName().equals(exportedPackageName))) {
+                    continue;
+                }
+                String binaryTypeName = platformMemberLookup.typePageName().replace('.', '$');
+                Class<?> platformType = Class.forName(platformModule, exportedPackageName + "." + binaryTypeName);
+                if (platformType != null
+                        && isApiVisible(platformType.getModifiers())
+                        && declaresMethod(platformType, platformMemberLookup.methodName())
+                        && !matchingPackageNames.contains(exportedPackageName)) {
+                    matchingPackageNames.add(exportedPackageName);
+                }
+            }
+        }
+        return matchingPackageNames.size() == 1 ? Optional.of(matchingPackageNames.getFirst()) : Optional.empty();
+    }
+
+    private static boolean declaresMethod(Class<?> platformType, String expectedMethodName) {
+        for (java.lang.reflect.Method declaredMethod : platformType.getDeclaredMethods()) {
+            if (isApiVisible(declaredMethod.getModifiers()) && expectedMethodName.equals(declaredMethod.getName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isApiVisible(int memberModifiers) {
+        return java.lang.reflect.Modifier.isPublic(memberModifiers)
+                || java.lang.reflect.Modifier.isProtected(memberModifiers);
+    }
+
+    private static boolean isJavaPlatformModule(Module candidateModule) {
+        String moduleName = candidateModule.getName();
+        return moduleName.startsWith("java.") || moduleName.startsWith("jdk.");
+    }
+
     private boolean matchesPackageTypePath(String javadocPath, JavaPackageName expectedPackageName) {
         String expectedPagePath = "/" + expectedPackageName.javadocPath() + "/" + typePageFileName();
         return javadocPath.endsWith(expectedPagePath);
@@ -334,15 +490,30 @@ public final class JavaApiMethodSelector {
             int segmentEndIndex = readIdentifierEnd(query, currentIndex);
             segments.add(query.substring(currentIndex, segmentEndIndex));
             if (segmentEndIndex >= query.length() || query.charAt(segmentEndIndex) != '.') {
-                return new ParsedQualifiedName(segments, segmentEndIndex);
+                int methodReferenceDelimiterIndex = skipWhitespace(query, segmentEndIndex);
+                if (hasMethodReferenceDelimiterAt(query, methodReferenceDelimiterIndex)) {
+                    int methodStartIndex = skipWhitespace(query, methodReferenceDelimiterIndex + 2);
+                    if (isIdentifierStartAt(query, methodStartIndex)) {
+                        int methodEndIndex = readIdentifierEnd(query, methodStartIndex);
+                        segments.add(query.substring(methodStartIndex, methodEndIndex));
+                        return new ParsedQualifiedName(segments, methodEndIndex, true);
+                    }
+                }
+                return new ParsedQualifiedName(segments, segmentEndIndex, false);
             }
             int nextSegmentStartIndex = segmentEndIndex + 1;
             if (!isIdentifierStartAt(query, nextSegmentStartIndex)) {
-                return new ParsedQualifiedName(segments, segmentEndIndex);
+                return new ParsedQualifiedName(segments, segmentEndIndex, false);
             }
             currentIndex = nextSegmentStartIndex;
         }
-        return new ParsedQualifiedName(segments, currentIndex);
+        return new ParsedQualifiedName(segments, currentIndex, false);
+    }
+
+    private static boolean hasMethodReferenceDelimiterAt(String query, int delimiterStartIndex) {
+        return delimiterStartIndex + 1 < query.length()
+                && query.charAt(delimiterStartIndex) == ':'
+                && query.charAt(delimiterStartIndex + 1) == ':';
     }
 
     private static Optional<JavaApiMethodSelector> fromQualifiedName(List<String> segments) {
@@ -419,11 +590,14 @@ public final class JavaApiMethodSelector {
         return nonNullText.trim();
     }
 
-    private record ParsedQualifiedName(List<String> segments, int endIndex) {
+    private record ParsedQualifiedName(List<String> segments, int endIndex, boolean methodReference) {
         private ParsedQualifiedName {
             segments = List.copyOf(segments);
         }
     }
 
-    private record SelectorOccurrence(JavaApiMethodSelector selector, int methodEndIndex) {}
+    private record SelectorOccurrence(
+            JavaApiMethodSelector selector, int methodEndIndex, boolean supportsInvocationSignature) {}
+
+    private record PlatformMemberLookup(String packageName, String typePageName, String methodName) {}
 }

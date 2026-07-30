@@ -23,6 +23,8 @@
     "validate": "npm run validate:node-version && npm run format:check && npm run lint && npm run check"
   },
   "dependencies": {
+    "@clerk/clerk-js": "^6.25.10",
+    "@clerk/ui": "^1.26.1",
     "@types/dompurify": "^3.0.5",
     "dompurify": "^3.4.0",
     "highlight.js": "^11.10.0",

@@ -430,7 +430,13 @@ function prepareMarkdownForParsing(markdownText: string, markdownParser: Marked)
   const normalizedContent = normalizeMarkdownForStreaming(
     nestNumericListFences(markdownText, markdownParser),
   );
-  if (import.meta.env.DEV && normalizedContent !== markdownText) {
+  // An append-only difference is the synthetic closing fence added for a stream that is
+  // still in flight; warning on every chunk would drown out genuine repair diagnostics.
+  if (
+    import.meta.env.DEV &&
+    normalizedContent !== markdownText &&
+    !normalizedContent.startsWith(markdownText)
+  ) {
     for (let markerIndex = 0; markerIndex < markdownText.length; markerIndex++) {
       const opening = readEnrichmentOpening(markdownText, markerIndex);
       if (!opening) {

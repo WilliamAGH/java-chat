@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 class JavaApiMethodSelectorTest {
 
     @Test
-    void recognizesPunctuatedTypeMethodInvocationAndAppendsOnlyTheDeclaringType() {
+    void recognizesPunctuatedTypeMethodInvocationAndBuildsMemberSearchTerms() {
         String citationQuery = "What does Java List.of() return?";
 
         JavaApiMethodSelector selector =
@@ -24,8 +24,8 @@ class JavaApiMethodSelectorTest {
         assertTrue(selector.exactOverloadAnchor().isEmpty());
         assertEquals("of()", exactSelector.exactOverloadAnchor().orElseThrow());
         assertEquals("List.html", selector.typePageFileName());
-        assertEquals("List", selector.sparseQueryTerms());
-        assertEquals(citationQuery + " List", JavaApiMethodSelector.expandForSparseCitationQuery(citationQuery));
+        assertEquals("List of", selector.sparseQueryTerms());
+        assertEquals("List of", JavaApiMethodSelector.sparseCitationQuery(citationQuery));
     }
 
     @Test
@@ -37,7 +37,146 @@ class JavaApiMethodSelectorTest {
         assertEquals("Stream", selector.typePageName());
         assertEquals("map", selector.methodName());
         assertTrue(selector.exactOverloadAnchor().isEmpty());
-        assertEquals("Stream", selector.sparseQueryTerms());
+        assertEquals("Stream map", selector.sparseQueryTerms());
+        JavaApiMethodSelector uniqueSelector = JavaApiMethodSelector.uniqueMemberFromQuery("Explain Stream.map in Java")
+                .orElseThrow();
+        assertEquals(selector.typePageName(), uniqueSelector.typePageName());
+        assertEquals(selector.methodName(), uniqueSelector.methodName());
+    }
+
+    @Test
+    void recognizesMethodReferencesWithoutInventingAnExactInvocationSignature() {
+        String citationQuery = "Show an example with java.lang.String::formatted(java.lang.Object...)";
+
+        JavaApiMethodSelector selector =
+                JavaApiMethodSelector.uniqueMemberFromQuery(citationQuery).orElseThrow();
+
+        assertEquals("java.lang", selector.packageName());
+        assertEquals("String", selector.typePageName());
+        assertEquals("formatted", selector.methodName());
+        assertEquals("String formatted", selector.sparseQueryTerms());
+        assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery(citationQuery)
+                .isEmpty());
+        assertEquals(
+                "formatted",
+                JavaApiMethodSelector.uniqueMemberFromQuery("Show String :: formatted")
+                        .orElseThrow()
+                        .methodName());
+        assertTrue(
+                JavaApiMethodSelector.uniqueMemberFromQuery("Show String::new").isEmpty());
+    }
+
+    @Test
+    void isolatesValidatedMemberTermsFromAnswerFormattingProse() {
+        String styledExampleQuery = "Show a Java 25 example with inline code String::formatted, a fenced code block, "
+                + "and cite official Javadoc.";
+        String thirdPartyQuery = "Show a fenced example for SpringApplication.run";
+
+        assertEquals("String formatted", JavaApiMethodSelector.sparseCitationQuery(styledExampleQuery));
+        assertEquals(
+                thirdPartyQuery + " SpringApplication run", JavaApiMethodSelector.sparseCitationQuery(thirdPartyQuery));
+        assertEquals(
+                "Compare List.of with Set.of List of",
+                JavaApiMethodSelector.sparseCitationQuery("Compare List.of with Set.of"));
+        assertEquals("Explain List.add List add", JavaApiMethodSelector.sparseCitationQuery("Explain List.add"));
+    }
+
+    @Test
+    void rejectsUniqueSelectionWhenAQueryNamesMultipleMembers() {
+        assertTrue(JavaApiMethodSelector.uniqueMemberFromQuery("Compare List.of with Set.of")
+                .isEmpty());
+    }
+
+    @Test
+    void classifiesOnlyTypesOwnedByExportedJavaPlatformModules() {
+        assertEquals(
+                "formatted",
+                JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain String.formatted")
+                        .orElseThrow()
+                        .methodName());
+        assertTrue(JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain Java SpringApplication.run")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain Java 25 SpringApplication.run")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain Javadoc SpringApplication.run")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain Java 25 SpringApplication.run()")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery(
+                        "Explain javax.servlet.http.HttpServlet.service")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain SpringApplication.run")
+                .isEmpty());
+        assertEquals(
+                "formatted",
+                JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain Java 25 String.formatted")
+                        .orElseThrow()
+                        .methodName());
+        assertEquals(
+                "of",
+                JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain java.util.List.of")
+                        .orElseThrow()
+                        .methodName());
+        assertEquals(
+                "of",
+                JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain Java 25 List.of")
+                        .orElseThrow()
+                        .methodName());
+        assertEquals(
+                "java.util",
+                JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain Java 25 List.of")
+                        .orElseThrow()
+                        .packageName());
+        assertEquals(
+                "map",
+                JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain Stream.map in Java")
+                        .orElseThrow()
+                        .methodName());
+        assertEquals(
+                "getNodeName",
+                JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain org.w3c.dom.Node.getNodeName")
+                        .orElseThrow()
+                        .methodName());
+        assertEquals(
+                "java.util",
+                JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain Map.Entry.comparingByKey")
+                        .orElseThrow()
+                        .packageName());
+        assertTrue(JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain java.util.Map.Missing.foo")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain Map.Missing.foo")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain List.add")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain String.checkIndex")
+                .isEmpty());
+        assertEquals(
+                "java.util",
+                JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery("Explain java.util.List.add")
+                        .orElseThrow()
+                        .packageName());
+    }
+
+    @Test
+    void rejectsIncompleteAndUnmappedChainedInvocationsForDeterministicMemberSelection() {
+        assertTrue(JavaApiMethodSelector.uniqueMemberFromQuery("Explain List.of(E,")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueMemberFromQuery("Explain Javadoc List.of(List<E>)")
+                .isEmpty());
+        assertEquals(
+                "of",
+                JavaApiMethodSelector.uniqueMemberFromQuery("Explain List.of(firstValue)")
+                        .orElseThrow()
+                        .methodName());
+        assertTrue(JavaApiMethodSelector.uniqueMemberFromQuery("Explain Stream.of().map(Function)")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueMemberFromQuery("Explain Javadoc Stream.of().map")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery(
+                        "Explain Thread.ofVirtual().start(java.lang.Runnable)")
+                .isPresent());
+        assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery("Explain Thread.ofVirtual().start")
+                .isEmpty());
     }
 
     @Test
@@ -124,7 +263,7 @@ class JavaApiMethodSelectorTest {
         assertEquals("Map.Entry", selector.typePageName());
         assertEquals("comparingByKey", selector.methodName());
         assertEquals("Map.Entry.html", selector.typePageFileName());
-        assertEquals("Map.Entry", selector.sparseQueryTerms());
+        assertEquals("Map.Entry comparingByKey", selector.sparseQueryTerms());
     }
 
     @Test
@@ -135,7 +274,7 @@ class JavaApiMethodSelectorTest {
         assertEquals("List", selector.typePageName());
         assertEquals("of", selector.methodName());
         assertEquals("List.html", selector.typePageFileName());
-        assertEquals("List", selector.sparseQueryTerms());
+        assertEquals("List of", selector.sparseQueryTerms());
         assertTrue(selector.matchesJavadocPath("/java.base/java/util/List.html", null));
     }
 

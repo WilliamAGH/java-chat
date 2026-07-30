@@ -83,6 +83,8 @@ class EnrichmentServiceCacheTest {
         @Bean
         AppProperties appProperties() {
             AppProperties appProperties = new AppProperties();
+            // Hand-built (not property-bound), so the mandatory policy must be supplied explicitly.
+            appProperties.setContentSecurityPolicy("default-src 'self'");
             AppProperties.Llm llmProperties = appProperties.getLlm();
             llmProperties.setTemperature(ENRICHMENT_TEMPERATURE);
             llmProperties.setRerankerTemperature(TEST_RERANKER_TEMPERATURE);

@@ -28,10 +28,12 @@ public class AppProperties {
     private static final String DIAG_KEY = "app.diagnostics";
     private static final String QDRANT_KEY = "app.qdrant";
     private static final String CORS_KEY = "app.cors";
+    private static final String CLERK_KEY = "app.clerk";
     private static final String PUBLIC_BASE_URL_KEY = "app.public-base-url";
     private static final String CLICKY_KEY = "app.clicky";
     private static final String EMBEDDINGS_KEY = "app.embeddings";
     private static final String LLM_KEY = "app.llm";
+    private static final String CONTENT_SECURITY_POLICY_KEY = "app.content-security-policy";
 
     /**
      * Default base URL for SEO endpoints when no explicit public base URL is configured.
@@ -47,10 +49,12 @@ public class AppProperties {
     private Diagnostics diagnostics = new Diagnostics();
     private QdrantProperties qdrant = new QdrantProperties();
     private CorsConfig cors = new CorsConfig();
+    private ClerkConfig clerk = new ClerkConfig();
     private Embeddings embeddings = new Embeddings();
     private Llm llm = new Llm();
     private Clicky clicky = new Clicky();
     private String publicBaseUrl = DEFAULT_PUBLIC_BASE_URL;
+    private String contentSecurityPolicy = "";
 
     /**
      * Creates configuration sections with default values.
@@ -70,10 +74,12 @@ public class AppProperties {
         requireConfiguredSection(diagnostics, DIAG_KEY).validateConfiguration();
         requireConfiguredSection(qdrant, QDRANT_KEY).validateConfiguration();
         requireConfiguredSection(cors, CORS_KEY).validateConfiguration();
+        requireConfiguredSection(clerk, CLERK_KEY).validateConfiguration();
         requireConfiguredSection(embeddings, EMBEDDINGS_KEY).validateConfiguration();
         requireConfiguredSection(llm, LLM_KEY).validateConfiguration();
         requireConfiguredSection(clicky, CLICKY_KEY).validateConfiguration();
         this.publicBaseUrl = validatePublicBaseUrl(publicBaseUrl);
+        this.contentSecurityPolicy = requireNonBlankContentSecurityPolicy(contentSecurityPolicy);
     }
 
     /**
@@ -221,6 +227,14 @@ public class AppProperties {
         this.cors = requireConfiguredSection(cors, CORS_KEY);
     }
 
+    public ClerkConfig getClerk() {
+        return clerk;
+    }
+
+    public void setClerk(ClerkConfig clerk) {
+        this.clerk = requireConfiguredSection(clerk, CLERK_KEY);
+    }
+
     public Embeddings getEmbeddings() {
         return embeddings;
     }
@@ -235,6 +249,35 @@ public class AppProperties {
 
     public void setLlm(Llm llm) {
         this.llm = requireConfiguredSection(llm, LLM_KEY);
+    }
+
+    /**
+     * Returns the Content-Security-Policy directive string applied to every
+     * application response.
+     *
+     * <p>Each Spring profile owns its own value because the allowed Clerk
+     * frontend-API origin differs per environment (dev uses the development
+     * instance host, prod uses {@code clerk.javachat.ai}).
+     */
+    public String getContentSecurityPolicy() {
+        return contentSecurityPolicy;
+    }
+
+    /**
+     * Sets the Content-Security-Policy directive string during property binding.
+     */
+    public void setContentSecurityPolicy(final String contentSecurityPolicy) {
+        this.contentSecurityPolicy = contentSecurityPolicy;
+    }
+
+    private static String requireNonBlankContentSecurityPolicy(final String policyDirectives) {
+        if (policyDirectives == null || policyDirectives.isBlank()) {
+            throw new IllegalArgumentException(String.format(
+                    Locale.ROOT,
+                    "%s must not be blank; every environment ships an explicit policy.",
+                    CONTENT_SECURITY_POLICY_KEY));
+        }
+        return policyDirectives.trim();
     }
 
     private static <T> T requireConfiguredSection(T section, String sectionKey) {

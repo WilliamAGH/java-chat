@@ -5,6 +5,7 @@
   import LearnView from './lib/components/LearnView.svelte'
   import ToastContainer from './lib/components/ToastContainer.svelte'
   import { refreshCsrfToken } from './lib/services/csrf'
+  import { loadClerkAuthentication } from './lib/composables/clerkAuthentication.svelte'
   import {
     applicationViewForPath,
     canonicalRecoveryPathForPath,
@@ -31,6 +32,11 @@
 
   onMount(() => {
     void refreshCsrfToken()
+    // Failure already surfaced to the user as a toast inside the composable;
+    // rethrown error lands in the console for diagnostics ([RC1f]: no silence).
+    loadClerkAuthentication().catch((clerkLoadFailure: unknown) => {
+      console.error('Clerk authentication failed to initialize', clerkLoadFailure)
+    })
   })
 
   function synchronizeViewWithBrowserHistory(): void {

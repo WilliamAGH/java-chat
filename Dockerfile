@@ -26,6 +26,14 @@ COPY frontend/ .
 COPY .gitignore /app/.ignore
 COPY Dockerfile /app/Dockerfile
 COPY docs/getting-started.md /app/docs/getting-started.md
+
+# Vite inlines VITE_-prefixed variables at build time, so the Clerk publishable
+# key must be present in this stage; the runtime stage never sees it. Clerk
+# publishable keys are public by design (they ship inside the browser bundle),
+# which is why this is a plain ARG rather than a BuildKit secret. Declared last
+# so a key change invalidates only the build layer below it. Left unset, the
+# frontend starts with authentication disabled (clerkAuthentication.svelte.ts).
+ARG VITE_CLERK_PUBLISHABLE_KEY
 RUN npm run validate && npm run test && npm run build
 
 # ================================

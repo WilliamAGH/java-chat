@@ -95,7 +95,11 @@ describe("createScrollAnchor final content", () => {
 
     expect(scrollAnchor.unseenCount).toBe(0);
 
-    setScrollGeometry(scrollContainer, 800, 3_657, 200);
+    scrollContainer.dispatchEvent(new WheelEvent("wheel"));
+    setScrollGeometry(scrollContainer, 600, 1_000, 200);
+    scrollAnchor.onUserScroll();
+
+    setScrollGeometry(scrollContainer, 600, 3_657, 200);
     await scrollAnchor.onContentAdded();
 
     expect(scrollAnchor.unseenCount).toBe(1);
@@ -107,6 +111,33 @@ describe("createScrollAnchor final content", () => {
 
     expect(scrollAnchor.unseenCount).toBe(1);
     expect(scrollAnchor.showIndicator).toBe(true);
+    scrollAnchor.cleanup();
+  });
+
+  it("suppresses the indicator when content grows while follow is engaged", async () => {
+    vi.useFakeTimers();
+    const scrollContainer = document.createElement("div");
+    setScrollGeometry(scrollContainer, 800, 1_000, 200);
+    const scrollAnchor = createScrollAnchor({ indicatorDelayMs: 150 });
+    scrollAnchor.attach(scrollContainer);
+    await scrollAnchor.scrollOnce();
+    scrollAnchor.onNewMessageStarted();
+
+    expect(scrollAnchor.unseenCount).toBe(0);
+
+    setScrollGeometry(scrollContainer, 800, 3_657, 200);
+    await scrollAnchor.onContentAdded();
+    vi.advanceTimersByTime(150);
+
+    expect(scrollAnchor.unseenCount).toBe(0);
+    expect(scrollAnchor.showIndicator).toBe(false);
+
+    setScrollGeometry(scrollContainer, 800, 5_157, 200);
+    await scrollAnchor.onContentAdded();
+    vi.advanceTimersByTime(150);
+
+    expect(scrollAnchor.unseenCount).toBe(0);
+    expect(scrollAnchor.showIndicator).toBe(false);
     scrollAnchor.cleanup();
   });
 
@@ -203,6 +234,10 @@ describe("createScrollAnchor final content", () => {
     const scrollToSpy = vi.spyOn(scrollContainer, "scrollTo");
     const scrollAnchor = createScrollAnchor({ indicatorDelayMs: 150 });
     scrollAnchor.attach(scrollContainer);
+
+    scrollContainer.dispatchEvent(new WheelEvent("wheel"));
+    setScrollGeometry(scrollContainer, 700, 3_657, 200);
+    scrollAnchor.onUserScroll();
 
     await scrollAnchor.onContentAdded();
     vi.advanceTimersByTime(150);

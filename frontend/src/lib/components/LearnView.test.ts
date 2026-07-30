@@ -23,6 +23,7 @@ const TEST_GUIDED_LESSON = createGuidedLessonFixture("intro", "Test Lesson", "Le
 const OFFSCREEN_MESSAGES_SCROLL_HEIGHT = 1_000;
 const STREAMED_MESSAGES_SCROLL_HEIGHT = 3_657;
 const VISIBLE_MESSAGES_CONTAINER_HEIGHT = 200;
+const SCROLLED_AWAY_SCROLL_TOP = 600;
 const NEW_UPDATES_INDICATOR_NAME = "1 new updates, jump to bottom";
 const ANY_NEW_UPDATES_INDICATOR_NAME = /jump to/i;
 
@@ -125,6 +126,19 @@ function makeDesktopMessagesContainerAppearScrolledAway(messagesContainer: HTMLE
 async function openLessonWithPendingNewUpdatesIndicator(initialLessonName: RegExp) {
   configureGuidedChatWithPendingStream();
 
+  let guidedStreamCallbacks: GuidedStreamCallbacks | undefined;
+  streamGuidedChatMock.mockImplementation(
+    async (
+      _sessionId: string,
+      _lessonSlug: string,
+      _guidedQuestion: string,
+      activeStreamCallbacks: GuidedStreamCallbacks,
+    ) => {
+      guidedStreamCallbacks = activeStreamCallbacks;
+      return new Promise<void>(() => {});
+    },
+  );
+
   const learnView = await renderLearnView();
   const initialLessonButton = await learnView.findByRole("button", {
     name: initialLessonName,
@@ -147,6 +161,19 @@ async function openLessonWithPendingNewUpdatesIndicator(initialLessonName: RegEx
   }
   await fireEvent.input(messageInput, { target: { value: "Hi" } });
   await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
+  await tick();
+  await vi.waitFor(() => expect(guidedStreamCallbacks).toBeDefined());
+
+  // Only a genuine scroll-away disengages follow; content growth alone never
+  // surfaces the indicator.
+  await fireEvent.wheel(messagesContainer);
+  await fireEvent.scroll(messagesContainer);
+
+  const activeGuidedStreamCallbacks = guidedStreamCallbacks;
+  if (!activeGuidedStreamCallbacks) {
+    throw new Error("Expected guided stream callbacks to be captured");
+  }
+  activeGuidedStreamCallbacks.onChunk("Off-screen chunk");
   await tick();
 
   return learnView;
@@ -681,6 +708,13 @@ describe("LearnView guided chat streaming stability", () => {
       throw new Error("Expected guided stream callbacks to be captured");
     }
     expect(learnView.queryByRole("button", { name: ANY_NEW_UPDATES_INDICATOR_NAME })).toBeNull();
+
+    // Disengage follow with a genuine scroll-away before the stream grows.
+    await fireEvent.wheel(messagesContainer);
+    Object.defineProperties(messagesContainer, {
+      scrollTop: { configurable: true, value: SCROLLED_AWAY_SCROLL_TOP },
+    });
+    await fireEvent.scroll(messagesContainer);
 
     vi.useFakeTimers();
     guidedStreamCallbacks.onChunk("First off-screen chunk");

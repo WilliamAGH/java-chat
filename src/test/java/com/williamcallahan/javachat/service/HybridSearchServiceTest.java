@@ -74,7 +74,8 @@ class HybridSearchServiceTest {
     private static final String SECOND_HYBRID_QUERY = "Java records and sealed classes";
     private static final String CITATION_QUERY = "Java records";
     private static final String EXACT_JAVA_API_QUERY = "What does List.of(E, E) return?";
-    private static final String RUNTIME_VALUE_JAVA_API_QUERY = "What does List.of(firstValue, secondValue) return?";
+    private static final String RUNTIME_VALUE_JAVA_API_QUERY =
+            "What does Java 25 List.of(firstValue, secondValue) return?";
     private static final String VERSIONED_SELECTOR_CITATION_QUERY =
             "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " List.of(E, E)";
     private static final Duration DISPATCH_BUDGET_TEST_TIMEOUT = Duration.ofMillis(500);
@@ -451,8 +452,32 @@ class HybridSearchServiceTest {
     }
 
     @Test
+    void exactThirdPartySignatureRemainsOnSparseOfficialDocumentationSearch() {
+        String thirdPartyQuery = "Explain SpringApplication.run(java.lang.String)";
+        when(sparseEncoder.encode(thirdPartyQuery + " SpringApplication run"))
+                .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(2L, 7L), List.of(3.0f, 1.0f)));
+        List<QueryPoints> capturedQueries = new ArrayList<>();
+        doAnswer(invocation -> {
+                    capturedQueries.add(invocation.getArgument(0));
+                    return Futures.immediateFuture(List.of(scoredPoint()));
+                })
+                .when(qdrantClient)
+                .queryAsync(notNull(), notNull());
+
+        HybridSearchService.SearchOutcome citationOutcome = buildSearchService()
+                .searchDocumentationCitationsOutcome(
+                        thirdPartyQuery, 3, RetrievalConstraint.none(), stageDeadlineNanos());
+
+        assertEquals(2, capturedQueries.size());
+        assertEquals(1, citationOutcome.documents().size());
+        verify(sparseEncoder).encode(thirdPartyQuery + " SpringApplication run");
+        verify(qdrantClient, never()).scrollAsync(notNull(), notNull());
+        verifyNoInteractions(embeddingClient);
+    }
+
+    @Test
     void runtimeValueCitationQueryRemainsSparse() {
-        when(sparseEncoder.encode(RUNTIME_VALUE_JAVA_API_QUERY + " List"))
+        when(sparseEncoder.encode("List of"))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(2L, 7L), List.of(3.0f, 1.0f)));
         List<QueryPoints> capturedQueries = new ArrayList<>();
         doAnswer(invocation -> {
@@ -469,8 +494,41 @@ class HybridSearchServiceTest {
         assertEquals(2, capturedQueries.size());
         assertTrue(capturedQueries.stream()
                 .allMatch(queryRequest -> queryRequest.getQuery().getNearest().hasSparse()));
+        assertTrue(capturedQueries.stream().allMatch(queryRequest -> queryRequest
+                .getFilter()
+                .toString()
+                .contains(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD)));
+        assertTrue(capturedQueries.stream()
+                .allMatch(queryRequest -> queryRequest.getFilter().toString().contains("List.html")));
         assertEquals(1, citationOutcome.documents().size());
-        verify(sparseEncoder).encode(RUNTIME_VALUE_JAVA_API_QUERY + " List");
+        verify(sparseEncoder).encode("List of");
+        verify(qdrantClient, never()).scrollAsync(notNull(), notNull());
+        verifyNoInteractions(embeddingClient);
+    }
+
+    @Test
+    void explicitJavaMemberCitationSearchExcludesUnrelatedPromptTermsFromSparseEncoding() {
+        String styledExampleQuery = "Show a Java 25 example with inline code String::formatted, a fenced code block, "
+                + "and cite official Javadoc.";
+        when(sparseEncoder.encode("String formatted"))
+                .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(2L, 7L), List.of(3.0f, 1.0f)));
+        List<QueryPoints> capturedQueries = new ArrayList<>();
+        doAnswer(invocation -> {
+                    capturedQueries.add(invocation.getArgument(0));
+                    return Futures.immediateFuture(List.of(scoredPoint()));
+                })
+                .when(qdrantClient)
+                .queryAsync(notNull(), notNull());
+
+        HybridSearchService.SearchOutcome citationOutcome = buildSearchService()
+                .searchDocumentationCitationsOutcome(
+                        styledExampleQuery, 3, RetrievalConstraint.none(), stageDeadlineNanos());
+
+        assertEquals(2, capturedQueries.size());
+        assertTrue(capturedQueries.stream()
+                .allMatch(queryRequest -> queryRequest.getFilter().toString().contains("String.html")));
+        assertEquals(1, citationOutcome.documents().size());
+        verify(sparseEncoder).encode("String formatted");
         verify(qdrantClient, never()).scrollAsync(notNull(), notNull());
         verifyNoInteractions(embeddingClient);
     }

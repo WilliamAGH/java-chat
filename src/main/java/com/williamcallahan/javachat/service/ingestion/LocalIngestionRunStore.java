@@ -222,6 +222,17 @@ public final class LocalIngestionRunStore {
                 return checkpoint;
             }
             try (abandonedRunLock) {
+                // Re-read under the lock: the owner may have persisted a terminal checkpoint between
+                // the unlocked read and this acquisition; reconciling that stale snapshot would
+                // regress durable progress (e.g. COMPLETE back to PARTIAL).
+                if (!Files.exists(progressPath)) {
+                    return checkpoint;
+                }
+                DurableIngestionCheckpoint lockedCheckpoint =
+                        objectMapper.readValue(progressPath.toFile(), DurableIngestionCheckpoint.class);
+                if (!lockedCheckpoint.equals(checkpoint)) {
+                    return lockedCheckpoint;
+                }
                 DurableIngestionCheckpoint reconciledCheckpoint = new DurableIngestionCheckpoint(
                         checkpoint.directoryIdentity(),
                         checkpoint.inventoryFingerprint(),

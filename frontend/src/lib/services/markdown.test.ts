@@ -311,6 +311,16 @@ describe("parseMarkdown", () => {
     warningSpy.mockRestore();
   });
 
+  it("stays silent when the only repair is the synthetic fence of an in-progress stream", () => {
+    const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const markdown = "{{background:Retrieved context}}\n```java\nint answer = 42;";
+
+    parseMarkdown(markdown);
+
+    expect(warningSpy).not.toHaveBeenCalled();
+    warningSpy.mockRestore();
+  });
+
   it("normalizes attached fenced code blocks with trailing prose", () => {
     const markdown = "Here's an example:```java\nint x = 10 % 3;\n```The result is 1.";
     const renderedHtml = parseMarkdown(markdown);

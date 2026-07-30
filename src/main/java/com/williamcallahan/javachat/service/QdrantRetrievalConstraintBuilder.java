@@ -32,11 +32,12 @@ public class QdrantRetrievalConstraintBuilder {
     }
 
     /**
-     * Builds an official-citation filter that can require one exact Javadoc member.
+     * Builds an official-citation filter that can require one Javadoc declaring type or exact member.
      *
      * <p>Primary hybrid retrieval does not use this method because a capitalized project type can
      * resemble a Java API selector. Exact Javadoc keys are safe only inside the dedicated official
-     * documentation citation search.</p>
+     * documentation citation search. One explicitly Java-platform member safely constrains the
+     * declaring type; an exact signature additionally constrains its authoritative anchor.</p>
      *
      * @param retrievalConstraint official-documentation retrieval constraint
      * @param citationQuery learner query that may contain one exact Java method signature
@@ -80,18 +81,21 @@ public class QdrantRetrievalConstraintBuilder {
             mustConditionCount++;
         }
 
-        Optional<JavaApiMethodSelector> exactOverloadSelector =
-                JavaApiMethodSelector.uniqueExactOverloadFromQuery(exactCitationQuery);
-        if (exactOverloadSelector.isPresent()) {
-            JavaApiMethodSelector selector = exactOverloadSelector.get();
+        Optional<JavaApiMethodSelector> uniqueMemberSelector =
+                JavaApiMethodSelector.uniqueExplicitJavaApiMemberFromQuery(exactCitationQuery);
+        if (uniqueMemberSelector.isPresent()) {
+            JavaApiMethodSelector selector = uniqueMemberSelector.get();
             filterBuilder.addMust(
                     matchKeyword(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, selector.typePageFileName()));
-            filterBuilder.addMust(matchKeyword(
-                    QdrantPayloadFieldSchema.ANCHOR_FIELD,
-                    selector.exactOverloadAnchor().orElseThrow()));
-            mustConditionCount += 2;
+            mustConditionCount++;
             if (!selector.packageName().isBlank()) {
                 filterBuilder.addMust(matchKeyword(QdrantPayloadFieldSchema.PACKAGE_FIELD, selector.packageName()));
+                mustConditionCount++;
+            }
+            Optional<String> exactOverloadAnchor = selector.exactOverloadAnchor();
+            exactOverloadAnchor.ifPresent(exactAnchor ->
+                    filterBuilder.addMust(matchKeyword(QdrantPayloadFieldSchema.ANCHOR_FIELD, exactAnchor)));
+            if (exactOverloadAnchor.isPresent()) {
                 mustConditionCount++;
             }
         }
