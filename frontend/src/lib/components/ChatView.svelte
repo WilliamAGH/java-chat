@@ -337,13 +337,19 @@
         flex: 1;
         display: flex;
         flex-direction: column;
+        min-height: 0;
         overflow: hidden;
     }
 
     .messages-wrapper {
         flex: 1;
+        min-height: 0;
         position: relative;
         overflow: hidden;
+    }
+
+    .chat-view :global(.input-area) {
+        flex-shrink: 0;
     }
 
     .messages-container {
