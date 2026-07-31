@@ -175,12 +175,17 @@ spotless {
 
 // Test configuration - base settings for all Test tasks
 tasks.withType<Test> {
+    testLogging {
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showStackTraces = true
+    }
     systemProperty("spring.profiles.active", "test")
     environment("OPENAI_MODEL", "gpt-5.4")
     useJUnitPlatform()
     maxHeapSize = "1024m"
     jvmArgs(
         "-javaagent:${mockitoAgent.asPath}",
+        "-XX:-OmitStackTraceInFastThrow",
         "-Xshare:off",
         "--enable-native-access=ALL-UNNAMED",
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
