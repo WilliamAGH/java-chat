@@ -57,10 +57,17 @@ export async function loadClerkAuthentication(): Promise<void> {
   const [{ Clerk: ClerkConstructor }, { ui: clerkPrebuiltUi }, { dark: clerkDarkBaseTheme }] =
     await Promise.all([import("@clerk/clerk-js"), import("@clerk/ui"), import("@clerk/ui/themes")]);
   const loadingClient = new ClerkConstructor(publishableKey);
+  const nativeOAuth = window.javaChatNativeOAuth;
   try {
     await loadingClient.load({
       ui: clerkPrebuiltUi,
       appearance: warmPrecisionAppearance(clerkDarkBaseTheme),
+      __internal_oauthTransport: nativeOAuth
+        ? {
+            getRedirectUrl: () => nativeOAuth.getRedirectUrl(),
+            open: (authorizationURL: URL) => nativeOAuth.open(authorizationURL.toString()),
+          }
+        : undefined,
     });
   } catch (loadFailure) {
     pushToast("Sign-in is unavailable: Clerk failed to load.", {
