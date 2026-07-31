@@ -1,0 +1,373 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		D15EA0300000000000000001 /* JavaChatDesktopApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15EA0100000000000000001 /* JavaChatDesktopApp.swift */; };
+		D15EA0310000000000000001 /* JavaChatProductionURL.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15EA0110000000000000001 /* JavaChatProductionURL.swift */; };
+		D15EA0320000000000000001 /* WebShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15EA0120000000000000001 /* WebShellView.swift */; };
+		D15EA0330000000000000001 /* WebViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15EA0130000000000000001 /* WebViewContainer.swift */; };
+		D15EA0340000000000000001 /* WebNavigationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15EA0140000000000000001 /* WebNavigationPolicy.swift */; };
+		D15EA0350000000000000001 /* PageLinkActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15EA0150000000000000001 /* PageLinkActions.swift */; };
+		D15EA0360000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D15EA0180000000000000001 /* Assets.xcassets */; };
+		D15EA0400000000000000001 /* WebNavigationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15EA0200000000000000001 /* WebNavigationPolicyTests.swift */; };
+		D15EA0410000000000000001 /* PageLinkActionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15EA0210000000000000001 /* PageLinkActionsTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		D15EA0700000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D15EA0010000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D15EA0500000000000000001;
+			remoteInfo = JavaChatDesktop;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		D15EA0060000000000000001 /* JavaChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JavaChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D15EA0070000000000000001 /* JavaChatDesktopTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = JavaChatDesktopTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D15EA0100000000000000001 /* JavaChatDesktopApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JavaChatDesktopApp.swift; sourceTree = "<group>"; };
+		D15EA0110000000000000001 /* JavaChatProductionURL.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JavaChatProductionURL.swift; sourceTree = "<group>"; };
+		D15EA0120000000000000001 /* WebShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebShellView.swift; sourceTree = "<group>"; };
+		D15EA0130000000000000001 /* WebViewContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewContainer.swift; sourceTree = "<group>"; };
+		D15EA0140000000000000001 /* WebNavigationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebNavigationPolicy.swift; sourceTree = "<group>"; };
+		D15EA0150000000000000001 /* PageLinkActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageLinkActions.swift; sourceTree = "<group>"; };
+		D15EA0160000000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		D15EA0170000000000000001 /* JavaChatDesktop.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = JavaChatDesktop.entitlements; sourceTree = "<group>"; };
+		D15EA0180000000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		D15EA0200000000000000001 /* WebNavigationPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebNavigationPolicyTests.swift; sourceTree = "<group>"; };
+		D15EA0210000000000000001 /* PageLinkActionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageLinkActionsTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		D15EA0610000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D15EA0640000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		D15EA0020000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				D15EA0040000000000000001 /* JavaChatDesktop */,
+				D15EA0050000000000000001 /* JavaChatDesktopTests */,
+				D15EA0030000000000000001 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D15EA0030000000000000001 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D15EA0060000000000000001 /* JavaChat.app */,
+				D15EA0070000000000000001 /* JavaChatDesktopTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D15EA0040000000000000001 /* JavaChatDesktop */ = {
+			isa = PBXGroup;
+			children = (
+				D15EA0100000000000000001 /* JavaChatDesktopApp.swift */,
+				D15EA0110000000000000001 /* JavaChatProductionURL.swift */,
+				D15EA0120000000000000001 /* WebShellView.swift */,
+				D15EA0130000000000000001 /* WebViewContainer.swift */,
+				D15EA0140000000000000001 /* WebNavigationPolicy.swift */,
+				D15EA0150000000000000001 /* PageLinkActions.swift */,
+				D15EA0160000000000000001 /* Info.plist */,
+				D15EA0170000000000000001 /* JavaChatDesktop.entitlements */,
+				D15EA0180000000000000001 /* Assets.xcassets */,
+			);
+			path = JavaChatDesktop;
+			sourceTree = "<group>";
+		};
+		D15EA0050000000000000001 /* JavaChatDesktopTests */ = {
+			isa = PBXGroup;
+			children = (
+				D15EA0200000000000000001 /* WebNavigationPolicyTests.swift */,
+				D15EA0210000000000000001 /* PageLinkActionsTests.swift */,
+			);
+			path = ../../__tests__/mobile/desktopApp;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		D15EA0500000000000000001 /* JavaChatDesktop */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D15EA0830000000000000001 /* Build configuration list for PBXNativeTarget "JavaChatDesktop" */;
+			buildPhases = (
+				D15EA0600000000000000001 /* Sources */,
+				D15EA0610000000000000001 /* Frameworks */,
+				D15EA0620000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = JavaChatDesktop;
+			productName = JavaChat;
+			productReference = D15EA0060000000000000001 /* JavaChat.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D15EA0510000000000000001 /* JavaChatDesktopTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D15EA0860000000000000001 /* Build configuration list for PBXNativeTarget "JavaChatDesktopTests" */;
+			buildPhases = (
+				D15EA0630000000000000001 /* Sources */,
+				D15EA0640000000000000001 /* Frameworks */,
+				D15EA0650000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D15EA0710000000000000001 /* PBXTargetDependency */,
+			);
+			name = JavaChatDesktopTests;
+			productName = JavaChatDesktopTests;
+			productReference = D15EA0070000000000000001 /* JavaChatDesktopTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D15EA0010000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					D15EA0500000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					D15EA0510000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = D15EA0500000000000000001;
+					};
+				};
+			};
+			buildConfigurationList = D15EA0800000000000000001 /* Build configuration list for PBXProject "JavaChatDesktop" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = D15EA0020000000000000001;
+			productRefGroup = D15EA0030000000000000001 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D15EA0500000000000000001 /* JavaChatDesktop */,
+				D15EA0510000000000000001 /* JavaChatDesktopTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D15EA0620000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D15EA0360000000000000001 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D15EA0650000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D15EA0600000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D15EA0300000000000000001 /* JavaChatDesktopApp.swift in Sources */,
+				D15EA0310000000000000001 /* JavaChatProductionURL.swift in Sources */,
+				D15EA0320000000000000001 /* WebShellView.swift in Sources */,
+				D15EA0330000000000000001 /* WebViewContainer.swift in Sources */,
+				D15EA0340000000000000001 /* WebNavigationPolicy.swift in Sources */,
+				D15EA0350000000000000001 /* PageLinkActions.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D15EA0630000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D15EA0400000000000000001 /* WebNavigationPolicyTests.swift in Sources */,
+				D15EA0410000000000000001 /* PageLinkActionsTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D15EA0710000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D15EA0500000000000000001 /* JavaChatDesktop */;
+			targetProxy = D15EA0700000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		D15EA0810000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		D15EA0820000000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		D15EA0840000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = JavaChatDesktop/JavaChatDesktop.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NB356A75PU;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = JavaChatDesktop/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.javachat;
+				PRODUCT_MODULE_NAME = JavaChatDesktop;
+				PRODUCT_NAME = JavaChat;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		D15EA0850000000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = JavaChatDesktop/JavaChatDesktop.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NB356A75PU;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = JavaChatDesktop/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.javachat;
+				PRODUCT_MODULE_NAME = JavaChatDesktop;
+				PRODUCT_NAME = JavaChat;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		D15EA0870000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NB356A75PU;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.javachat.desktop.tests;
+				PRODUCT_MODULE_NAME = JavaChatDesktopTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/JavaChat.app/Contents/MacOS/JavaChat";
+				TEST_TARGET_NAME = JavaChatDesktop;
+			};
+			name = Debug;
+		};
+		D15EA0880000000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NB356A75PU;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.javachat.desktop.tests;
+				PRODUCT_MODULE_NAME = JavaChatDesktopTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/JavaChat.app/Contents/MacOS/JavaChat";
+				TEST_TARGET_NAME = JavaChatDesktop;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		D15EA0800000000000000001 /* Build configuration list for PBXProject "JavaChatDesktop" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D15EA0810000000000000001 /* Debug */,
+				D15EA0820000000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D15EA0830000000000000001 /* Build configuration list for PBXNativeTarget "JavaChatDesktop" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D15EA0840000000000000001 /* Debug */,
+				D15EA0850000000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D15EA0860000000000000001 /* Build configuration list for PBXNativeTarget "JavaChatDesktopTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D15EA0870000000000000001 /* Debug */,
+				D15EA0880000000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = D15EA0010000000000000001 /* Project object */;
+}

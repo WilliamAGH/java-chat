@@ -1,0 +1,335 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A00100000000000000000001 /* JavaChatApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000001 /* JavaChatApp.swift */; };
+		A00100000000000000000002 /* ShellConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000002 /* ShellConfiguration.swift */; };
+		A00100000000000000000003 /* WebShellState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000003 /* WebShellState.swift */; };
+		A00100000000000000000004 /* OAuthPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000004 /* OAuthPolicy.swift */; };
+		A00100000000000000000005 /* WebNavigationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000005 /* WebNavigationPolicy.swift */; };
+		A00100000000000000000006 /* JavaChatWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000006 /* JavaChatWebView.swift */; };
+		A00100000000000000000007 /* WebViewCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000007 /* WebViewCoordinator.swift */; };
+		A00100000000000000000008 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000008 /* Assets.xcassets */; };
+		A00100000000000000000009 /* ShellConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000009 /* ShellConfigurationTests.swift */; };
+		A0010000000000000000000A /* WebShellStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000000A /* WebShellStateTests.swift */; };
+		A0010000000000000000000B /* WebNavigationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000000B /* WebNavigationPolicyTests.swift */; };
+		A0010000000000000000000C /* OAuthPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000000C /* OAuthPolicyTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A00300000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00400000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A00500000000000000000001;
+			remoteInfo = JavaChat;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		A00200000000000000000001 /* JavaChatApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JavaChatApp.swift; sourceTree = "<group>"; };
+		A00200000000000000000002 /* ShellConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellConfiguration.swift; sourceTree = "<group>"; };
+		A00200000000000000000003 /* WebShellState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebShellState.swift; sourceTree = "<group>"; };
+		A00200000000000000000004 /* OAuthPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthPolicy.swift; sourceTree = "<group>"; };
+		A00200000000000000000005 /* WebNavigationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebNavigationPolicy.swift; sourceTree = "<group>"; };
+		A00200000000000000000006 /* JavaChatWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JavaChatWebView.swift; sourceTree = "<group>"; };
+		A00200000000000000000007 /* WebViewCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewCoordinator.swift; sourceTree = "<group>"; };
+		A00200000000000000000008 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A00200000000000000000009 /* ShellConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellConfigurationTests.swift; sourceTree = "<group>"; };
+		A0020000000000000000000A /* WebShellStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebShellStateTests.swift; sourceTree = "<group>"; };
+		A0020000000000000000000B /* WebNavigationPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebNavigationPolicyTests.swift; sourceTree = "<group>"; };
+		A0020000000000000000000C /* OAuthPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthPolicyTests.swift; sourceTree = "<group>"; };
+		A0020000000000000000000D /* JavaChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JavaChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A0020000000000000000000E /* JavaChatTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = JavaChatTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A00600000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A00600000000000000000002 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A00700000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A00700000000000000000002 /* JavaChat */,
+				A00700000000000000000003 /* Tests */,
+				A00700000000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A00700000000000000000002 /* JavaChat */ = {
+			isa = PBXGroup;
+			children = (
+				A00200000000000000000001 /* JavaChatApp.swift */,
+				A00200000000000000000002 /* ShellConfiguration.swift */,
+				A00200000000000000000003 /* WebShellState.swift */,
+				A00200000000000000000004 /* OAuthPolicy.swift */,
+				A00200000000000000000005 /* WebNavigationPolicy.swift */,
+				A00200000000000000000006 /* JavaChatWebView.swift */,
+				A00200000000000000000007 /* WebViewCoordinator.swift */,
+				A00200000000000000000008 /* Assets.xcassets */,
+			);
+			path = JavaChat;
+			sourceTree = "<group>";
+		};
+		A00700000000000000000003 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				A00200000000000000000009 /* ShellConfigurationTests.swift */,
+				A0020000000000000000000A /* WebShellStateTests.swift */,
+				A0020000000000000000000B /* WebNavigationPolicyTests.swift */,
+				A0020000000000000000000C /* OAuthPolicyTests.swift */,
+			);
+			path = ../../__tests__/mobile/iosApp;
+			sourceTree = "<group>";
+		};
+		A00700000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A0020000000000000000000D /* JavaChat.app */,
+				A0020000000000000000000E /* JavaChatTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A00500000000000000000001 /* JavaChat */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00800000000000000000001 /* Build configuration list for PBXNativeTarget "JavaChat" */;
+			buildPhases = (
+				A00900000000000000000001 /* Sources */,
+				A00600000000000000000001 /* Frameworks */,
+				A00A00000000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = JavaChat;
+			productName = JavaChat;
+			productReference = A0020000000000000000000D /* JavaChat.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A00500000000000000000002 /* JavaChatTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00800000000000000000002 /* Build configuration list for PBXNativeTarget "JavaChatTests" */;
+			buildPhases = (
+				A00900000000000000000002 /* Sources */,
+				A00600000000000000000002 /* Frameworks */,
+				A00A00000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A00B00000000000000000001 /* PBXTargetDependency */,
+			);
+			name = JavaChatTests;
+			productName = JavaChatTests;
+			productReference = A0020000000000000000000E /* JavaChatTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A00400000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					A00500000000000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					A00500000000000000000002 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = A00500000000000000000001;
+					};
+				};
+			};
+			buildConfigurationList = A00800000000000000000003 /* Build configuration list for PBXProject "JavaChat" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A00700000000000000000001;
+			productRefGroup = A00700000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A00500000000000000000001 /* JavaChat */,
+				A00500000000000000000002 /* JavaChatTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A00A00000000000000000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A00100000000000000000008 /* Assets.xcassets in Resources */,); runOnlyForDeploymentPostprocessing = 0; };
+		A00A00000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A00900000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00100000000000000000001 /* JavaChatApp.swift in Sources */,
+				A00100000000000000000002 /* ShellConfiguration.swift in Sources */,
+				A00100000000000000000003 /* WebShellState.swift in Sources */,
+				A00100000000000000000004 /* OAuthPolicy.swift in Sources */,
+				A00100000000000000000005 /* WebNavigationPolicy.swift in Sources */,
+				A00100000000000000000006 /* JavaChatWebView.swift in Sources */,
+				A00100000000000000000007 /* WebViewCoordinator.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A00900000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00100000000000000000009 /* ShellConfigurationTests.swift in Sources */,
+				A0010000000000000000000A /* WebShellStateTests.swift in Sources */,
+				A0010000000000000000000B /* WebNavigationPolicyTests.swift in Sources */,
+				A0010000000000000000000C /* OAuthPolicyTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A00B00000000000000000001 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = A00500000000000000000001 /* JavaChat */; targetProxy = A00300000000000000000001 /* PBXContainerItemProxy */; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A00C00000000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
+			ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+			CODE_SIGN_STYLE = Automatic;
+			CURRENT_PROJECT_VERSION = 1;
+			DEVELOPMENT_TEAM = NB356A75PU;
+			ENABLE_PREVIEWS = YES;
+			GENERATE_INFOPLIST_FILE = NO;
+			INFOPLIST_FILE = JavaChat/Info.plist;
+			IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+			MARKETING_VERSION = 1.0;
+			PRODUCT_BUNDLE_IDENTIFIER = ai.javachat;
+			PRODUCT_NAME = "$(TARGET_NAME)";
+			SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+			SUPPORTS_MACCATALYST = NO;
+			SWIFT_EMIT_LOC_STRINGS = YES;
+			SWIFT_VERSION = 5.0;
+			TARGETED_DEVICE_FAMILY = "1,2";
+		}; name = Debug; };
+		A00C00000000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
+			ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+			CODE_SIGN_STYLE = Automatic;
+			CURRENT_PROJECT_VERSION = 1;
+			DEVELOPMENT_TEAM = NB356A75PU;
+			GENERATE_INFOPLIST_FILE = NO;
+			INFOPLIST_FILE = JavaChat/Info.plist;
+			IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+			MARKETING_VERSION = 1.0;
+			PRODUCT_BUNDLE_IDENTIFIER = ai.javachat;
+			PRODUCT_NAME = "$(TARGET_NAME)";
+			SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+			SUPPORTS_MACCATALYST = NO;
+			SWIFT_COMPILATION_MODE = wholemodule;
+			SWIFT_VERSION = 5.0;
+			TARGETED_DEVICE_FAMILY = "1,2";
+			VALIDATE_PRODUCT = YES;
+		}; name = Release; };
+		A00C00000000000000000003 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
+			BUNDLE_LOADER = "$(TEST_HOST)";
+			CODE_SIGN_STYLE = Automatic;
+			DEVELOPMENT_TEAM = NB356A75PU;
+			GENERATE_INFOPLIST_FILE = YES;
+			IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+			PRODUCT_BUNDLE_IDENTIFIER = ai.javachat.tests;
+			PRODUCT_NAME = "$(TARGET_NAME)";
+			SWIFT_VERSION = 5.0;
+			TARGETED_DEVICE_FAMILY = "1,2";
+			TEST_HOST = "$(BUILT_PRODUCTS_DIR)/JavaChat.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/JavaChat";
+		}; name = Debug; };
+		A00C00000000000000000004 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
+			BUNDLE_LOADER = "$(TEST_HOST)";
+			CODE_SIGN_STYLE = Automatic;
+			DEVELOPMENT_TEAM = NB356A75PU;
+			GENERATE_INFOPLIST_FILE = YES;
+			IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+			PRODUCT_BUNDLE_IDENTIFIER = ai.javachat.tests;
+			PRODUCT_NAME = "$(TARGET_NAME)";
+			SWIFT_VERSION = 5.0;
+			TARGETED_DEVICE_FAMILY = "1,2";
+			TEST_HOST = "$(BUILT_PRODUCTS_DIR)/JavaChat.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/JavaChat";
+		}; name = Release; };
+		A00C00000000000000000005 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
+			ALWAYS_SEARCH_USER_PATHS = NO;
+			CLANG_ANALYZER_NONNULL = YES;
+			CLANG_ENABLE_MODULES = YES;
+			CLANG_ENABLE_OBJC_ARC = YES;
+			CLANG_WARN_BOOL_CONVERSION = YES;
+			CLANG_WARN_CONSTANT_CONVERSION = YES;
+			CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+			CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+			CLANG_WARN_EMPTY_BODY = YES;
+			CLANG_WARN_ENUM_CONVERSION = YES;
+			CLANG_WARN_INFINITE_RECURSION = YES;
+			CLANG_WARN_INT_CONVERSION = YES;
+			CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+			CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+			CLANG_WARN_UNREACHABLE_CODE = YES;
+			DEBUG_INFORMATION_FORMAT = dwarf;
+			ENABLE_TESTABILITY = YES;
+			GCC_C_LANGUAGE_STANDARD = gnu17;
+			GCC_NO_COMMON_BLOCKS = YES;
+			GCC_OPTIMIZATION_LEVEL = 0;
+			IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+			ONLY_ACTIVE_ARCH = YES;
+			SDKROOT = iphoneos;
+			SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+			SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+		}; name = Debug; };
+		A00C00000000000000000006 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
+			ALWAYS_SEARCH_USER_PATHS = NO;
+			CLANG_ANALYZER_NONNULL = YES;
+			CLANG_ENABLE_MODULES = YES;
+			CLANG_ENABLE_OBJC_ARC = YES;
+			CLANG_WARN_BOOL_CONVERSION = YES;
+			CLANG_WARN_CONSTANT_CONVERSION = YES;
+			CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+			CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+			CLANG_WARN_EMPTY_BODY = YES;
+			CLANG_WARN_ENUM_CONVERSION = YES;
+			CLANG_WARN_INFINITE_RECURSION = YES;
+			CLANG_WARN_INT_CONVERSION = YES;
+			CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+			CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+			CLANG_WARN_UNREACHABLE_CODE = YES;
+			DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+			ENABLE_NS_ASSERTIONS = NO;
+			GCC_C_LANGUAGE_STANDARD = gnu17;
+			GCC_NO_COMMON_BLOCKS = YES;
+			IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+			SDKROOT = iphoneos;
+			SWIFT_COMPILATION_MODE = wholemodule;
+		}; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A00800000000000000000001 /* Build configuration list for PBXNativeTarget "JavaChat" */ = {isa = XCConfigurationList; buildConfigurations = (A00C00000000000000000001 /* Debug */, A00C00000000000000000002 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A00800000000000000000002 /* Build configuration list for PBXNativeTarget "JavaChatTests" */ = {isa = XCConfigurationList; buildConfigurations = (A00C00000000000000000003 /* Debug */, A00C00000000000000000004 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A00800000000000000000003 /* Build configuration list for PBXProject "JavaChat" */ = {isa = XCConfigurationList; buildConfigurations = (A00C00000000000000000005 /* Debug */, A00C00000000000000000006 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = A00400000000000000000001 /* Project object */;
+}
