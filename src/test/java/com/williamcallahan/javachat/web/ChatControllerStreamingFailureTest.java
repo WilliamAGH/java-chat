@@ -32,10 +32,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.openai.core.http.Headers;
 import com.openai.errors.InternalServerException;
-import com.openai.errors.UnprocessableEntityException;
-import com.openai.models.ErrorObject;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ReactorHooksConfig;
@@ -56,6 +53,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -87,6 +85,7 @@ class ChatControllerStreamingFailureTest {
     private static final String USER_QUERY = "explain sealed classes";
     private static final String UPSTREAM_SECRET_MESSAGE = "OPENAI_API_KEY=secret-body";
     private static final int ASYNC_ASSERTION_TIMEOUT_SECONDS = 2;
+    private static final int UNPROCESSABLE_ENTITY_STATUS = 422;
 
     private final Logger pipelineLogger = (Logger) LoggerFactory.getLogger("PIPELINE");
     private final Logger reactorHooksLogger = (Logger) LoggerFactory.getLogger(ReactorHooksConfig.class);
@@ -243,17 +242,11 @@ class ChatControllerStreamingFailureTest {
         assertEquals(Boolean.FALSE, genericErrorEvent.retryable());
     }
 
-    private static UnprocessableEntityException unprocessableEntityFailure(String gatewayErrorCode) {
-        ErrorObject gatewayError = ErrorObject.builder()
-                .message("gateway rejected the request")
-                .type("invalid_request_error")
-                .code(gatewayErrorCode)
-                .param((String) null)
-                .build();
-        return UnprocessableEntityException.builder()
-                .headers(Headers.builder().build())
-                .error(gatewayError)
-                .build();
+    private static ReportedTerminalStreamingFailure unprocessableEntityFailure(String gatewayErrorCode) {
+        InternalServerException gatewayFailure = mock(InternalServerException.class);
+        when(gatewayFailure.statusCode()).thenReturn(UNPROCESSABLE_ENTITY_STATUS);
+        when(gatewayFailure.code()).thenReturn(Optional.of(gatewayErrorCode));
+        return new ReportedTerminalStreamingFailure(gatewayFailure);
     }
 
     @Test
