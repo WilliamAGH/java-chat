@@ -183,8 +183,15 @@
 
   /* Footer */
   .welcome-footer {
+    display: none;
     color: var(--color-text-muted);
     font-size: var(--text-sm);
+  }
+
+  @media (min-width: 641px) and (hover: hover) and (pointer: fine) {
+    .welcome-footer {
+      display: block;
+    }
   }
 
   .welcome-footer p {
@@ -267,9 +274,6 @@
       font-size: var(--text-xs);
     }
 
-    .welcome-footer {
-      display: none;
-    }
   }
 
   /* Small phones */
