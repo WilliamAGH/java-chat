@@ -124,6 +124,37 @@ class OpenAiRequestFactoryTest {
     }
 
     @Test
+    void prepareStreamingRequestAppliesTheConfiguredReasoningEffort() {
+        OpenAiRequestFactory requestFactory = createRequestFactory("high");
+        StructuredPrompt structuredPrompt = new StructuredPrompt(
+                new SystemSegment("Follow the Java teaching policy", 8),
+                List.of(),
+                List.of(),
+                new CurrentQuerySegment("Explain records", 2));
+
+        ResponseCreateParams reasoningRequestParams =
+                requestFactory.prepareStreamingRequest(structuredPrompt, 0.4).responseParams();
+
+        assertEquals(
+                ReasoningEffort.HIGH,
+                reasoningRequestParams.reasoning().orElseThrow().effort().orElseThrow());
+    }
+
+    @Test
+    void jsonCompletionOmitsTheConfiguredReasoningEffort() {
+        OpenAiRequestFactory requestFactory = createRequestFactory("max");
+
+        ResponseCreateParams jsonCompletionParams =
+                requestFactory.buildJsonCompletionRequest("Rank these documents", 0.0, 128);
+
+        assertTrue(
+                jsonCompletionParams.text().orElseThrow().format().orElseThrow().isJsonObject());
+        assertTrue(
+                jsonCompletionParams.reasoning().isEmpty(),
+                "JSON completions inherit the gateway default so reasoning tokens cannot starve the output budget");
+    }
+
+    @Test
     void applicationDefaultsLeaveReasoningEffortUnset() throws IOException {
         Properties applicationProperties = new Properties();
         InputStream applicationPropertiesStream =

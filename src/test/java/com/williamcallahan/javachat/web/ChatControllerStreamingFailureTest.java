@@ -53,6 +53,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -84,6 +85,7 @@ class ChatControllerStreamingFailureTest {
     private static final String USER_QUERY = "explain sealed classes";
     private static final String UPSTREAM_SECRET_MESSAGE = "OPENAI_API_KEY=secret-body";
     private static final int ASYNC_ASSERTION_TIMEOUT_SECONDS = 2;
+    private static final int UNPROCESSABLE_ENTITY_STATUS = 422;
 
     private final Logger pipelineLogger = (Logger) LoggerFactory.getLogger("PIPELINE");
     private final Logger reactorHooksLogger = (Logger) LoggerFactory.getLogger(ReactorHooksConfig.class);
@@ -201,6 +203,50 @@ class ChatControllerStreamingFailureTest {
                 "user-facing message must not leak the exception class name");
         assertFalse(serializedError.contains(RerankingFailureException.class.getSimpleName()));
         assertFalse(serializedError.contains("Reranking service unavailable"));
+    }
+
+    @Test
+    void unpreservableReasoningIntentNamesTheEffortAndTheOwningSetting() throws JsonProcessingException {
+        AppProperties appProperties = new AppProperties();
+        appProperties.getLlm().setReasoningEffort("xhigh");
+
+        List<ServerSentEvent<String>> streamEvents =
+                streamFailure(unprocessableEntityFailure("unpreservable_reasoning_intent"), false, appProperties);
+
+        ServerSentEvent<String> errorEvent = streamEvents.stream()
+                .filter(streamEvent -> "error".equals(streamEvent.event()))
+                .findFirst()
+                .orElseThrow();
+        String serializedError = Objects.requireNonNull(errorEvent.data(), "error event data");
+        SseSupport.SseEventPayload reasoningErrorEvent =
+                objectMapper.readValue(serializedError, SseSupport.SseEventPayload.class);
+        assertTrue(reasoningErrorEvent.message().contains("xhigh"));
+        assertTrue(reasoningErrorEvent.message().contains("app.llm.reasoning-effort"));
+        assertTrue(reasoningErrorEvent.message().contains("unpreservable_reasoning_intent"));
+        assertEquals(Boolean.FALSE, reasoningErrorEvent.retryable());
+    }
+
+    @Test
+    void otherUnprocessableEntityFailuresKeepTheGenericMessage() throws JsonProcessingException {
+        List<ServerSentEvent<String>> streamEvents =
+                streamFailure(unprocessableEntityFailure("invalid_request"), false);
+
+        ServerSentEvent<String> errorEvent = streamEvents.stream()
+                .filter(streamEvent -> "error".equals(streamEvent.event()))
+                .findFirst()
+                .orElseThrow();
+        SseSupport.SseEventPayload genericErrorEvent = objectMapper.readValue(
+                Objects.requireNonNull(errorEvent.data(), "error event data"), SseSupport.SseEventPayload.class);
+        assertEquals(
+                "Something went wrong while generating this response. Please try again.", genericErrorEvent.message());
+        assertEquals(Boolean.FALSE, genericErrorEvent.retryable());
+    }
+
+    private static ReportedTerminalStreamingFailure unprocessableEntityFailure(String gatewayErrorCode) {
+        InternalServerException gatewayFailure = mock(InternalServerException.class);
+        when(gatewayFailure.statusCode()).thenReturn(UNPROCESSABLE_ENTITY_STATUS);
+        when(gatewayFailure.code()).thenReturn(Optional.of(gatewayErrorCode));
+        return new ReportedTerminalStreamingFailure(gatewayFailure);
     }
 
     @Test
@@ -776,6 +822,11 @@ class ChatControllerStreamingFailureTest {
     }
 
     private List<ServerSentEvent<String>> streamFailure(Throwable streamingFailure, boolean retryable) {
+        return streamFailure(streamingFailure, retryable, new AppProperties());
+    }
+
+    private List<ServerSentEvent<String>> streamFailure(
+            Throwable streamingFailure, boolean retryable, AppProperties appProperties) {
         ChatService chatService = mock(ChatService.class);
         ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
@@ -787,7 +838,7 @@ class ChatControllerStreamingFailureTest {
                 retrievalService,
                 createSseSupport(),
                 new ExceptionResponseBuilder(),
-                new AppProperties());
+                appProperties);
 
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any(), anyLong()))

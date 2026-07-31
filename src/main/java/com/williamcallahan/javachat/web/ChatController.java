@@ -4,6 +4,7 @@ import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_RETRIEVA
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
 
 import com.openai.errors.OpenAIIoException;
+import com.openai.errors.OpenAIServiceException;
 import com.openai.errors.RateLimitException;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
@@ -68,6 +69,8 @@ public class ChatController extends BaseController {
             "Java documentation retrieval failed before response generation.";
     private static final String GENERIC_STREAMING_FAILURE_MESSAGE =
             "Something went wrong while generating this response. Please try again.";
+    private static final int HTTP_UNPROCESSABLE_ENTITY = 422;
+    private static final String UNPRESERVABLE_REASONING_INTENT_CODE = "unpreservable_reasoning_intent";
 
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
@@ -430,7 +433,35 @@ public class ChatController extends BaseController {
             return RETRIEVAL_UNAVAILABLE_MESSAGE;
         }
 
+        if (isUnpreservableReasoningIntent(error)) {
+            return unpreservableReasoningIntentMessage();
+        }
+
         return GENERIC_STREAMING_FAILURE_MESSAGE;
+    }
+
+    private static boolean isUnpreservableReasoningIntent(Throwable error) {
+        return error instanceof OpenAIServiceException serviceException
+                && serviceException.statusCode() == HTTP_UNPROCESSABLE_ENTITY
+                && serviceException
+                        .code()
+                        .map(UNPRESERVABLE_REASONING_INTENT_CODE::equals)
+                        .orElse(false);
+    }
+
+    /**
+     * Names the operator-facing fix for a deterministic gateway rejection: the configured
+     * reasoning effort cannot be preserved by any provider for this model, so retrying unchanged
+     * can never succeed; only lowering or unsetting {@code app.llm.reasoning-effort} resolves it.
+     */
+    private String unpreservableReasoningIntentMessage() {
+        String configuredReasoningEffort = appProperties.getLlm().getReasoningEffort();
+        String rejectedEffort = configuredReasoningEffort == null || configuredReasoningEffort.isBlank()
+                ? "the configured reasoning effort"
+                : "reasoning effort '" + configuredReasoningEffort.trim() + "'";
+        return "The gateway cannot preserve " + rejectedEffort + " for this model (HTTP 422 "
+                + UNPRESERVABLE_REASONING_INTENT_CODE + "). Lower or unset app.llm.reasoning-effort to resolve;"
+                + " retrying unchanged cannot succeed.";
     }
 
     private static boolean isRetrievalFailure(Throwable error) {
