@@ -87,3 +87,5 @@ Local variables must be definitely assigned before Java lets you read them. For 
 - Change `completedLessons` in `LearnerProfile.java` and predict every affected output line.
 - Add a `String` variable that names the next topic, then print it with a descriptive label.
 - Explain why `moduleGrade` uses single quotes while `learnerName` uses double quotes.
+
+Read [JLS 4.12: Variables](https://docs.oracle.com/javase/specs/jls/se25/html/jls-4.html#jls-4.12) for the official rules governing Java variables and their values.

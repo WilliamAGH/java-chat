@@ -87,3 +87,5 @@ Strings use `equals` to compare their text. `==` asks whether two references poi
 - Change `practiceScore` to `90`, `70`, and `69`, then predict which message each value prints.
 - Write a conditional for sessions shorter than one hour, from one through two hours, and longer than two hours. State which branch handles exactly one and exactly two hours.
 - Explain why one `if`/`else if`/`else` chain does not run two of its branches.
+
+Read [JLS 14.9: The `if` Statement](https://docs.oracle.com/javase/specs/jls/se25/html/jls-14.html#jls-14.9) for the language rules behind conditional execution.

@@ -79,3 +79,5 @@ Number of scores: 3
 - Add a fourth lesson title and confirm that both loops in `LessonTitles.java` include it without changing the loop conditions.
 - Change the indexed loop condition to `lessonIndex <= lessonTitles.length`, then explain why that attempts to access an invalid position.
 - Explain why `lessonTitles.length` has no parentheses while `courseName.length()` does.
+
+Read [JLS 10: Arrays](https://docs.oracle.com/javase/specs/jls/se25/html/jls-10.html) for Java's array types, creation rules, members, and access semantics.

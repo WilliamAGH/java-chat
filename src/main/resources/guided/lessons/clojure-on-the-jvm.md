@@ -199,3 +199,5 @@ The key takeaway is that interop is never hidden. The slash form names a static 
 ## Recap
 
 Clojure runs on the JVM and shares Java's platform, but it builds on immutable values instead of in-place mutation. Updating a persistent collection with a function like `assoc` derives a new value and leaves every earlier value available, because bindings are not reassigned and data does not change underneath you. Immutability governs values, not I/O: your program can still print and read. Functions such as `map` and `filter` return lazy sequences that compute elements only on demand, so consuming a small prefix does only a small amount of work. Namespaces map to file paths with dots as directories and hyphens munged to underscores. And Java interop is explicit: imported class names, slash-qualified static calls, and leading-dot instance calls mark exactly where Clojure syntax hands off to a Java method.
+
+Read the official Clojure references for [sequences](https://clojure.org/reference/sequences) and [Java interop](https://clojure.org/reference/java_interop).

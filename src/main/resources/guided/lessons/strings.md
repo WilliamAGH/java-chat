@@ -74,3 +74,5 @@ For a string with `length()` of `9`, valid indexes run from `0` through `8`. Cal
 - Change `topic` to a longer word. Predict `charAt`, `substring`, and `length()` before running the program.
 - Call `toUpperCase()` and print both the original string and the returned string to demonstrate immutability.
 - Explain why `actualTopic.equals(expectedTopic)` asks the right question while `actualTopic == expectedTopic` does not.
+
+Read the Java 25 [`String` API](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/String.html) for the complete operation and indexing contracts.

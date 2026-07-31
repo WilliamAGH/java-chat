@@ -82,3 +82,5 @@ The variable declared inside `ReviewPlan`'s `for` loop belongs only to that loop
 - Write a `while` loop that counts down from `5` to `1`, then prints `"Start!"` after the loop. Predict the five numbers first.
 - Change `reviewNumber <= 3` to `reviewNumber < 3`, then explain why the final review is no longer printed.
 - Explain why removing `lessonNumber++` creates a nonterminating loop without running that version.
+
+Read [JLS 14.12: The `while` Statement](https://docs.oracle.com/javase/specs/jls/se25/html/jls-14.html#jls-14.12) and [JLS 14.14: The `for` Statement](https://docs.oracle.com/javase/specs/jls/se25/html/jls-14.html#jls-14.14) for the official loop semantics.

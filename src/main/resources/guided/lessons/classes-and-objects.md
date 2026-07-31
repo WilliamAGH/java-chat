@@ -87,3 +87,5 @@ This protects the class's rules. `completeNextLesson()` throws an `IllegalStateE
 - Try constructing a `LessonProgress` with a blank learner name or `0` total lessons and read the resulting error. Explain which rule the constructor enforces.
 - Explain why `completedLessons` is private instead of changing it directly from `main`.
 - Assign `devonProgress` to a second variable, call `completeNextLesson()` through that variable, and explain why Devon's original summary changes without another `new` expression.
+
+Read [JLS 8.1: Class Declarations](https://docs.oracle.com/javase/specs/jls/se25/html/jls-8.html#jls-8.1) for the official class model.
