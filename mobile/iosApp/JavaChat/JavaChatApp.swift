@@ -31,7 +31,6 @@ private struct JavaChatShell: View {
                 shellState: $shellState,
                 retryToken: retryToken
             )
-            .ignoresSafeArea(.container, edges: .horizontal)
             .ignoresSafeArea(.keyboard)
             .overlay {
                 ShellStatusOverlay(state: shellState) {
@@ -39,6 +38,7 @@ private struct JavaChatShell: View {
                 }
             }
         }
+        .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
     }
 }
 
