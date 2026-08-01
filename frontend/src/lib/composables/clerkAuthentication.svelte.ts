@@ -124,7 +124,9 @@ function warmPrecisionAppearance(darkBaseTheme: Appearance["theme"]): Appearance
       fontFamily: "var(--font-sans)",
       borderRadius: "var(--radius-md)",
       colorPrimary: "var(--color-accent)",
-      colorPrimaryForeground: "var(--color-text-primary)",
+      // Dedicated on-accent token: --color-text-primary is dark charcoal in
+      // the light theme, which would fail WCAG AA on the accent button.
+      colorPrimaryForeground: "var(--color-accent-foreground)",
       colorBackground: "var(--color-bg-secondary)",
       colorForeground: "var(--color-text-primary)",
       colorMutedForeground: "var(--color-text-tertiary)",

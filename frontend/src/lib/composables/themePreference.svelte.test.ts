@@ -1,6 +1,8 @@
+/// <reference types="node" />
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { THEME_COLOR_HEX_PER_THEME, THEME_PREFERENCE_STORAGE_KEY } from "./themePreference.svelte";
 
-const THEME_PREFERENCE_STORAGE_KEY = "java-chat-theme-preference";
 const SYSTEM_COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)";
 
 let systemPrefersDark = false;
@@ -156,5 +158,72 @@ describe("setThemePreference", () => {
 
     expect(themePreference.resolvedTheme).toBe("dark");
     expect(localStorage.getItem(THEME_PREFERENCE_STORAGE_KEY)).toBe("system");
+  });
+
+  it("still applies the theme when storage writes are blocked", async () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("denied", "SecurityError");
+    });
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { initializeThemePreference, setThemePreference, themePreference } =
+      await importThemePreferenceModule();
+    initializeThemePreference();
+
+    setThemePreference("dark");
+
+    expect(themePreference.resolvedTheme).toBe("dark");
+    expect(document.documentElement.dataset["theme"]).toBe("dark");
+    expect(consoleWarnSpy).toHaveBeenCalled();
+  });
+});
+
+describe("cross-tab synchronization", () => {
+  it("follows preference changes made in other tabs", async () => {
+    systemPrefersDark = false;
+    const { initializeThemePreference, themePreference } = await importThemePreferenceModule();
+    initializeThemePreference();
+
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: THEME_PREFERENCE_STORAGE_KEY, newValue: "dark" }),
+    );
+
+    expect(themePreference.preference).toBe("dark");
+    expect(document.documentElement.dataset["theme"]).toBe("dark");
+  });
+
+  it("returns to system when another tab clears the preference", async () => {
+    systemPrefersDark = false;
+    const { initializeThemePreference, setThemePreference, themePreference } =
+      await importThemePreferenceModule();
+    initializeThemePreference();
+    setThemePreference("dark");
+
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: THEME_PREFERENCE_STORAGE_KEY, newValue: null }),
+    );
+
+    expect(themePreference.preference).toBe("system");
+    expect(themePreference.resolvedTheme).toBe("light");
+  });
+
+  it("ignores storage events for unrelated keys", async () => {
+    const { initializeThemePreference, themePreference } = await importThemePreferenceModule();
+    initializeThemePreference();
+
+    window.dispatchEvent(new StorageEvent("storage", { key: "unrelated-key", newValue: "dark" }));
+
+    expect(themePreference.preference).toBe("system");
+  });
+});
+
+describe("boot asset parity", () => {
+  it("keeps public/theme-boot.js in sync with the composable constants", () => {
+    // Vitest runs with cwd at the frontend root.
+    const bootScript = readFileSync("public/theme-boot.js", "utf8");
+
+    expect(bootScript).toContain(THEME_PREFERENCE_STORAGE_KEY);
+    for (const themeColorHex of Object.values(THEME_COLOR_HEX_PER_THEME)) {
+      expect(bootScript).toContain(themeColorHex);
+    }
   });
 });
