@@ -78,13 +78,19 @@ public class SeoController {
                 defaultImage);
         metadataMap.put("/guided", guided);
         metadataMap.put("/learn", guided);
+        metadataMap.put(
+                "/privacy",
+                new PageMetadata(
+                        "Privacy Policy - Java Chat",
+                        "How Java Chat collects, uses, discloses, retains, and protects personal information.",
+                        defaultImage));
     }
 
     /**
      * Serves the SPA index.html with path-specific SEO metadata for crawlers and social previews.
      */
     @GetMapping(
-            value = {"/", "/chat", "/guided", "/learn"},
+            value = {"/", "/chat", "/guided", "/learn", "/privacy"},
             produces = MediaType.TEXT_HTML_VALUE)
     public ResponseEntity<String> serveIndexWithSeo(HttpServletRequest request) {
         try {

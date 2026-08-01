@@ -69,6 +69,19 @@ class SeoControllerTest {
         assertMetaContent(htmlDocument, "property", "og:url", "https://example.com/guided");
     }
 
+    @Test
+    void serves_privacy_with_specific_metadata() throws Exception {
+        Document htmlDocument = loadSeoDocument("/privacy");
+
+        assertEquals("Privacy Policy - Java Chat", htmlDocument.title());
+        assertMetaContent(
+                htmlDocument,
+                "property",
+                "og:description",
+                "How Java Chat collects, uses, discloses, retains, and protects personal information.");
+        assertMetaContent(htmlDocument, "property", "og:url", "https://example.com/privacy");
+    }
+
     private Document loadSeoDocument(String path) throws Exception {
         MvcResult mvcOutcome = mvc.perform(get(path)).andExpect(status().isOk()).andReturn();
         return Jsoup.parse(mvcOutcome.getResponse().getContentAsString());
