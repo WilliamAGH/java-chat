@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render } from "@testing-library/svelte";
+import { afterEach, describe, expect, it } from "vitest";
+import { render } from "@testing-library/svelte";
 import Header from "./Header.svelte";
 import { clerkAuthentication } from "../composables/clerkAuthentication.svelte";
 
@@ -9,46 +9,38 @@ afterEach(() => {
 });
 
 describe("Header navigation accessibility", () => {
-  it("names icon-only mobile navigation buttons and marks the current view", () => {
-    const { getByRole } = render(Header, {
-      props: { currentView: "chat", onContactOpen: vi.fn() },
+  it("limits the main navigation to the learning surfaces and marks the current view", () => {
+    const { getByRole, queryByRole } = render(Header, {
+      props: { currentView: "chat" },
     });
 
     expect(getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
     expect(getByRole("button", { name: "Learn" })).not.toHaveAttribute("aria-current");
-    expect(getByRole("button", { name: "Privacy" })).not.toHaveAttribute("aria-current");
+
+    const navigation = getByRole("navigation", { name: "Main navigation" });
+    expect(navigation.querySelectorAll("button").length).toBe(2);
+
+    // Public pages and the color scheme live in the unified header menu, not
+    // the main navigation.
+    expect(queryByRole("button", { name: "Privacy" })).toBeNull();
+    expect(queryByRole("button", { name: "Contact" })).toBeNull();
+    expect(getByRole("button", { name: "Settings and pages menu" })).toBeInTheDocument();
   });
 
-  it("marks privacy as the current public view", () => {
+  it("marks learn as the current public view", () => {
     const { getByRole } = render(Header, {
-      props: { currentView: "privacy", onContactOpen: vi.fn() },
+      props: { currentView: "learn" },
     });
 
-    expect(getByRole("button", { name: "Privacy" })).toHaveAttribute("aria-current", "page");
+    expect(getByRole("button", { name: "Learn" })).toHaveAttribute("aria-current", "page");
     expect(getByRole("button", { name: "Chat" })).not.toHaveAttribute("aria-current");
-  });
-
-  it("opens the contact dialog without marking a view", async () => {
-    const onContactOpen = vi.fn();
-    const { getByRole } = render(Header, {
-      props: { currentView: "chat", onContactOpen },
-    });
-
-    const contactTab = getByRole("button", { name: "Contact" });
-    expect(contactTab).not.toHaveAttribute("aria-current");
-    expect(contactTab).toHaveAttribute("aria-haspopup", "dialog");
-
-    await fireEvent.click(contactTab);
-
-    expect(onContactOpen).toHaveBeenCalledTimes(1);
-    expect(getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
   });
 });
 
 describe("Header authentication controls", () => {
   it("hides auth controls until Clerk has loaded, avoiding a signed-out flicker", () => {
     const { queryByRole } = render(Header, {
-      props: { currentView: "chat", onContactOpen: vi.fn() },
+      props: { currentView: "chat" },
     });
 
     expect(queryByRole("button", { name: "Sign in" })).toBeNull();
@@ -59,7 +51,7 @@ describe("Header authentication controls", () => {
     clerkAuthentication.isLoaded = true;
 
     const { getAllByRole } = render(Header, {
-      props: { currentView: "chat", onContactOpen: vi.fn() },
+      props: { currentView: "chat" },
     });
 
     // Narrow viewports swap the text buttons for an icon-only sign-in via CSS;

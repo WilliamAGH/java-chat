@@ -4,13 +4,14 @@
  * The index bootstrap and in-app navigation consume this catalog so deep links, aliases,
  * trailing slashes, and document metadata remain synchronized.
  */
-export type ApplicationView = "chat" | "learn" | "privacy";
+export type ApplicationView = "chat" | "learn" | "privacy" | "contact";
 
 const ROOT_APPLICATION_PATH = "/";
 const CHAT_APPLICATION_PATH = "/chat";
 const GUIDED_APPLICATION_PATH = "/guided";
 const LEARN_APPLICATION_PATH = "/learn";
 const PRIVACY_APPLICATION_PATH = "/privacy";
+const CONTACT_APPLICATION_PATH = "/contact";
 /** Mirrors the backend lesson slug contract (`GuidedLearningService`). */
 const LESSON_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const DEFAULT_OPEN_GRAPH_IMAGE_PATH = "/og-image.png";
@@ -63,6 +64,12 @@ const PRIVACY_PAGE_METADATA: PageMetadata = {
   imagePath: DEFAULT_OPEN_GRAPH_IMAGE_PATH,
 };
 
+const CONTACT_PAGE_METADATA: PageMetadata = {
+  title: "Contact - Java Chat",
+  description: "Contact the Java Chat team with questions, feedback, or privacy requests.",
+  imagePath: DEFAULT_OPEN_GRAPH_IMAGE_PATH,
+};
+
 const APPLICATION_ROUTE_BY_PATH = {
   [ROOT_APPLICATION_PATH]: {
     view: "chat",
@@ -93,6 +100,12 @@ const APPLICATION_ROUTE_BY_PATH = {
     isCanonicalViewPath: true,
     recoversDescendantPathsToCanonicalView: false,
     pageMetadata: PRIVACY_PAGE_METADATA,
+  },
+  [CONTACT_APPLICATION_PATH]: {
+    view: "contact",
+    isCanonicalViewPath: true,
+    recoversDescendantPathsToCanonicalView: false,
+    pageMetadata: CONTACT_PAGE_METADATA,
   },
 } as const;
 

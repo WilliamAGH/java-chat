@@ -63,3 +63,12 @@ describe("privacy route resolution", () => {
     expect(canonicalRecoveryPathForPath("/privacy")).toBeNull();
   });
 });
+
+describe("contact route resolution", () => {
+  it("keeps the exact contact path separate from chat and learning views", () => {
+    expect(applicationViewForPath("/contact")).toBe("contact");
+    expect(applicationViewForPath("/contact/")).toBe("contact");
+    expect(applicationViewForPath("/contact/extra")).toBe("chat");
+    expect(canonicalRecoveryPathForPath("/contact")).toBeNull();
+  });
+});

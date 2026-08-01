@@ -4,8 +4,8 @@
   import ChatView from './lib/components/ChatView.svelte'
   import LearnView from './lib/components/LearnView.svelte'
   import PrivacyPage from './lib/components/PrivacyPage.svelte'
+  import ContactPage from './lib/components/ContactPage.svelte'
   import ToastContainer from './lib/components/ToastContainer.svelte'
-  import ContactFormDialog from './lib/components/ContactFormDialog.svelte'
   import { refreshCsrfToken } from './lib/services/csrf'
   import { loadClerkAuthentication } from './lib/composables/clerkAuthentication.svelte'
   import {
@@ -20,15 +20,6 @@
   let currentView = $state<ApplicationView>(applicationViewForPath(globalThis.location.pathname))
   let currentLessonSlug = $state<string | null>(lessonSlugForPath(globalThis.location.pathname))
   let chatView = $state<ReturnType<typeof ChatView> | null>(null)
-  let contactDialogOpen = $state(false)
-
-  function openContactDialog(): void {
-    contactDialogOpen = true
-  }
-
-  function closeContactDialog(): void {
-    contactDialogOpen = false
-  }
 
   $effect(() => {
     recoverUnimplementedLessonRoute()
@@ -64,6 +55,13 @@
     currentView = selectedView
   }
 
+  /** In-page navigation for static pages (Privacy, Contact): SPA view switch
+   * driven by the real anchor's href, so links stay crawlable and openable in
+   * a new tab. */
+  function navigateToInternalPath(path: string): void {
+    selectApplicationView(applicationViewForPath(path))
+  }
+
   function synchronizeLessonRouteWithSelection(): void {
     const pathLessonSlug = lessonSlugForPath(globalThis.location.pathname)
     if (currentLessonSlug && pathLessonSlug !== currentLessonSlug) {
@@ -84,20 +82,21 @@
 <svelte:window onpopstate={synchronizeViewWithBrowserHistory} />
 
 <div class="app-shell">
-  <Header bind:currentView={() => currentView, selectApplicationView} onContactOpen={openContactDialog} />
+  <Header bind:currentView={() => currentView, selectApplicationView} />
 
   <main class="main-content">
     {#if currentView === 'chat'}
       <ChatView bind:this={chatView} />
     {:else if currentView === 'learn'}
       <LearnView bind:selectedSlug={currentLessonSlug} />
+    {:else if currentView === 'privacy'}
+      <PrivacyPage onInternalNavigate={navigateToInternalPath} />
     {:else}
-      <PrivacyPage />
+      <ContactPage onInternalNavigate={navigateToInternalPath} />
     {/if}
   </main>
 
   <ToastContainer />
-  <ContactFormDialog isOpen={contactDialogOpen} onClose={closeContactDialog} />
 </div>
 
 <style>

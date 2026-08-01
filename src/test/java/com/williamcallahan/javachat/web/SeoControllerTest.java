@@ -82,6 +82,19 @@ class SeoControllerTest {
         assertMetaContent(htmlDocument, "property", "og:url", "https://example.com/privacy");
     }
 
+    @Test
+    void serves_contact_with_specific_metadata() throws Exception {
+        Document htmlDocument = loadSeoDocument("/contact");
+
+        assertEquals("Contact - Java Chat", htmlDocument.title());
+        assertMetaContent(
+                htmlDocument,
+                "property",
+                "og:description",
+                "Contact the Java Chat team with questions, feedback, or privacy requests.");
+        assertMetaContent(htmlDocument, "property", "og:url", "https://example.com/contact");
+    }
+
     private Document loadSeoDocument(String path) throws Exception {
         MvcResult mvcOutcome = mvc.perform(get(path)).andExpect(status().isOk()).andReturn();
         return Jsoup.parse(mvcOutcome.getResponse().getContentAsString());

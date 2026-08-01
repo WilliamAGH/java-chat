@@ -6,14 +6,13 @@
     openSignUp,
   } from '../composables/clerkAuthentication.svelte'
   import type { ApplicationView } from '../services/pageMetadata'
-  import ThemeToggle from './ThemeToggle.svelte'
+  import HeaderMenu from './HeaderMenu.svelte'
 
   interface Props {
     currentView: ApplicationView
-    onContactOpen: () => void
   }
 
-  let { currentView = $bindable('chat'), onContactOpen }: Props = $props()
+  let { currentView = $bindable('chat') }: Props = $props()
 </script>
 
 <header class="header">
@@ -56,35 +55,7 @@
         </svg>
         <span>Learn</span>
       </button>
-      <button
-        type="button"
-        class="nav-tab"
-        class:active={currentView === 'privacy'}
-        aria-label="Privacy"
-        aria-current={currentView === 'privacy' ? 'page' : undefined}
-        onclick={() => currentView = 'privacy'}
-      >
-        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-          <path fill-rule="evenodd" d="M10 1.944A11.954 11.954 0 0 1 3.84 4.13a.75.75 0 0 0-.34.627v4.577c0 3.83 2.144 7.335 5.552 9.077a2.086 2.086 0 0 0 1.896 0C14.356 16.67 16.5 13.165 16.5 9.334V4.757a.75.75 0 0 0-.34-.627A11.954 11.954 0 0 1 10 1.944Zm3.03 6.586a.75.75 0 0 0-1.06-1.06L9 10.44 8.03 9.47a.75.75 0 0 0-1.06 1.06l1.5 1.5a.75.75 0 0 0 1.06 0l3.5-3.5Z" clip-rule="evenodd"/>
-        </svg>
-        <span>Privacy</span>
-      </button>
-      <button
-        type="button"
-        class="nav-tab"
-        aria-label="Contact"
-        aria-haspopup="dialog"
-        onclick={() => onContactOpen()}
-      >
-        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-          <path d="M3 4a2 2 0 0 0-2 2v1.161l8.441 4.221a1.25 1.25 0 0 0 1.118 0L19 7.162V6a2 2 0 0 0-2-2H3Z"/>
-          <path d="M19 8.839l-7.77 3.885a2.75 2.75 0 0 1-2.46 0L1 8.839V14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.839Z"/>
-        </svg>
-        <span>Contact</span>
-      </button>
       </nav>
-
-    <ThemeToggle />
 
     {#if clerkAuthentication.isLoaded}
       <div class="auth-controls">
@@ -113,6 +84,8 @@
         {/if}
       </div>
     {/if}
+
+    <HeaderMenu bind:currentView />
   </div>
 </header>
 
@@ -189,7 +162,10 @@
     border: none;
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out),
+      box-shadow var(--duration-fast) var(--ease-out);
   }
 
   .nav-tab:hover:not(.active) {
@@ -232,7 +208,10 @@
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out),
+      box-shadow var(--duration-fast) var(--ease-out);
   }
 
   .auth-button:hover {
@@ -260,9 +239,9 @@
   }
 
 
-  /* Tablet and small laptops: icon-only navigation keeps brand + nav +
-     theme toggle + auth within the row (with labels the header needs ~985px,
-     so anything under 1024 would squeeze or wrap the brand). */
+  /* Tablet and small laptops: icon-only navigation keeps brand + nav + auth +
+     menu within the row (with labels the header needs ~985px, so anything
+     under 1024 would squeeze or wrap the brand). */
   @media (max-width: 1024px) {
     .header-inner {
       padding: var(--space-3) var(--space-4);

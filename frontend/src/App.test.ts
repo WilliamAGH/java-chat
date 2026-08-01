@@ -11,6 +11,7 @@ const streamChatMock = vi.fn<StreamChatFunction>();
 const CHAT_CANONICAL_PATH = "/";
 const LEARN_CANONICAL_PATH = "/learn";
 const PRIVACY_CANONICAL_PATH = "/privacy";
+const CONTACT_CANONICAL_PATH = "/contact";
 
 vi.mock("./lib/services/csrf", async () => {
   const actualCsrfService =
@@ -99,12 +100,48 @@ describe("App route synchronization", () => {
     const application = render(App);
 
     expect(await application.findByRole("heading", { name: "Privacy Policy" })).toBeInTheDocument();
-    expect(application.getByRole("button", { name: "Privacy" })).toHaveAttribute(
+    expect(application.getByRole("menuitem", { name: "Privacy" })).toHaveAttribute(
       "aria-current",
       "page",
     );
     expect(globalThis.location.pathname).toBe(PRIVACY_CANONICAL_PATH);
     expectCurrentRouteMetadata(PRIVACY_CANONICAL_PATH);
+  });
+
+  it("renders a direct contact route with canonical metadata", async () => {
+    globalThis.history.replaceState({}, "", CONTACT_CANONICAL_PATH);
+    const App = (await import("./App.svelte")).default;
+    const application = render(App);
+
+    expect(
+      await application.findByRole("heading", { level: 1, name: "Contact" }),
+    ).toBeInTheDocument();
+    expect(application.getByRole("menuitem", { name: "Contact" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(globalThis.location.pathname).toBe(CONTACT_CANONICAL_PATH);
+    expectCurrentRouteMetadata(CONTACT_CANONICAL_PATH);
+  });
+
+  it("navigates from the privacy policy to the contact form without a reload", async () => {
+    globalThis.history.replaceState({}, "", PRIVACY_CANONICAL_PATH);
+    const App = (await import("./App.svelte")).default;
+    const application = render(App);
+
+    expect(await application.findByRole("heading", { name: "Privacy Policy" })).toBeInTheDocument();
+    const [firstContactFormLink, ...remainingContactFormLinks] = application.getAllByRole("link", {
+      name: /contact form/i,
+    });
+    expect(remainingContactFormLinks.length).toBeGreaterThan(0);
+
+    await fireEvent.click(firstContactFormLink);
+
+    expect(
+      await application.findByRole("heading", { level: 1, name: "Contact" }),
+    ).toBeInTheDocument();
+    expect(globalThis.location.pathname).toBe(CONTACT_CANONICAL_PATH);
+    expectCurrentRouteMetadata(CONTACT_CANONICAL_PATH);
   });
 
   it("honors a direct learn route with a trailing slash", async () => {

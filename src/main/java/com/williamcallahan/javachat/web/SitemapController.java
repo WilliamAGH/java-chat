@@ -27,7 +27,8 @@ public class SitemapController {
     private static final int INITIAL_BUFFER_CAPACITY = 512;
     private static final String SITEMAP_NAMESPACE = "http://www.sitemaps.org/schemas/sitemap/0.9";
 
-    private static final List<String> PUBLIC_ROUTES = List.of("/", "/chat", "/learn", "/guided", "/privacy");
+    private static final List<String> PUBLIC_ROUTES =
+            List.of("/", "/chat", "/learn", "/guided", "/privacy", "/contact");
 
     private final SiteUrlResolver siteUrlResolver;
 

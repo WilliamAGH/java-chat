@@ -1,3 +1,26 @@
+<script lang="ts">
+  /**
+   * Privacy policy at the /privacy route.
+   *
+   * Every location that names the privacy mailbox also links the contact form
+   * so readers can act without leaving the app.
+   */
+  interface Props {
+    /** SPA navigation for internal links; falls back to a full page load. */
+    onInternalNavigate?: (path: string) => void
+  }
+
+  let { onInternalNavigate }: Props = $props()
+
+  function navigateToContact(clickEvent: MouseEvent): void {
+    if (!onInternalNavigate) {
+      return
+    }
+    clickEvent.preventDefault()
+    onInternalNavigate('/contact')
+  }
+</script>
+
 <svelte:head>
   <meta name="robots" content="index,follow" />
 </svelte:head>
@@ -29,7 +52,8 @@
         </p>
         <p>
           If you have a privacy question or want to exercise a privacy right, contact us at
-          <a href="mailto:privacy@javachat.ai">privacy@javachat.ai</a>.
+          <a href="mailto:privacy@javachat.ai">privacy@javachat.ai</a> or through the
+          <a href="/contact" onclick={navigateToContact}>contact form</a>.
         </p>
 
         <h2>Information We Collect</h2>
@@ -156,8 +180,10 @@
         <p>
           To request deletion of your Java Chat account or other personal information, email
           <a href="mailto:privacy@javachat.ai">privacy@javachat.ai</a> from the address associated
-          with your account. We may need to verify your identity and may retain information that we
-          are legally permitted or required to retain.
+          with your account, or start the request through the
+          <a href="/contact" onclick={navigateToContact}>contact form</a>. We may need to verify
+          your identity and may retain information that we are legally permitted or required to
+          retain.
         </p>
 
         <h2>Your Choices and Privacy Rights</h2>
@@ -179,8 +205,10 @@
         <p>
           To submit a request, email
           <a href="mailto:privacy@javachat.ai">privacy@javachat.ai</a> with “Privacy Request” in the
-          subject line. We may verify your request before responding. An authorized agent may submit
-          a request where permitted by law.
+          subject line, or send the same request through the
+          <a href="/contact" onclick={navigateToContact}>contact form</a>. We may verify your
+          request before responding. An authorized agent may submit a request where permitted by
+          law.
         </p>
 
         <h2>Do Not Track and Opt-Out Preference Signals</h2>
@@ -196,8 +224,9 @@
         <p>
           Java Chat is not directed to children under 13, and we do not knowingly collect personal
           information from children under 13. If you believe a child has provided personal
-          information, contact <a href="mailto:privacy@javachat.ai">privacy@javachat.ai</a> so we
-          can investigate and take appropriate action.
+          information, contact <a href="mailto:privacy@javachat.ai">privacy@javachat.ai</a> or use
+          the <a href="/contact" onclick={navigateToContact}>contact form</a> so we can investigate
+          and take appropriate action.
         </p>
 
         <h2>Security</h2>
@@ -219,7 +248,8 @@
         <p>
           Java Chat<br />
           California sole proprietorship<br />
-          <a href="mailto:privacy@javachat.ai">privacy@javachat.ai</a>
+          <a href="mailto:privacy@javachat.ai">privacy@javachat.ai</a><br />
+          <a href="/contact" onclick={navigateToContact}>Contact form</a>
         </p>
       </div>
 
@@ -227,6 +257,10 @@
         <h2>Privacy requests</h2>
         <p>Access, correction, deletion, and other privacy questions can be sent to:</p>
         <a href="mailto:privacy@javachat.ai">privacy@javachat.ai</a>
+        <p>
+          No email client handy? Use the
+          <a href="/contact" onclick={navigateToContact}>contact form</a> instead.
+        </p>
       </aside>
     </div>
   </div>
