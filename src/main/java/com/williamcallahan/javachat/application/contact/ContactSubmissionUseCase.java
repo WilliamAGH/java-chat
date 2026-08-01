@@ -43,7 +43,8 @@ public class ContactSubmissionUseCase {
     private static final String SUBJECT_PREFIX = "Java Chat contact: ";
 
     private final JavaMailSender javaMailSender;
-    private final AppProperties appProperties;
+    private final String senderEmail;
+    private final String recipientEmail;
     private final Cache<String, AtomicInteger> acceptedSubmissionsPerIp;
 
     /**
@@ -51,7 +52,9 @@ public class ContactSubmissionUseCase {
      */
     public ContactSubmissionUseCase(JavaMailSender javaMailSender, AppProperties appProperties) {
         this.javaMailSender = javaMailSender;
-        this.appProperties = appProperties;
+        AppProperties.Contact contactProperties = appProperties.getContact();
+        this.senderEmail = contactProperties.getSenderEmail();
+        this.recipientEmail = contactProperties.getRecipientEmail();
         this.acceptedSubmissionsPerIp =
                 Caffeine.newBuilder().expireAfterWrite(RATE_LIMIT_WINDOW).build();
     }
@@ -65,22 +68,20 @@ public class ContactSubmissionUseCase {
      */
     public void submit(ContactSubmission contactSubmission) {
         if (isSpamSubmission(contactSubmission)) {
-            log.info(
-                    "Dropping contact submission flagged as spam (remoteAddress={})",
-                    contactSubmission.remoteAddress());
+            log.info("Dropping contact submission flagged as spam");
             return;
         }
 
         AtomicInteger acceptedSubmissionCount =
                 acceptedSubmissionsPerIp.get(contactSubmission.remoteAddress(), remoteAddress -> new AtomicInteger());
         if (acceptedSubmissionCount.get() >= MAX_ACCEPTED_SUBMISSIONS_PER_IP) {
-            log.info("Contact submission rate limited (remoteAddress={})", contactSubmission.remoteAddress());
+            log.info("Contact submission rate limited");
             throw new ContactRateLimitExceededException();
         }
 
         javaMailSender.send(buildMimeMessage(contactSubmission));
         acceptedSubmissionCount.incrementAndGet();
-        log.info("Contact message delivered (remoteAddress={})", contactSubmission.remoteAddress());
+        log.info("Contact message delivered");
     }
 
     private static boolean isSpamSubmission(ContactSubmission contactSubmission) {
@@ -96,12 +97,11 @@ public class ContactSubmissionUseCase {
     }
 
     private MimeMessage buildMimeMessage(ContactSubmission contactSubmission) {
-        AppProperties.Contact contactProperties = appProperties.getContact();
         MimeMessage mimeMessage = javaMailSender.createMimeMessage();
         try {
             MimeMessageHelper messageHelper = new MimeMessageHelper(mimeMessage, StandardCharsets.UTF_8.name());
-            messageHelper.setFrom(contactProperties.getSenderEmail());
-            messageHelper.setTo(contactProperties.getRecipientEmail());
+            messageHelper.setFrom(senderEmail);
+            messageHelper.setTo(recipientEmail);
             messageHelper.setReplyTo(contactSubmission.email());
             messageHelper.setSubject(SUBJECT_PREFIX + contactSubmission.name());
             messageHelper.setText(buildPlainTextBody(contactSubmission), false);

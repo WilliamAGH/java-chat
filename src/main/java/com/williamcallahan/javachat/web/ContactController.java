@@ -7,6 +7,7 @@ import com.williamcallahan.javachat.domain.errors.ApiResponse;
 import com.williamcallahan.javachat.domain.errors.ContactMessageAcknowledgement;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,7 +56,7 @@ public class ContactController extends BaseController {
      */
     @PostMapping
     public ResponseEntity<ApiResponse> submitContactMessage(
-            @RequestBody ContactMessageRequest contactMessageRequest, HttpServletRequest servletRequest) {
+            @Valid @RequestBody ContactMessageRequest contactMessageRequest, HttpServletRequest servletRequest) {
         try {
             ContactSubmission contactSubmission = new ContactSubmission(
                     contactMessageRequest.name(),

@@ -168,9 +168,9 @@ class ContactControllerTest {
 
     @Test
     void lineBreaksInNameAreRejectedAsHeaderInjection() throws Exception {
-        String requestJson = """
-                {"name": "Evil\\r\\nBcc: victim@example.test", "email": "sender@example.test", "message": "Header injection attempt", "website": "", "renderedAt": %d}
-                """.formatted(legitimateRenderedAt());
+        String requestJson =
+                "{\"name\": \"Evil\\r\\nBcc: victim@example.test\", \"email\": \"sender@example.test\", \"message\": \"Header injection attempt\", \"website\": \"\", \"renderedAt\": %d}"
+                        .formatted(legitimateRenderedAt());
 
         mockMvc.perform(post(CONTACT_ENDPOINT)
                         .with(csrf())
@@ -209,8 +209,7 @@ class ContactControllerTest {
     }
 
     private static String submissionJson(String name, String email, String message, String website, long renderedAt) {
-        return """
-                {"name": "%s", "email": "%s", "message": "%s", "website": "%s", "renderedAt": %d}
-                """.formatted(name, email, message, website, renderedAt);
+        return "{\"name\": \"%s\", \"email\": \"%s\", \"message\": \"%s\", \"website\": \"%s\", \"renderedAt\": %d}"
+                .formatted(name, email, message, website, renderedAt);
     }
 }
