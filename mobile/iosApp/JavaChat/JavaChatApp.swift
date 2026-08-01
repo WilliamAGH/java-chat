@@ -2,9 +2,12 @@ import SwiftUI
 
 @main
 struct JavaChatApp: App {
+    @AppStorage(AppAppearance.storageKey) private var appAppearance = AppAppearance.system
+
     var body: some Scene {
         WindowGroup {
             JavaChatShell()
+                .preferredColorScheme(appAppearance.colorScheme)
         }
     }
 }

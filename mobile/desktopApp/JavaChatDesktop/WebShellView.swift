@@ -25,7 +25,6 @@ struct WebShellView: View {
             .frame(minWidth: 900, minHeight: 600)
             .toolbarBackground(.javaChatToolbar, for: .windowToolbar)
             .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
-            .toolbarColorScheme(.dark, for: .windowToolbar)
             .toolbar(removing: .title)
             .toolbar {
                 if #available(macOS 26.0, *) {
@@ -51,7 +50,7 @@ struct WebShellView: View {
                     .labelStyle(.iconOnly)
                     .font(.system(size: 14, weight: .regular))
                     .frame(width: 20, height: 20)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
             .help("Copy Link")
@@ -67,7 +66,7 @@ struct WebShellView: View {
                 .labelStyle(.iconOnly)
                 .font(.system(size: 15, weight: .regular))
                 .frame(width: 20, height: 20)
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
             .help("Open in Default Browser")

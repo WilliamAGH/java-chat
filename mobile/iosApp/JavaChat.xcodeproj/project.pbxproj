@@ -19,6 +19,9 @@
 		A0010000000000000000000A /* WebShellStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000000A /* WebShellStateTests.swift */; };
 		A0010000000000000000000B /* WebNavigationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000000B /* WebNavigationPolicyTests.swift */; };
 		A0010000000000000000000C /* OAuthPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000000C /* OAuthPolicyTests.swift */; };
+		A0010000000000000000000D /* AppAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000000F /* AppAppearance.swift */; };
+		A0010000000000000000000E /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000010 /* Settings.bundle */; };
+		A0010000000000000000000F /* AppAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000011 /* AppAppearanceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -46,6 +49,9 @@
 		A0020000000000000000000C /* OAuthPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthPolicyTests.swift; sourceTree = "<group>"; };
 		A0020000000000000000000D /* JavaChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JavaChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A0020000000000000000000E /* JavaChatTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = JavaChatTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A0020000000000000000000F /* AppAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/AppAppearance.swift; sourceTree = SOURCE_ROOT; };
+		A00200000000000000000010 /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = Settings.bundle; sourceTree = "<group>"; };
+		A00200000000000000000011 /* AppAppearanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAppearanceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -57,6 +63,7 @@
 		A00700000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				A0020000000000000000000F /* AppAppearance.swift */,
 				A00700000000000000000002 /* JavaChat */,
 				A00700000000000000000003 /* Tests */,
 				A00700000000000000000004 /* Products */,
@@ -74,6 +81,7 @@
 				A00200000000000000000006 /* JavaChatWebView.swift */,
 				A00200000000000000000007 /* WebViewCoordinator.swift */,
 				A00200000000000000000008 /* Assets.xcassets */,
+				A00200000000000000000010 /* Settings.bundle */,
 			);
 			path = JavaChat;
 			sourceTree = "<group>";
@@ -81,6 +89,7 @@
 		A00700000000000000000003 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				A00200000000000000000011 /* AppAppearanceTests.swift */,
 				A00200000000000000000009 /* ShellConfigurationTests.swift */,
 				A0020000000000000000000A /* WebShellStateTests.swift */,
 				A0020000000000000000000B /* WebNavigationPolicyTests.swift */,
@@ -175,7 +184,7 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A00A00000000000000000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A00100000000000000000008 /* Assets.xcassets in Resources */,); runOnlyForDeploymentPostprocessing = 0; };
+		A00A00000000000000000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A00100000000000000000008 /* Assets.xcassets in Resources */, A0010000000000000000000E /* Settings.bundle in Resources */,); runOnlyForDeploymentPostprocessing = 0; };
 		A00A00000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
@@ -191,6 +200,7 @@
 				A00100000000000000000005 /* WebNavigationPolicy.swift in Sources */,
 				A00100000000000000000006 /* JavaChatWebView.swift in Sources */,
 				A00100000000000000000007 /* WebViewCoordinator.swift in Sources */,
+				A0010000000000000000000D /* AppAppearance.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -198,6 +208,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A0010000000000000000000F /* AppAppearanceTests.swift in Sources */,
 				A00100000000000000000009 /* ShellConfigurationTests.swift in Sources */,
 				A0010000000000000000000A /* WebShellStateTests.swift in Sources */,
 				A0010000000000000000000B /* WebNavigationPolicyTests.swift in Sources */,
