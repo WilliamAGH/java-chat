@@ -27,7 +27,7 @@ const CANONICAL_LINK_SELECTOR = 'link[data-seo="canonical"]';
 const STRUCTURED_DATA_ELEMENT_ID = "java-chat-structured-data";
 const STRUCTURED_DATA_CONTEXT = "https://schema.org";
 const STRUCTURED_DATA_TYPE = "WebApplication";
-const APPLICATION_NAME = "Java Chat";
+const APPLICATION_NAME = "JavaChat";
 const APPLICATION_CATEGORY = "EducationalApplication";
 const APPLICATION_OPERATING_SYSTEM = "Web";
 
@@ -37,36 +37,40 @@ type PageMetadata = {
   readonly imagePath: string;
 };
 
+/* Title mirrors the App Store record ("Java Chat - AI Learning") under the
+   JavaChat spelling; the description names the flagship guided-lesson topics
+   so search snippets carry the curriculum keywords. */
 const DEFAULT_PAGE_METADATA: PageMetadata = {
-  title: "Java Chat - AI-Powered Java Learning With Citations",
+  title: "JavaChat - AI Learning",
   description:
-    "Learn Java faster with an AI tutor: streaming answers, code examples, and citations to official docs.",
+    "Learn Java with an AI tutor: streaming answers cited to official JDK docs, plus guided lessons on Spring Boot, Quarkus, Kotlin, virtual threads, records, and pattern matching.",
   imagePath: DEFAULT_OPEN_GRAPH_IMAGE_PATH,
 };
 
 const CHAT_PAGE_METADATA: PageMetadata = {
-  title: "Java Chat - Streaming Java Tutor With Citations",
+  title: "JavaChat - Streaming Java Tutor With Citations",
   description:
     "Ask Java questions and get streaming answers with citations to official docs and practical examples.",
   imagePath: DEFAULT_OPEN_GRAPH_IMAGE_PATH,
 };
 
 const GUIDED_PAGE_METADATA: PageMetadata = {
-  title: "Guided Java Learning - Java Chat",
-  description: "Structured, step-by-step Java learning paths with examples and explanations.",
+  title: "Guided Java Learning - JavaChat",
+  description:
+    "Guided Java lessons with examples and explanations: Spring Boot, Quarkus, Kotlin and other JVM languages, virtual threads, records, pattern matching, and JUnit testing.",
   imagePath: DEFAULT_OPEN_GRAPH_IMAGE_PATH,
 };
 
 const PRIVACY_PAGE_METADATA: PageMetadata = {
-  title: "Privacy Policy - Java Chat",
+  title: "Privacy Policy - JavaChat",
   description:
-    "How Java Chat collects, uses, discloses, retains, and protects personal information.",
+    "How JavaChat collects, uses, discloses, retains, and protects personal information.",
   imagePath: DEFAULT_OPEN_GRAPH_IMAGE_PATH,
 };
 
 const CONTACT_PAGE_METADATA: PageMetadata = {
-  title: "Contact - Java Chat",
-  description: "Contact the Java Chat team with questions, feedback, or privacy requests.",
+  title: "Contact - JavaChat",
+  description: "Contact the JavaChat team with questions, feedback, or privacy requests.",
   imagePath: DEFAULT_OPEN_GRAPH_IMAGE_PATH,
 };
 
