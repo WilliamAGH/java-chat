@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import PrivacyPage from "./PrivacyPage.svelte";
 
 describe("PrivacyPage", () => {
-  it("renders Java Chat's current data practices and privacy contact", () => {
+  it("renders JavaChat's current data practices and privacy contact", () => {
     const privacyPage = render(PrivacyPage);
 
     expect(privacyPage.getByRole("heading", { level: 1, name: "Privacy Policy" })).toBeVisible();

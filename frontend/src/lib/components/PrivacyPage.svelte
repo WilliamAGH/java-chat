@@ -37,7 +37,7 @@
       <div class="kicker">Legal</div>
       <h1>Privacy Policy</h1>
       <p class="deck">
-        How Java Chat collects, uses, discloses, retains, and protects personal information.
+        How JavaChat collects, uses, discloses, retains, and protects personal information.
       </p>
       <time datetime="2026-07-31">Effective July 31, 2026</time>
     </header>
@@ -45,9 +45,9 @@
     <div class="privacy-layout">
       <div class="policy">
         <p>
-          Java Chat (“Java Chat,” “we,” “us,” or “our”) is operated by a California sole
+          JavaChat (“JavaChat,” “we,” “us,” or “our”) is operated by a California sole
           proprietorship. This Privacy Policy explains how we collect, use, disclose, retain, and
-          protect information when you use Java Chat’s websites, mobile or desktop applications,
+          protect information when you use JavaChat’s websites, mobile or desktop applications,
           and related services (the “Service”).
         </p>
         <p>
@@ -62,7 +62,7 @@
           <li>
             <strong>Account information.</strong> If you choose to create an account, our
             authentication provider, Clerk, processes the account, contact, profile, session, and
-            verification information you provide. Java Chat’s backend receives the verified Clerk
+            verification information you provide. JavaChat’s backend receives the verified Clerk
             user identifier needed to recognize an authenticated request.
           </li>
           <li>
@@ -101,7 +101,7 @@
           <li>retrieve relevant Java documentation and generate AI-assisted answers;</li>
           <li>authenticate users and protect requests against abuse;</li>
           <li>measure usage, diagnose failures, observe AI performance, and improve reliability; and</li>
-          <li>comply with law, enforce our agreements, and protect Java Chat and its users.</li>
+          <li>comply with law, enforce our agreements, and protect JavaChat and its users.</li>
         </ul>
 
         <h2>When We Disclose Information</h2>
@@ -121,7 +121,7 @@
             the configured embedding model.
           </li>
           <li>
-            <strong>Search and application infrastructure.</strong> Java Chat uses Qdrant-backed
+            <strong>Search and application infrastructure.</strong> JavaChat uses Qdrant-backed
             vector search to retrieve relevant Java documentation and uses hosting and security
             infrastructure to deliver the Service.
           </li>
@@ -154,7 +154,7 @@
 
         <h2>Advertising, Sale, and Sharing</h2>
         <p>
-          Java Chat does not sell personal information for money and does not intentionally use
+          JavaChat does not sell personal information for money and does not intentionally use
           personal information for cross-context behavioral advertising. We disclose information to
           the service providers described above so they can operate, secure, and measure the Service.
           If these practices change, we will update this Policy and provide any notice or choice
@@ -163,9 +163,9 @@
 
         <h2>Data Retention and Deletion</h2>
         <p>
-          Java Chat keeps completed chat exchanges in server memory under a randomly generated
+          JavaChat keeps completed chat exchanges in server memory under a randomly generated
           session identifier so the conversation can continue. This chat history is not stored in a
-          durable Java Chat database and is removed when you clear the chat, when the server process
+          durable JavaChat database and is removed when you clear the chat, when the server process
           restarts, or when it is otherwise no longer needed for the active session. The browser’s
           visible transcript is held for the current page session and is removed when you clear it or
           reload the application.
@@ -178,7 +178,7 @@
           cycles.
         </p>
         <p>
-          To request deletion of your Java Chat account or other personal information, email
+          To request deletion of your JavaChat account or other personal information, email
           <a href="mailto:privacy@javachat.ai">privacy@javachat.ai</a> from the address associated
           with your account, or start the request through the
           <a href="/contact" onclick={navigateToContact}>contact form</a>. We may need to verify
@@ -197,7 +197,7 @@
         <h3>California Residents</h3>
         <p>
           The California Consumer Privacy Act (“CCPA”) applies only when its statutory requirements
-          are met. If the CCPA applies to Java Chat and to your information, California residents may
+          are met. If the CCPA applies to JavaChat and to your information, California residents may
           have rights to know or access, correct, delete, opt out of certain sale or sharing, limit
           certain uses of sensitive personal information, and not be discriminated against for
           exercising applicable rights.
@@ -213,16 +213,16 @@
 
         <h2>Do Not Track and Opt-Out Preference Signals</h2>
         <p>
-          Java Chat does not currently change its practices in response to a browser Do Not Track
+          JavaChat does not currently change its practices in response to a browser Do Not Track
           signal. Our analytics and authentication providers may respond to browser signals under
-          their own privacy practices. Where applicable law requires Java Chat to honor a valid
+          their own privacy practices. Where applicable law requires JavaChat to honor a valid
           opt-out preference signal, such as Global Privacy Control, we will process that signal as
           required.
         </p>
 
         <h2>Children’s Privacy</h2>
         <p>
-          Java Chat is not directed to children under 13, and we do not knowingly collect personal
+          JavaChat is not directed to children under 13, and we do not knowingly collect personal
           information from children under 13. If you believe a child has provided personal
           information, contact <a href="mailto:privacy@javachat.ai">privacy@javachat.ai</a> or use
           the <a href="/contact" onclick={navigateToContact}>contact form</a> so we can investigate
@@ -246,7 +246,7 @@
 
         <h2>Contact</h2>
         <p>
-          Java Chat<br />
+          JavaChat<br />
           California sole proprietorship<br />
           <a href="mailto:privacy@javachat.ai">privacy@javachat.ai</a><br />
           <a href="/contact" onclick={navigateToContact}>Contact form</a>
