@@ -621,10 +621,14 @@ describe("LearnView guided chat streaming stability", () => {
     await vi.waitFor(() =>
       expect(
         learnView.container.querySelector(
-          '.chat-panel--desktop .thinking-indicator[data-phase="connecting"]',
+          '.chat-panel--desktop .thinking-indicator[role="status"]',
         ),
       ).not.toBeNull(),
     );
+    expect(
+      learnView.container.querySelector(".chat-panel--desktop .thinking-indicator .status-message")
+        ?.textContent,
+    ).toBe("Connecting");
   });
 
   it("shows the provider selected for the active guided stream", async () => {
