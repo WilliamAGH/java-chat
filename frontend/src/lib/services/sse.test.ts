@@ -80,7 +80,7 @@ describe("streamSse transport handling", () => {
       details: NETWORK_FAILURE_DETAILS,
       retryable: true,
     });
-    expect((rejection as { cause?: unknown }).cause).toBe(fetchFailure);
+    expect(rejection).toHaveProperty("cause", fetchFailure);
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(onText).not.toHaveBeenCalled();
@@ -359,7 +359,7 @@ describe("streamSse transport handling", () => {
       details: NETWORK_FAILURE_DETAILS,
       retryable: true,
     });
-    expect((rejection as { cause?: unknown }).cause).toBe(streamReadFailure);
+    expect(rejection).toHaveProperty("cause", streamReadFailure);
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(onText).not.toHaveBeenCalled();
