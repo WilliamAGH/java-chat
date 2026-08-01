@@ -3,7 +3,9 @@
   import Header from './lib/components/Header.svelte'
   import ChatView from './lib/components/ChatView.svelte'
   import LearnView from './lib/components/LearnView.svelte'
+  import PrivacyPage from './lib/components/PrivacyPage.svelte'
   import ToastContainer from './lib/components/ToastContainer.svelte'
+  import ContactFormDialog from './lib/components/ContactFormDialog.svelte'
   import { refreshCsrfToken } from './lib/services/csrf'
   import { loadClerkAuthentication } from './lib/composables/clerkAuthentication.svelte'
   import {
@@ -18,6 +20,15 @@
   let currentView = $state<ApplicationView>(applicationViewForPath(globalThis.location.pathname))
   let currentLessonSlug = $state<string | null>(lessonSlugForPath(globalThis.location.pathname))
   let chatView = $state<ReturnType<typeof ChatView> | null>(null)
+  let contactDialogOpen = $state(false)
+
+  function openContactDialog(): void {
+    contactDialogOpen = true
+  }
+
+  function closeContactDialog(): void {
+    contactDialogOpen = false
+  }
 
   $effect(() => {
     recoverUnimplementedLessonRoute()
@@ -73,17 +84,20 @@
 <svelte:window onpopstate={synchronizeViewWithBrowserHistory} />
 
 <div class="app-shell">
-  <Header bind:currentView={() => currentView, selectApplicationView} />
+  <Header bind:currentView={() => currentView, selectApplicationView} onContactOpen={openContactDialog} />
 
   <main class="main-content">
     {#if currentView === 'chat'}
       <ChatView bind:this={chatView} />
-    {:else}
+    {:else if currentView === 'learn'}
       <LearnView bind:selectedSlug={currentLessonSlug} />
+    {:else}
+      <PrivacyPage />
     {/if}
   </main>
 
   <ToastContainer />
+  <ContactFormDialog isOpen={contactDialogOpen} onClose={closeContactDialog} />
 </div>
 
 <style>

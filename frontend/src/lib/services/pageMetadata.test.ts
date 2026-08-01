@@ -54,3 +54,12 @@ describe("lesson route resolution", () => {
     expect(canonicalRecoveryPathForPath("/guided/variables-and-types")).toBe("/learn");
   });
 });
+
+describe("privacy route resolution", () => {
+  it("keeps the exact privacy path separate from chat and learning views", () => {
+    expect(applicationViewForPath("/privacy")).toBe("privacy");
+    expect(applicationViewForPath("/privacy/")).toBe("privacy");
+    expect(applicationViewForPath("/privacy/extra")).toBe("chat");
+    expect(canonicalRecoveryPathForPath("/privacy")).toBeNull();
+  });
+});

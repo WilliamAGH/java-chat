@@ -10,6 +10,7 @@ const refreshCsrfTokenMock = vi.fn(async () => true);
 const streamChatMock = vi.fn<StreamChatFunction>();
 const CHAT_CANONICAL_PATH = "/";
 const LEARN_CANONICAL_PATH = "/learn";
+const PRIVACY_CANONICAL_PATH = "/privacy";
 
 vi.mock("./lib/services/csrf", async () => {
   const actualCsrfService =
@@ -92,6 +93,20 @@ describe("App CSRF preflight", () => {
 });
 
 describe("App route synchronization", () => {
+  it("renders a direct privacy route with canonical metadata", async () => {
+    globalThis.history.replaceState({}, "", PRIVACY_CANONICAL_PATH);
+    const App = (await import("./App.svelte")).default;
+    const application = render(App);
+
+    expect(await application.findByRole("heading", { name: "Privacy Policy" })).toBeInTheDocument();
+    expect(application.getByRole("button", { name: "Privacy" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(globalThis.location.pathname).toBe(PRIVACY_CANONICAL_PATH);
+    expectCurrentRouteMetadata(PRIVACY_CANONICAL_PATH);
+  });
+
   it("honors a direct learn route with a trailing slash", async () => {
     globalThis.history.replaceState({}, "", "/learn/");
     const App = (await import("./App.svelte")).default;

@@ -106,6 +106,37 @@ export const LessonContentResponseSchema = z.object({
 });
 
 // =============================================================================
+// Contact Form Schemas
+// =============================================================================
+
+/** Longest name accepted by POST /api/contact; mirrored in the form's maxlength. */
+export const CONTACT_NAME_MAX_LENGTH = 100;
+
+/** Longest message body accepted by POST /api/contact; mirrored in the form's maxlength. */
+export const CONTACT_MESSAGE_MAX_LENGTH = 5000;
+
+/**
+ * Submission contract for POST /api/contact.
+ *
+ * `website` is a spam honeypot: the form positions the field off-screen so
+ * humans leave it empty, and a filled value marks the sender as a bot.
+ * `renderedAt` (epoch ms captured when the form renders) lets the backend
+ * reject submissions that arrive faster than a human can type.
+ */
+export const ContactSubmissionSchema = z.object({
+  name: z.string().trim().min(1).max(CONTACT_NAME_MAX_LENGTH),
+  email: z.email(),
+  message: z.string().trim().min(1).max(CONTACT_MESSAGE_MAX_LENGTH),
+  website: z.string(),
+  renderedAt: z.int().positive(),
+});
+
+/** Acknowledgement returned by POST /api/contact alongside HTTP 202. */
+export const ContactAcceptedSchema = z.object({
+  status: z.literal("accepted"),
+});
+
+// =============================================================================
 // Error Response Schemas
 // =============================================================================
 
@@ -128,4 +159,6 @@ export type ProviderEvent = z.infer<typeof ProviderEventSchema>;
 export type Citation = z.infer<typeof CitationSchema>;
 export type GuidedLesson = z.infer<typeof GuidedLessonSchema>;
 export type LessonContentResponse = z.infer<typeof LessonContentResponseSchema>;
+export type ContactSubmission = z.infer<typeof ContactSubmissionSchema>;
+export type ContactAccepted = z.infer<typeof ContactAcceptedSchema>;
 export type ApiErrorResponse = z.infer<typeof ApiErrorResponseSchema>;
