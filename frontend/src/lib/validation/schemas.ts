@@ -137,6 +137,17 @@ export const ContactAcceptedSchema = z.object({
 });
 
 // =============================================================================
+// Local Storage Schemas
+// =============================================================================
+
+/**
+ * Color-scheme choices offered by the theme toggle. `system` defers to the
+ * OS-level `prefers-color-scheme` media query; `light`/`dark` are explicit
+ * user overrides persisted in localStorage.
+ */
+export const ThemePreferenceSchema = z.enum(["system", "light", "dark"]);
+
+// =============================================================================
 // Error Response Schemas
 // =============================================================================
 
@@ -162,3 +173,4 @@ export type LessonContentResponse = z.infer<typeof LessonContentResponseSchema>;
 export type ContactSubmission = z.infer<typeof ContactSubmissionSchema>;
 export type ContactAccepted = z.infer<typeof ContactAcceptedSchema>;
 export type ApiErrorResponse = z.infer<typeof ApiErrorResponseSchema>;
+export type ThemePreference = z.infer<typeof ThemePreferenceSchema>;

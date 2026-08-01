@@ -8,6 +8,33 @@
     />
     <meta name="theme-color" content="#1a1a18" />
     <meta name="color-scheme" content="dark light" />
+    <script>
+      // Applies the persisted/system color scheme before first paint so the
+      // wrong theme never flashes. Mirrors themePreference.svelte.ts — the two
+      // share the storage key and must stay consistent.
+      (function () {
+        var storedPreference = null;
+        try {
+          storedPreference = localStorage.getItem("java-chat-theme-preference");
+        } catch (storageError) {
+          // localStorage unavailable (e.g. hardened privacy mode): fall through to system.
+          console.warn("Theme preference unreadable, using system color scheme", storageError);
+        }
+        var resolvedTheme =
+          storedPreference === "light" || storedPreference === "dark"
+            ? storedPreference
+            : typeof window.matchMedia === "function" &&
+                window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+        document.documentElement.dataset.theme = resolvedTheme;
+        document.documentElement.style.colorScheme = resolvedTheme;
+        var themeColorMeta = document.querySelector('meta[name="theme-color"]');
+        if (themeColorMeta) {
+          themeColorMeta.setAttribute("content", resolvedTheme === "dark" ? "#1a1a18" : "#faf9f6");
+        }
+      })();
+    </script>
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

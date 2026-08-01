@@ -58,7 +58,7 @@
     border-radius: 16px;
     background: var(--color-bg-secondary);
     border: 1px solid var(--color-border-default);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    box-shadow: var(--shadow-xl);
     color: var(--color-text-primary);
   }
 

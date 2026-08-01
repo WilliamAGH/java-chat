@@ -58,11 +58,14 @@ describe("Header authentication controls", () => {
   it("offers sign-in and sign-up once Clerk is loaded and no user is signed in", () => {
     clerkAuthentication.isLoaded = true;
 
-    const { getByRole } = render(Header, {
+    const { getAllByRole } = render(Header, {
       props: { currentView: "chat", onContactOpen: vi.fn() },
     });
 
-    expect(getByRole("button", { name: "Sign in" })).toBeInTheDocument();
-    expect(getByRole("button", { name: "Sign up" })).toBeInTheDocument();
+    // Narrow viewports swap the text buttons for an icon-only sign-in via CSS;
+    // jsdom never applies Svelte's injected component styles, so both variants
+    // match role queries here even though only one is visible in a browser.
+    expect(getAllByRole("button", { name: "Sign in" }).length).toBeGreaterThan(0);
+    expect(getAllByRole("button", { name: "Sign up" }).length).toBeGreaterThan(0);
   });
 });

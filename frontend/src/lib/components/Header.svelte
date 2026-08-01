@@ -6,6 +6,7 @@
     openSignUp,
   } from '../composables/clerkAuthentication.svelte'
   import type { ApplicationView } from '../services/pageMetadata'
+  import ThemeToggle from './ThemeToggle.svelte'
 
   interface Props {
     currentView: ApplicationView
@@ -83,6 +84,8 @@
       </button>
       </nav>
 
+    <ThemeToggle />
+
     {#if clerkAuthentication.isLoaded}
       <div class="auth-controls">
         {#if clerkAuthentication.signedInUser}
@@ -93,6 +96,19 @@
           </button>
           <button type="button" class="auth-button auth-button-primary" onclick={() => openSignUp()}>
             Sign up
+          </button>
+          <!-- Narrow viewports: one icon button keeps the header row within
+               360px; Clerk's sign-in form links to sign-up. -->
+          <button
+            type="button"
+            class="auth-button-icon"
+            aria-label="Sign in"
+            title="Sign in"
+            onclick={() => openSignIn()}
+          >
+            <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path d="M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z"/>
+            </svg>
           </button>
         {/if}
       </div>
@@ -164,6 +180,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
+    min-height: 40px;
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     font-weight: 500;
@@ -206,6 +223,7 @@
   }
 
   .auth-button {
+    min-height: 40px;
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     font-weight: 500;
@@ -235,11 +253,37 @@
     min-height: 28px;
   }
 
+  /* Narrow viewports swap the two text buttons for this single icon button
+     (see the ≤640px media query). */
+  .auth-button-icon {
+    display: none;
+  }
 
-  /* Tablet */
-  @media (max-width: 768px) {
+
+  /* Tablet and small laptops: icon-only navigation keeps brand + nav +
+     theme toggle + auth within the row (with labels the header needs ~985px,
+     so anything under 1024 would squeeze or wrap the brand). */
+  @media (max-width: 1024px) {
     .header-inner {
       padding: var(--space-3) var(--space-4);
+      gap: var(--space-4);
+    }
+
+    .nav-tab span {
+      display: none;
+    }
+
+    .nav-tab {
+      min-height: 44px; /* Touch target */
+    }
+
+    .nav-icon {
+      width: 20px;
+      height: 20px;
+    }
+
+    .auth-button {
+      min-height: 44px; /* Touch target */
     }
   }
 
@@ -259,23 +303,34 @@
       height: 36px;
     }
 
-    .nav-tab span {
-      display: none;
-    }
-
     .nav-tab {
       padding: var(--space-2) var(--space-3);
-      min-height: 44px; /* Touch target */
-    }
-
-    .nav-icon {
-      width: 20px;
-      height: 20px;
     }
 
     .auth-button {
-      padding: var(--space-2) var(--space-3);
-      min-height: 44px; /* Touch target */
+      display: none;
+    }
+
+    .auth-button-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 44px; /* Touch target */
+      min-height: 44px;
+      padding: var(--space-2);
+      color: var(--color-text-secondary);
+      background: transparent;
+      border: 1px solid var(--color-border-subtle);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition:
+        color var(--duration-fast) var(--ease-out),
+        background-color var(--duration-fast) var(--ease-out);
+    }
+
+    .auth-button-icon:hover {
+      color: var(--color-text-primary);
+      background: var(--color-surface-hover);
     }
   }
 
@@ -296,6 +351,8 @@
     }
 
     .nav-tab {
+      justify-content: center;
+      min-width: 40px; /* Touch target */
       padding: var(--space-2);
     }
   }

@@ -261,20 +261,20 @@
     height: var(--citation-icon-size-sm);
   }
 
-  /* Type-specific colors */
+  /* Type-specific colors - dark theme (the unadorned :root default) */
   .citation-item[data-type="pdf"] .citation-type-badge {
-    background: rgba(220, 38, 38, 0.08);
-    color: rgb(185, 28, 28);
+    background: rgba(248, 113, 113, 0.12);
+    color: rgb(248, 113, 113);
   }
 
   .citation-item[data-type="api-doc"] .citation-type-badge {
-    background: rgba(37, 99, 235, 0.08);
-    color: rgb(29, 78, 216);
+    background: rgba(96, 165, 250, 0.12);
+    color: rgb(96, 165, 250);
   }
 
   .citation-item[data-type="repo"] .citation-type-badge {
-    background: rgba(22, 163, 74, 0.08);
-    color: rgb(21, 128, 61);
+    background: rgba(74, 222, 128, 0.12);
+    color: rgb(74, 222, 128);
   }
 
   .citation-text {
@@ -336,21 +336,21 @@
     }
   }
 
-  /* Dark mode refinements */
-  @media (prefers-color-scheme: dark) {
-    .citation-item[data-type="pdf"] .citation-type-badge {
-      background: rgba(248, 113, 113, 0.12);
-      color: rgb(248, 113, 113);
-    }
+  /* Light theme: badge colors follow the app's data-theme attribute (driven
+     by the System/Dark/Light toggle), never the raw OS media query, so a
+     manual override can never desynchronize badges from the page palette. */
+  :global([data-theme="light"]) .citation-item[data-type="pdf"] .citation-type-badge {
+    background: rgba(220, 38, 38, 0.08);
+    color: rgb(185, 28, 28);
+  }
 
-    .citation-item[data-type="api-doc"] .citation-type-badge {
-      background: rgba(96, 165, 250, 0.12);
-      color: rgb(96, 165, 250);
-    }
+  :global([data-theme="light"]) .citation-item[data-type="api-doc"] .citation-type-badge {
+    background: rgba(37, 99, 235, 0.08);
+    color: rgb(29, 78, 216);
+  }
 
-    .citation-item[data-type="repo"] .citation-type-badge {
-      background: rgba(74, 222, 128, 0.12);
-      color: rgb(74, 222, 128);
-    }
+  :global([data-theme="light"]) .citation-item[data-type="repo"] .citation-type-badge {
+    background: rgba(22, 163, 74, 0.08);
+    color: rgb(21, 128, 61);
   }
 </style>
