@@ -57,35 +57,41 @@
       </button>
       </nav>
 
-    {#if clerkAuthentication.isLoaded}
-      <div class="auth-controls">
-        {#if clerkAuthentication.signedInUser}
-          <div class="user-button-host" {@attach attachUserButton}></div>
-        {:else}
-          <button type="button" class="auth-button" onclick={() => openSignIn()}>
-            Sign in
-          </button>
-          <button type="button" class="auth-button auth-button-primary" onclick={() => openSignUp()}>
-            Sign up
-          </button>
-          <!-- Narrow viewports: one icon button keeps the header row within
-               360px; Clerk's sign-in form links to sign-up. -->
-          <button
-            type="button"
-            class="auth-button-icon"
-            aria-label="Sign in"
-            title="Sign in"
-            onclick={() => openSignIn()}
-          >
-            <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path d="M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z"/>
-            </svg>
-          </button>
-        {/if}
-      </div>
-    {/if}
+    <!-- Right-edge cluster: the auth control must always sit immediately
+         left of the menu trigger, so both live in one flex group. Spreading
+         them as separate `space-between` children let the avatar drift
+         across the header on wide viewports. -->
+    <div class="header-actions">
+      {#if clerkAuthentication.isLoaded}
+        <div class="auth-controls">
+          {#if clerkAuthentication.signedInUser}
+            <div class="user-button-host" {@attach attachUserButton}></div>
+          {:else}
+            <button type="button" class="auth-button" onclick={() => openSignIn()}>
+              Sign in
+            </button>
+            <button type="button" class="auth-button auth-button-primary" onclick={() => openSignUp()}>
+              Sign up
+            </button>
+            <!-- Narrow viewports: one icon button keeps the header row within
+                 360px; Clerk's sign-in form links to sign-up. -->
+            <button
+              type="button"
+              class="auth-button-icon"
+              aria-label="Sign in"
+              title="Sign in"
+              onclick={() => openSignIn()}
+            >
+              <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path d="M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z"/>
+              </svg>
+            </button>
+          {/if}
+        </div>
+      {/if}
 
-    <HeaderMenu bind:currentView />
+      <HeaderMenu bind:currentView />
+    </div>
   </div>
 </header>
 
@@ -189,6 +195,14 @@
   .nav-tab:hover .nav-icon,
   .nav-tab.active .nav-icon {
     opacity: 1;
+  }
+
+  /* Right-edge cluster: keeps the auth control pinned immediately left of
+     the menu trigger at every viewport width. */
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
   }
 
   /* Authentication */
