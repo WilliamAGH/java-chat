@@ -17,14 +17,14 @@
 
 <header class="header">
   <div class="header-inner">
-    <a href="/" class="brand" aria-label="Java Chat Home">
+    <a href="/" class="brand" aria-label="JavaChat Home">
       <img
         class="brand-mark"
         src="/assets/javachat_cup_star_256.png"
         alt=""
         aria-hidden="true"
       />
-      <span class="brand-text">Java Chat</span>
+      <span class="brand-text">JavaChat</span>
     </a>
 
     <nav class="nav-tabs" aria-label="Main navigation">
@@ -105,13 +105,28 @@
   }
 
   .header-inner {
-    display: flex;
+    /* Three-column grid keeps the nav optically centered at every viewport:
+       `space-between` flex only centers it when brand and actions happen to
+       be equal width, which they never are. */
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    justify-content: space-between;
     max-width: 1400px;
     margin: 0 auto;
     padding: var(--space-3) var(--space-6);
     gap: var(--space-8);
+  }
+
+  .brand {
+    justify-self: start;
+  }
+
+  .nav-tabs {
+    justify-self: center;
+  }
+
+  .header-actions {
+    justify-self: end;
   }
 
   /* Brand */
