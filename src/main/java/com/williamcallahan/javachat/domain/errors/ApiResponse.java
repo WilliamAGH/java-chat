@@ -6,7 +6,7 @@ package com.williamcallahan.javachat.domain.errors;
  * <p>The response contract is intentionally framework-free to keep domain models reusable across
  * delivery mechanisms.</p>
  */
-public sealed interface ApiResponse permits ApiErrorResponse, ApiSuccessResponse {
+public sealed interface ApiResponse permits ApiErrorResponse, ApiSuccessResponse, ContactMessageAcknowledgement {
 
     /**
      * Returns the status indicator for this response.

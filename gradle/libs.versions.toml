@@ -46,6 +46,7 @@ spring-boot-starter-validation = { module = "org.springframework.boot:spring-boo
 spring-boot-starter-aop = { module = "org.springframework.boot:spring-boot-starter-aop" }
 spring-boot-starter-oauth2-client = { module = "org.springframework.boot:spring-boot-starter-oauth2-client" }
 spring-boot-starter-oauth2-resource-server = { module = "org.springframework.boot:spring-boot-starter-oauth2-resource-server" }
+spring-boot-starter-mail = { module = "org.springframework.boot:spring-boot-starter-mail" }
 spring-boot-starter-logging = { module = "org.springframework.boot:spring-boot-starter-logging" }
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
 micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus" }
