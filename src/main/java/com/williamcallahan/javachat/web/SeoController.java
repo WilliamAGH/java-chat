@@ -60,35 +60,35 @@ public class SeoController {
         String defaultImage = "/og-image.png";
 
         PageMetadata base = new PageMetadata(
-                "Java Chat - AI-Powered Java Learning With Citations",
-                "Learn Java faster with an AI tutor: streaming answers, code examples, and citations to official docs.",
+                "JavaChat - AI Learning",
+                "Learn Java with an AI tutor: streaming answers cited to official JDK docs, plus guided lessons on Spring Boot, Quarkus, Kotlin, virtual threads, records, and pattern matching.",
                 defaultImage);
 
         metadataMap.put("/", base);
         metadataMap.put(
                 "/chat",
                 new PageMetadata(
-                        "Java Chat - Streaming Java Tutor With Citations",
+                        "JavaChat - Streaming Java Tutor With Citations",
                         "Ask Java questions and get streaming answers with citations to official docs and practical examples.",
                         defaultImage));
 
         PageMetadata guided = new PageMetadata(
-                "Guided Java Learning - Java Chat",
-                "Structured, step-by-step Java learning paths with examples and explanations.",
+                "Guided Java Learning - JavaChat",
+                "Guided Java lessons with examples and explanations: Spring Boot, Quarkus, Kotlin and other JVM languages, virtual threads, records, pattern matching, and JUnit testing.",
                 defaultImage);
         metadataMap.put("/guided", guided);
         metadataMap.put("/learn", guided);
         metadataMap.put(
                 "/privacy",
                 new PageMetadata(
-                        "Privacy Policy - Java Chat",
-                        "How Java Chat collects, uses, discloses, retains, and protects personal information.",
+                        "Privacy Policy - JavaChat",
+                        "How JavaChat collects, uses, discloses, retains, and protects personal information.",
                         defaultImage));
         metadataMap.put(
                 "/contact",
                 new PageMetadata(
-                        "Contact - Java Chat",
-                        "Contact the Java Chat team with questions, feedback, or privacy requests.",
+                        "Contact - JavaChat",
+                        "Contact the JavaChat team with questions, feedback, or privacy requests.",
                         defaultImage));
     }
 
@@ -174,7 +174,7 @@ public class SeoController {
                 {
                   "@context": "https://schema.org",
                   "@type": "WebApplication",
-                  "name": "Java Chat",
+                  "name": "JavaChat",
                   "url": "__FULL_URL__",
                   "applicationCategory": "EducationalApplication",
                   "operatingSystem": "Web",

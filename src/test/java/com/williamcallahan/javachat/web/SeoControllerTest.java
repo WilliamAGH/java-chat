@@ -39,7 +39,7 @@ class SeoControllerTest {
                 .andReturn();
         Document htmlDocument = Jsoup.parse(mvcOutcome.getResponse().getContentAsString());
 
-        assertEquals("Java Chat - AI-Powered Java Learning With Citations", htmlDocument.title());
+        assertEquals("JavaChat - AI Learning", htmlDocument.title());
         assertMetaContent(htmlDocument, "property", "og:url", "https://example.com");
         assertMetaContent(htmlDocument, "property", "og:image", "https://example.com/og-image.png");
         assertMetaContent(htmlDocument, "property", "og:image:width", "1200");
@@ -52,7 +52,7 @@ class SeoControllerTest {
     void serves_chat_with_specific_metadata() throws Exception {
         Document htmlDocument = loadSeoDocument("/chat");
 
-        assertEquals("Java Chat - Streaming Java Tutor With Citations", htmlDocument.title());
+        assertEquals("JavaChat - Streaming Java Tutor With Citations", htmlDocument.title());
         assertMetaContent(htmlDocument, "property", "og:url", "https://example.com/chat");
     }
 
@@ -60,12 +60,12 @@ class SeoControllerTest {
     void serves_guided_with_specific_metadata() throws Exception {
         Document htmlDocument = loadSeoDocument("/guided");
 
-        assertEquals("Guided Java Learning - Java Chat", htmlDocument.title());
+        assertEquals("Guided Java Learning - JavaChat", htmlDocument.title());
         assertMetaContent(
                 htmlDocument,
                 "property",
                 "og:description",
-                "Structured, step-by-step Java learning paths with examples and explanations.");
+                "Guided Java lessons with examples and explanations: Spring Boot, Quarkus, Kotlin and other JVM languages, virtual threads, records, pattern matching, and JUnit testing.");
         assertMetaContent(htmlDocument, "property", "og:url", "https://example.com/guided");
     }
 
@@ -73,12 +73,12 @@ class SeoControllerTest {
     void serves_privacy_with_specific_metadata() throws Exception {
         Document htmlDocument = loadSeoDocument("/privacy");
 
-        assertEquals("Privacy Policy - Java Chat", htmlDocument.title());
+        assertEquals("Privacy Policy - JavaChat", htmlDocument.title());
         assertMetaContent(
                 htmlDocument,
                 "property",
                 "og:description",
-                "How Java Chat collects, uses, discloses, retains, and protects personal information.");
+                "How JavaChat collects, uses, discloses, retains, and protects personal information.");
         assertMetaContent(htmlDocument, "property", "og:url", "https://example.com/privacy");
     }
 
@@ -86,12 +86,12 @@ class SeoControllerTest {
     void serves_contact_with_specific_metadata() throws Exception {
         Document htmlDocument = loadSeoDocument("/contact");
 
-        assertEquals("Contact - Java Chat", htmlDocument.title());
+        assertEquals("Contact - JavaChat", htmlDocument.title());
         assertMetaContent(
                 htmlDocument,
                 "property",
                 "og:description",
-                "Contact the Java Chat team with questions, feedback, or privacy requests.");
+                "Contact the JavaChat team with questions, feedback, or privacy requests.");
         assertMetaContent(htmlDocument, "property", "og:url", "https://example.com/contact");
     }
 
