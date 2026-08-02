@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.mail.MailException;
 import org.springframework.mail.MailParseException;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -83,7 +84,7 @@ public class ContactSubmissionUseCase {
 
         try {
             javaMailSender.send(buildMimeMessage(contactSubmission));
-        } catch (RuntimeException deliveryFailure) {
+        } catch (MailException deliveryFailure) {
             acceptedSubmissionCount.decrementAndGet();
             throw deliveryFailure;
         }
