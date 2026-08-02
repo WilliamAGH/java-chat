@@ -74,13 +74,19 @@ public class ContactSubmissionUseCase {
 
         AtomicInteger acceptedSubmissionCount =
                 acceptedSubmissionsPerIp.get(contactSubmission.remoteAddress(), remoteAddress -> new AtomicInteger());
-        if (acceptedSubmissionCount.get() >= MAX_ACCEPTED_SUBMISSIONS_PER_IP) {
+        int reservedSubmissionSlot = acceptedSubmissionCount.incrementAndGet();
+        if (reservedSubmissionSlot > MAX_ACCEPTED_SUBMISSIONS_PER_IP) {
+            acceptedSubmissionCount.decrementAndGet();
             log.info("Contact submission rate limited");
             throw new ContactRateLimitExceededException();
         }
 
-        javaMailSender.send(buildMimeMessage(contactSubmission));
-        acceptedSubmissionCount.incrementAndGet();
+        try {
+            javaMailSender.send(buildMimeMessage(contactSubmission));
+        } catch (RuntimeException deliveryFailure) {
+            acceptedSubmissionCount.decrementAndGet();
+            throw deliveryFailure;
+        }
         log.info("Contact message delivered");
     }
 
