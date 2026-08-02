@@ -2,6 +2,8 @@ package com.williamcallahan.javachat.config;
 
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import jakarta.annotation.PostConstruct;
+import jakarta.mail.internet.AddressException;
+import jakarta.mail.internet.InternetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Locale;
@@ -34,6 +36,7 @@ public class AppProperties {
     private static final String EMBEDDINGS_KEY = "app.embeddings";
     private static final String LLM_KEY = "app.llm";
     private static final String CONTENT_SECURITY_POLICY_KEY = "app.content-security-policy";
+    private static final String CONTACT_KEY = "app.contact";
 
     /**
      * Default base URL for SEO endpoints when no explicit public base URL is configured.
@@ -53,6 +56,7 @@ public class AppProperties {
     private Embeddings embeddings = new Embeddings();
     private Llm llm = new Llm();
     private Clicky clicky = new Clicky();
+    private Contact contact = new Contact();
     private String publicBaseUrl = DEFAULT_PUBLIC_BASE_URL;
     private String contentSecurityPolicy = "";
 
@@ -78,6 +82,7 @@ public class AppProperties {
         requireConfiguredSection(embeddings, EMBEDDINGS_KEY).validateConfiguration();
         requireConfiguredSection(llm, LLM_KEY).validateConfiguration();
         requireConfiguredSection(clicky, CLICKY_KEY).validateConfiguration();
+        requireConfiguredSection(contact, CONTACT_KEY).validateConfiguration();
         this.publicBaseUrl = validatePublicBaseUrl(publicBaseUrl);
         this.contentSecurityPolicy = requireNonBlankContentSecurityPolicy(contentSecurityPolicy);
     }
@@ -106,6 +111,25 @@ public class AppProperties {
 
     public void setClicky(Clicky clicky) {
         this.clicky = requireConfiguredSection(clicky, CLICKY_KEY);
+    }
+
+    /**
+     * Returns contact-form email routing configuration.
+     *
+     * @return recipient and sender addresses for support submissions
+     */
+    public Contact getContact() {
+        return contact;
+    }
+
+    /**
+     * Replaces contact-form email routing configuration during property binding.
+     *
+     * @param contact recipient and sender addresses for support submissions
+     * @throws IllegalArgumentException when contact is null
+     */
+    public void setContact(Contact contact) {
+        this.contact = requireConfiguredSection(contact, CONTACT_KEY);
     }
 
     private static String validatePublicBaseUrl(final String configuredPublicBaseUrl) {
@@ -285,6 +309,54 @@ public class AppProperties {
             throw new IllegalArgumentException(String.format(Locale.ROOT, NULL_SECT_FMT, sectionKey));
         }
         return section;
+    }
+
+    /**
+     * Contact-form email routing: the site owner's recipient address and the
+     * envelope sender address used for support submissions.
+     */
+    public static class Contact {
+        private static final String RECIPIENT_EMAIL_KEY = "app.contact.recipient-email";
+        private static final String SENDER_EMAIL_KEY = "app.contact.sender-email";
+        private static final String DEFAULT_RECIPIENT_EMAIL = "support@javachat.ai";
+        private static final String DEFAULT_SENDER_EMAIL = "noreply@javachat.ai";
+
+        private String recipientEmail = DEFAULT_RECIPIENT_EMAIL;
+        private String senderEmail = DEFAULT_SENDER_EMAIL;
+
+        public String getRecipientEmail() {
+            return recipientEmail;
+        }
+
+        public void setRecipientEmail(String recipientEmail) {
+            this.recipientEmail = recipientEmail;
+        }
+
+        public String getSenderEmail() {
+            return senderEmail;
+        }
+
+        public void setSenderEmail(String senderEmail) {
+            this.senderEmail = senderEmail;
+        }
+
+        Contact validateConfiguration() {
+            requireWellFormedContactEmail(recipientEmail, RECIPIENT_EMAIL_KEY);
+            requireWellFormedContactEmail(senderEmail, SENDER_EMAIL_KEY);
+            return this;
+        }
+
+        private static void requireWellFormedContactEmail(String emailAddress, String propertyKey) {
+            if (emailAddress == null || emailAddress.isBlank()) {
+                throw new IllegalArgumentException(propertyKey + " must not be blank");
+            }
+            try {
+                new InternetAddress(emailAddress.trim(), true).validate();
+            } catch (AddressException addressException) {
+                throw new IllegalArgumentException(
+                        propertyKey + " must be a well-formed email address", addressException);
+            }
+        }
     }
 
     /** Clicky analytics configuration. */

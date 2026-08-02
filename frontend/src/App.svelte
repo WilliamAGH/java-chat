@@ -3,6 +3,8 @@
   import Header from './lib/components/Header.svelte'
   import ChatView from './lib/components/ChatView.svelte'
   import LearnView from './lib/components/LearnView.svelte'
+  import PrivacyPage from './lib/components/PrivacyPage.svelte'
+  import ContactPage from './lib/components/ContactPage.svelte'
   import ToastContainer from './lib/components/ToastContainer.svelte'
   import { refreshCsrfToken } from './lib/services/csrf'
   import { loadClerkAuthentication } from './lib/composables/clerkAuthentication.svelte'
@@ -53,6 +55,13 @@
     currentView = selectedView
   }
 
+  /** In-page navigation for static pages (Privacy, Contact): SPA view switch
+   * driven by the real anchor's href, so links stay crawlable and openable in
+   * a new tab. */
+  function navigateToInternalPath(path: string): void {
+    selectApplicationView(applicationViewForPath(path))
+  }
+
   function synchronizeLessonRouteWithSelection(): void {
     const pathLessonSlug = lessonSlugForPath(globalThis.location.pathname)
     if (currentLessonSlug && pathLessonSlug !== currentLessonSlug) {
@@ -78,8 +87,12 @@
   <main class="main-content">
     {#if currentView === 'chat'}
       <ChatView bind:this={chatView} />
-    {:else}
+    {:else if currentView === 'learn'}
       <LearnView bind:selectedSlug={currentLessonSlug} />
+    {:else if currentView === 'privacy'}
+      <PrivacyPage onInternalNavigate={navigateToInternalPath} />
+    {:else}
+      <ContactPage onInternalNavigate={navigateToInternalPath} />
     {/if}
   </main>
 

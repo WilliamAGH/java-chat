@@ -120,7 +120,15 @@ class BrowserErrorResponseIntegrationTest {
     @Test
     void publishedSpaRoutesForwardToIndexShell() {
         List<String> publishedSpaPaths = List.of(
-                "/", "/chat", "/guided", "/learn", "/learn/records", "/learn/records/fields", "/guided/records/fields");
+                "/",
+                "/chat",
+                "/guided",
+                "/learn",
+                "/privacy",
+                "/contact",
+                "/learn/records",
+                "/learn/records/fields",
+                "/guided/records/fields");
 
         for (String publishedSpaPath : publishedSpaPaths) {
             webTestClient

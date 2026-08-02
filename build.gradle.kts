@@ -66,6 +66,8 @@ dependencies {
 
     // Spring Boot starters
     implementation(libs.bundles.spring.boot.web)
+    // SMTP delivery for the self-hosted contact form (kept out of the web bundle: not a web concern)
+    implementation(libs.spring.boot.starter.mail)
     runtimeOnly(libs.micrometer.registry.prometheus)
 
     // Spring AI

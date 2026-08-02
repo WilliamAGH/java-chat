@@ -5,9 +5,11 @@
     openSignIn,
     openSignUp,
   } from '../composables/clerkAuthentication.svelte'
+  import type { ApplicationView } from '../services/pageMetadata'
+  import HeaderMenu from './HeaderMenu.svelte'
 
   interface Props {
-    currentView: 'chat' | 'learn'
+    currentView: ApplicationView
   }
 
   let { currentView = $bindable('chat') }: Props = $props()
@@ -15,14 +17,14 @@
 
 <header class="header">
   <div class="header-inner">
-    <a href="/" class="brand" aria-label="Java Chat Home">
+    <a href="/" class="brand" aria-label="JavaChat Home">
       <img
         class="brand-mark"
         src="/assets/javachat_cup_star_256.png"
         alt=""
         aria-hidden="true"
       />
-      <span class="brand-text">Java Chat</span>
+      <span class="brand-text">JavaChat</span>
     </a>
 
     <nav class="nav-tabs" aria-label="Main navigation">
@@ -55,20 +57,41 @@
       </button>
       </nav>
 
-    {#if clerkAuthentication.isLoaded}
-      <div class="auth-controls">
-        {#if clerkAuthentication.signedInUser}
-          <div class="user-button-host" {@attach attachUserButton}></div>
-        {:else}
-          <button type="button" class="auth-button" onclick={() => openSignIn()}>
-            Sign in
-          </button>
-          <button type="button" class="auth-button auth-button-primary" onclick={() => openSignUp()}>
-            Sign up
-          </button>
-        {/if}
-      </div>
-    {/if}
+    <!-- Right-edge cluster: the auth control must always sit immediately
+         left of the menu trigger, so both live in one flex group. Spreading
+         them as separate `space-between` children let the avatar drift
+         across the header on wide viewports. -->
+    <div class="header-actions">
+      {#if clerkAuthentication.isLoaded}
+        <div class="auth-controls">
+          {#if clerkAuthentication.signedInUser}
+            <div class="user-button-host" {@attach attachUserButton}></div>
+          {:else}
+            <button type="button" class="auth-button" onclick={() => openSignIn()}>
+              Sign in
+            </button>
+            <button type="button" class="auth-button auth-button-primary" onclick={() => openSignUp()}>
+              Sign up
+            </button>
+            <!-- Narrow viewports: one icon button keeps the header row within
+                 360px; Clerk's sign-in form links to sign-up. -->
+            <button
+              type="button"
+              class="auth-button-icon"
+              aria-label="Sign in"
+              title="Sign in"
+              onclick={() => openSignIn()}
+            >
+              <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path d="M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z"/>
+              </svg>
+            </button>
+          {/if}
+        </div>
+      {/if}
+
+      <HeaderMenu bind:currentView />
+    </div>
   </div>
 </header>
 
@@ -82,13 +105,28 @@
   }
 
   .header-inner {
-    display: flex;
+    /* Three-column grid keeps the nav optically centered at every viewport:
+       `space-between` flex only centers it when brand and actions happen to
+       be equal width, which they never are. */
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    justify-content: space-between;
     max-width: 1400px;
     margin: 0 auto;
     padding: var(--space-3) var(--space-6);
     gap: var(--space-8);
+  }
+
+  .brand {
+    justify-self: start;
+  }
+
+  .nav-tabs {
+    justify-self: center;
+  }
+
+  .header-actions {
+    justify-self: end;
   }
 
   /* Brand */
@@ -136,6 +174,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
+    min-height: 40px;
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     font-weight: 500;
@@ -144,7 +183,10 @@
     border: none;
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out),
+      box-shadow var(--duration-fast) var(--ease-out);
   }
 
   .nav-tab:hover:not(.active) {
@@ -170,6 +212,14 @@
     opacity: 1;
   }
 
+  /* Right-edge cluster: keeps the auth control pinned immediately left of
+     the menu trigger at every viewport width. */
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
   /* Authentication */
   .auth-controls {
     display: flex;
@@ -178,6 +228,7 @@
   }
 
   .auth-button {
+    min-height: 40px;
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     font-weight: 500;
@@ -186,7 +237,10 @@
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out),
+      box-shadow var(--duration-fast) var(--ease-out);
   }
 
   .auth-button:hover {
@@ -207,11 +261,37 @@
     min-height: 28px;
   }
 
+  /* Narrow viewports swap the two text buttons for this single icon button
+     (see the ≤640px media query). */
+  .auth-button-icon {
+    display: none;
+  }
 
-  /* Tablet */
-  @media (max-width: 768px) {
+
+  /* Tablet and small laptops: icon-only navigation keeps brand + nav + auth +
+     menu within the row (with labels the header needs ~985px, so anything
+     under 1024 would squeeze or wrap the brand). */
+  @media (max-width: 1024px) {
     .header-inner {
       padding: var(--space-3) var(--space-4);
+      gap: var(--space-4);
+    }
+
+    .nav-tab span {
+      display: none;
+    }
+
+    .nav-tab {
+      min-height: 44px; /* Touch target */
+    }
+
+    .nav-icon {
+      width: 20px;
+      height: 20px;
+    }
+
+    .auth-button {
+      min-height: 44px; /* Touch target */
     }
   }
 
@@ -231,23 +311,34 @@
       height: 36px;
     }
 
-    .nav-tab span {
-      display: none;
-    }
-
     .nav-tab {
       padding: var(--space-2) var(--space-3);
-      min-height: 44px; /* Touch target */
-    }
-
-    .nav-icon {
-      width: 20px;
-      height: 20px;
     }
 
     .auth-button {
-      padding: var(--space-2) var(--space-3);
-      min-height: 44px; /* Touch target */
+      display: none;
+    }
+
+    .auth-button-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 44px; /* Touch target */
+      min-height: 44px;
+      padding: var(--space-2);
+      color: var(--color-text-secondary);
+      background: transparent;
+      border: 1px solid var(--color-border-subtle);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition:
+        color var(--duration-fast) var(--ease-out),
+        background-color var(--duration-fast) var(--ease-out);
+    }
+
+    .auth-button-icon:hover {
+      color: var(--color-text-primary);
+      background: var(--color-surface-hover);
     }
   }
 
@@ -268,6 +359,8 @@
     }
 
     .nav-tab {
+      justify-content: center;
+      min-width: 40px; /* Touch target */
       padding: var(--space-2);
     }
   }

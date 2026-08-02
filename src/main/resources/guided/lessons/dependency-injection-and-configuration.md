@@ -416,3 +416,5 @@ Keep this discipline throughout: configuration classes and properties records de
 ## Recap
 
 Dependency injection means an object declares its collaborators and the container supplies them. You expressed those needs through a single constructor, so no injection annotation was required, the fields could be `final`, and the service was testable as ordinary Java. You declared the `Clock` as a bean at the composition boundary, keeping the concrete choice in one place and making time a controllable dependency. You bound external settings into an immutable `@ConfigurationProperties` record, registered it with `@ConfigurationPropertiesScan`, and guarded it with Jakarta Bean Validation so invalid required configuration stops the application at startup with a clear report. Configuration held values and wiring; the service held behavior. That separation, plus explicit constructor injection, is what keeps a Spring Boot application easy to read, test, and safely configure.
+
+Read the official Spring Boot reference for [externalized configuration](https://docs.spring.io/spring-boot/reference/features/external-config.html) and type-safe configuration properties.

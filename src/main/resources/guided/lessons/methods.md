@@ -84,3 +84,5 @@ Pass information through parameters and return values rather than distant mutabl
 - Change the quiz score to `69` and predict the first output line.
 - Add a method that returns the number of lessons remaining in a nine-lesson module, then print its returned number from `main`.
 - Explain the difference between a parameter and an argument using `welcomeFor`.
+
+Read [JLS 8.4: Method Declarations](https://docs.oracle.com/javase/specs/jls/se25/html/jls-8.html#jls-8.4) for the full method contract.

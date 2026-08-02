@@ -91,3 +91,5 @@ If a base case is missing or an argument does not get closer to it, calls contin
 - Trace `sumThrough(3)` on paper before running it.
 - State the base case and progress rule for a recursive method that counts down from a positive number to zero.
 - Explain why changing `nonNegativeNumber - 1` to `nonNegativeNumber + 1` breaks the recursion rule.
+
+Read [JLS 15.12: Method Invocation Expressions](https://docs.oracle.com/javase/specs/jls/se25/html/jls-15.html#jls-15.12) for the invocation rules used by recursive calls.

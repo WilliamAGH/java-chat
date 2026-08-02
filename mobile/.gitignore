@@ -1,0 +1,4 @@
+**/build*/
+**/distribution/
+**/xcuserdata/
+*.xcuserstate

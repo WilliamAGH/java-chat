@@ -33,6 +33,8 @@ class SitemapControllerTest {
                 .andExpect(content().string(containsString("<loc>https://java-chat.example/</loc>")))
                 .andExpect(content().string(containsString("<loc>https://java-chat.example/chat</loc>")))
                 .andExpect(content().string(containsString("<loc>https://java-chat.example/learn</loc>")))
-                .andExpect(content().string(containsString("<loc>https://java-chat.example/guided</loc>")));
+                .andExpect(content().string(containsString("<loc>https://java-chat.example/guided</loc>")))
+                .andExpect(content().string(containsString("<loc>https://java-chat.example/privacy</loc>")))
+                .andExpect(content().string(containsString("<loc>https://java-chat.example/contact</loc>")));
     }
 }

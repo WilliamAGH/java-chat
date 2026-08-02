@@ -1,5 +1,5 @@
 /*
- * Java Chat - Design System
+ * JavaChat - Design System
  * Aesthetic: "Warm Precision"
  * Inspired by Linear, Anthropic, Stripe - editorial quality with functional clarity
  */
@@ -14,6 +14,8 @@
 }
 
 :root {
+  color-scheme: dark;
+
   /* ═══════════════════════════════════════════════════════════════════════════
    * COLOR SYSTEM - Warm Neutrals + Terracotta Accent
    * ═══════════════════════════════════════════════════════════════════════════ */
@@ -41,6 +43,8 @@
   --color-accent-hover: #d4694a;
   --color-accent-muted: rgba(196, 93, 58, 0.16);
   --color-accent-subtle: rgba(196, 93, 58, 0.08);
+  /* Text/icons sitting directly on --color-accent backgrounds */
+  --color-accent-foreground: #ffffff;
 
   /* Borders */
   --color-border-subtle: rgba(255, 252, 247, 0.06);
@@ -134,17 +138,97 @@
   --duration-normal: 200ms;
   --duration-slow: 400ms;
 
-  /* Animation durations - longer cycles for ambient effects */
-  --duration-bounce: 1.4s;
-  --duration-pulse: 2s;
-  --duration-glow: 1s;
-
-  /* Loading indicator sizes */
-  --loading-dot-size: 6px;
-  --loading-dot-gap: 4px;
-
   /* Layout dimensions */
   --header-height: 57px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * LIGHT THEME - Warm paper, same "Warm Precision" family
+ *
+ * Mirrors the dark palette: cream-on-charcoal inverts to charcoal-on-paper,
+ * and the terracotta accent deepens (#b04a26) to keep ≥4.5:1 contrast on the
+ * paper background. Applied via `data-theme` on <html>; the attribute is set
+ * pre-paint by the boot script in index.html and kept in sync by
+ * themePreference.svelte.ts. The unadorned :root stays dark so a missing
+ * attribute can never render light tokens on a dark first paint.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Base - Warm paper scale */
+  --color-bg-primary: #faf9f6;
+  --color-bg-secondary: #f2f0ea;
+  --color-bg-tertiary: #e9e6de;
+  --color-bg-elevated: #ffffff;
+  --color-bg-hover: #e0dcd2;
+
+  /* Surface overlays */
+  --color-surface-subtle: rgba(31, 30, 28, 0.025);
+  --color-surface-muted: rgba(31, 30, 28, 0.045);
+  --color-surface-hover: rgba(31, 30, 28, 0.06);
+
+  /* Text - Warm charcoal hierarchy */
+  --color-text-primary: #1f1e1c;
+  --color-text-secondary: rgba(31, 30, 28, 0.72);
+  --color-text-tertiary: rgba(31, 30, 28, 0.52);
+  --color-text-muted: rgba(31, 30, 28, 0.36);
+
+  /* Accent - Deepened terracotta (5.2:1 on --color-bg-primary) */
+  --color-accent: #b04a26;
+  --color-accent-hover: #9c3f1e;
+  --color-accent-muted: rgba(176, 74, 38, 0.14);
+  --color-accent-subtle: rgba(176, 74, 38, 0.07);
+  /* White on the deepened accent: 5.4:1, WCAG AA for button labels */
+  --color-accent-foreground: #ffffff;
+
+  /* Borders */
+  --color-border-subtle: rgba(31, 30, 28, 0.07);
+  --color-border-default: rgba(31, 30, 28, 0.11);
+  --color-border-strong: rgba(31, 30, 28, 0.17);
+
+  /* Semantic */
+  --color-success: #33702f;
+  --color-warning: #7d5a10;
+  --color-error: #a83a3a;
+  --color-info: #2b5a94;
+
+  /* Shadows - soft warm gray, far gentler than the dark theme's */
+  --shadow-sm: 0 1px 2px rgba(31, 30, 28, 0.06);
+  --shadow-md: 0 4px 12px rgba(31, 30, 28, 0.08);
+  --shadow-lg: 0 8px 24px rgba(31, 30, 28, 0.1);
+  --shadow-xl: 0 16px 48px rgba(31, 30, 28, 0.14);
+
+  /* Glow */
+  --glow-accent: 0 0 24px rgba(176, 74, 38, 0.15);
+}
+
+/* Syntax highlighting - light palette, same warm hues darkened for paper */
+:root[data-theme="light"] .hljs-keyword {
+  color: #b04a26;
+}
+:root[data-theme="light"] .hljs-string {
+  color: #3e6b34;
+}
+:root[data-theme="light"] .hljs-number {
+  color: #8a5c0f;
+}
+:root[data-theme="light"] .hljs-function {
+  color: #2b5a94;
+}
+:root[data-theme="light"] .hljs-class {
+  color: #8a5c0f;
+}
+:root[data-theme="light"] .hljs-variable {
+  color: #6b5636;
+}
+:root[data-theme="light"] .hljs-type {
+  color: #2b5a94;
+}
+:root[data-theme="light"] .hljs-built_in {
+  color: #7d5a10;
+}
+:root[data-theme="light"] .hljs-attr {
+  color: #b04a26;
 }
 
 /* Responsive header heights */
@@ -299,19 +383,6 @@ body {
   }
   50% {
     opacity: 0.25;
-  }
-}
-
-@keyframes bounce {
-  0%,
-  80%,
-  100% {
-    transform: scale(0.8);
-    opacity: 0.5;
-  }
-  40% {
-    transform: scale(1);
-    opacity: 1;
   }
 }
 

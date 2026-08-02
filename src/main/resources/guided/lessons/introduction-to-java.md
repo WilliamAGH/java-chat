@@ -60,3 +60,5 @@ Java checks grammar and types before it runs a source file. A missing semicolon 
 - Explain why the quote marks around `"Hello, Java!"` do not appear in the output.
 
 Later lessons add variables, decisions, repetition, methods, and explicit classes. The compact form is an on-ramp: the programming ideas continue to apply as a program grows.
+
+Read [JLS 12: Execution](https://docs.oracle.com/javase/specs/jls/se25/html/jls-12.html) for the official Java execution model.

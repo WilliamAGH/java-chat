@@ -1,6 +1,11 @@
 import { mount } from "svelte";
 import App from "./App.svelte";
+import { initializeThemePreference } from "./lib/composables/themePreference.svelte";
 import "./styles/global.css";
+
+// The inline boot script in index.html already painted the correct theme;
+// this wires persistence and OS-change tracking for the rest of the session.
+initializeThemePreference();
 
 const RELOAD_GUARD_STORAGE_KEY = "vite-preload-error-reloaded";
 

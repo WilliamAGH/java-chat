@@ -193,8 +193,8 @@
   }
 
   .message.error .bubble {
-    background: rgba(196, 93, 93, 0.1);
-    border-color: rgba(196, 93, 93, 0.2);
+    background: color-mix(in srgb, var(--color-error) 10%, transparent);
+    border-color: color-mix(in srgb, var(--color-error) 20%, transparent);
     color: var(--color-error);
   }
 

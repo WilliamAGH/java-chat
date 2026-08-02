@@ -318,3 +318,5 @@ Conditional recommendation: prototype the service in Clojure to gain immutable-b
 ## Recap
 
 There is no universal winner among Java, Kotlin, Scala, Groovy, and Clojure, and this lesson does not name one. There is a defensible process: state your constraints, understand your existing code and toolchain, assess Java interop and library fit, weigh team learning and operations, and validate a small representative slice before committing. Every comparison in this lesson is a tradeoff conditioned on those constraints, and the runnable slices show that the real costs and benefits live as much in the toolchain and the interop boundary as in the language syntax. Run your own slice, write your own interop plan, collect the evidence each scenario asks for, and let that evidence, not reputation, decide.
+
+Compare each language through its official reference: [Java](https://dev.java/learn/), [Kotlin](https://kotlinlang.org/docs/java-interop.html), [Scala 3](https://docs.scala-lang.org/scala3/reference/), [Groovy](https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/), and [Clojure](https://clojure.org/reference/java_interop).

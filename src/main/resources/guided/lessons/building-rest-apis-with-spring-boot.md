@@ -512,3 +512,5 @@ BUILD SUCCESSFUL in 6s
 ## Recap
 
 A REST endpoint in Spring Boot 4.1.0 is a thin controller that maps an HTTP verb and a resource-oriented route to a use-case collaborator supplied through constructor injection. Java records give the request and response their own explicit, immutable contracts, and Jakarta constraints plus `@Valid` reject bad input before any business logic runs. A successful creation returns `201 Created` with a `Location` header built from the current request. Expected, client-visible failures become deliberate `ProblemDetail` responses through an `@ExceptionHandler`, while unexpected infrastructure failures are allowed to surface as a `500` rather than being masked by success-shaped fallbacks. The modular `spring-boot-starter-webmvc` and `spring-boot-starter-validation` starters supply the web and validation machinery, and a `@WebMvcTest` slice with a `@MockitoBean` collaborator verifies the whole contract without ever starting a server.
+
+Read the official Spring Framework reference for [annotated Spring MVC controllers](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller.html).

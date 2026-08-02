@@ -72,7 +72,7 @@
     border-radius: var(--radius-full);
     box-shadow:
       var(--shadow-md),
-      0 0 20px rgba(196, 93, 58, 0.15);
+      0 0 20px color-mix(in srgb, var(--color-accent) 15%, transparent);
 
     font-family: var(--font-sans);
     font-size: var(--text-sm);
@@ -117,7 +117,7 @@
     border-color: var(--color-accent);
     box-shadow:
       var(--shadow-lg),
-      0 0 24px rgba(196, 93, 58, 0.25);
+      0 0 24px color-mix(in srgb, var(--color-accent) 25%, transparent);
     transform: translateX(-50%) translateY(-2px);
   }
 
@@ -125,7 +125,7 @@
     transform: translateX(-50%) translateY(0);
     box-shadow:
       var(--shadow-sm),
-      0 0 16px rgba(196, 93, 58, 0.12);
+      0 0 16px color-mix(in srgb, var(--color-accent) 12%, transparent);
   }
 
   /* Focus ring */

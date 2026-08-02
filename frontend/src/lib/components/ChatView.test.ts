@@ -321,9 +321,12 @@ describe("ChatView streaming stability", () => {
 
     await vi.waitFor(() =>
       expect(
-        renderedChatView.container.querySelector('.thinking-indicator[data-phase="connecting"]'),
+        renderedChatView.container.querySelector('.thinking-indicator[role="status"]'),
       ).not.toBeNull(),
     );
+    expect(
+      renderedChatView.container.querySelector(".thinking-indicator .status-message")?.textContent,
+    ).toBe("Connecting");
   });
 
   it("shows the provider selected for the active stream", async () => {

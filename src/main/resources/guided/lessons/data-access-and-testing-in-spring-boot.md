@@ -384,3 +384,5 @@ The overall rule of thumb: default to the fast slice for mappings and derived qu
 ## Recap
 
 Data access in Spring Boot is easy to make work and worth keeping disciplined. Put a repository at the boundary of persistence, where each method is one data-access operation. Let an application service own the transaction, so a use case that touches several rows commits or rolls back as a unit, and keep controllers and repositories apart with a separate HTTP contract type between the entity and the outside world. Guard entity invariants with a validating factory, and leave the no-arg constructor to JPA. For testing, prefer focused test slices: a fast `@DataJpaTest` on H2 verifies mappings and derived queries, and it is honest about what it does not prove. Reserve Testcontainers for behavior that genuinely depends on the real PostgreSQL engine. Fast and focused by default, realistic where it matters.
+
+Read the official Spring Boot references for [SQL data access](https://docs.spring.io/spring-boot/reference/data/sql.html) and [testing Spring Boot applications](https://docs.spring.io/spring-boot/reference/testing/spring-boot-applications.html).

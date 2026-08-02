@@ -1169,6 +1169,9 @@
 
         .lesson-summary {
             font-size: var(--text-xs);
+            overflow: visible;
+            text-overflow: clip;
+            white-space: normal;
         }
     }
 </style>

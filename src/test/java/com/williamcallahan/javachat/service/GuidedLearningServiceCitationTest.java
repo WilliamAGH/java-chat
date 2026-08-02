@@ -178,6 +178,32 @@ class GuidedLearningServiceCitationTest {
     }
 
     @Test
+    void everyGuidedLessonPublishesCanonicalHttpsCitations() {
+        GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        GuidedLearningService guidedLearningService = guidedLearningService(
+                tocProvider,
+                retrievalService,
+                mock(EnrichmentService.class),
+                mock(ChatService.class),
+                systemPromptConfig());
+
+        for (GuidedLesson guidedLesson : tocProvider.getTOC()) {
+            List<Citation> lessonCitations = guidedLearningService.citationsForLesson(guidedLesson.getSlug());
+            assertFalse(
+                    lessonCitations.isEmpty(),
+                    () -> "Guided lesson has no canonical citation: " + guidedLesson.getSlug());
+            assertTrue(
+                    lessonCitations.stream()
+                            .map(Citation::getUrl)
+                            .allMatch(citationUrl -> citationUrl.startsWith("https://")),
+                    () -> "Guided lesson has a non-HTTPS citation: " + guidedLesson.getSlug());
+        }
+
+        verifyNoInteractions(retrievalService);
+    }
+
+    @Test
     void guidedLoopsPromptSuppliesTheCanonicalJava25CompactSourceLessonAsContext() throws IOException {
         GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
         RetrievalService retrievalService = mock(RetrievalService.class);
