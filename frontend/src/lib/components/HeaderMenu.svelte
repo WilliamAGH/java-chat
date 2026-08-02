@@ -59,6 +59,10 @@
   }
 
   function navigateToSiteLink(clickEvent: MouseEvent, siteLink: SiteLink): void {
+    // Modified or non-primary clicks must keep native anchor semantics (new tab/window).
+    if (clickEvent.button !== 0 || clickEvent.metaKey || clickEvent.ctrlKey || clickEvent.shiftKey || clickEvent.altKey) {
+      return
+    }
     clickEvent.preventDefault()
     currentView = siteLink.view
     closeMenu()

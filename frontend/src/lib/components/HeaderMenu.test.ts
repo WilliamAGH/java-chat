@@ -113,4 +113,16 @@ describe("HeaderMenu page links", () => {
     expect(contactLink).toHaveAttribute("aria-current", "page");
     expect(getByRole("menuitem", { name: "Privacy" })).not.toHaveAttribute("aria-current");
   });
+
+  it("leaves modified clicks to the browser so links can open in a new tab", async () => {
+    const { getByRole } = render(HeaderMenu, { props: { currentView: "chat" } });
+
+    await fireEvent.click(getByRole("button", { name: "Settings and pages menu" }));
+    const contactLink = getByRole("menuitem", { name: "Contact" });
+    const clickEvent = new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true });
+    await fireEvent(contactLink, clickEvent);
+
+    expect(clickEvent.defaultPrevented).toBe(false);
+    expect(contactLink).not.toHaveAttribute("aria-current");
+  });
 });

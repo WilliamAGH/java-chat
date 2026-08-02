@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.mail.MailException;
 import org.springframework.mail.MailParseException;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -74,13 +75,19 @@ public class ContactSubmissionUseCase {
 
         AtomicInteger acceptedSubmissionCount =
                 acceptedSubmissionsPerIp.get(contactSubmission.remoteAddress(), remoteAddress -> new AtomicInteger());
-        if (acceptedSubmissionCount.get() >= MAX_ACCEPTED_SUBMISSIONS_PER_IP) {
+        int reservedSubmissionSlot = acceptedSubmissionCount.incrementAndGet();
+        if (reservedSubmissionSlot > MAX_ACCEPTED_SUBMISSIONS_PER_IP) {
+            acceptedSubmissionCount.decrementAndGet();
             log.info("Contact submission rate limited");
             throw new ContactRateLimitExceededException();
         }
 
-        javaMailSender.send(buildMimeMessage(contactSubmission));
-        acceptedSubmissionCount.incrementAndGet();
+        try {
+            javaMailSender.send(buildMimeMessage(contactSubmission));
+        } catch (MailException deliveryFailure) {
+            acceptedSubmissionCount.decrementAndGet();
+            throw deliveryFailure;
+        }
         log.info("Contact message delivered");
     }
 
