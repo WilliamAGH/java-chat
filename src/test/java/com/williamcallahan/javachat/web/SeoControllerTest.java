@@ -1,7 +1,9 @@
 package com.williamcallahan.javachat.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -93,6 +95,24 @@ class SeoControllerTest {
                 "og:description",
                 "Contact the JavaChat team with questions, feedback, or privacy requests.");
         assertMetaContent(htmlDocument, "property", "og:url", "https://example.com/contact");
+    }
+
+    /**
+     * The deployed CSP blocks inline scripts, so the Clicky site ID must travel on the
+     * loader tag's {@code data-id} attribute — never as an inline initializer script.
+     */
+    @Test
+    void injects_clicky_loader_without_inline_initializer() throws Exception {
+        Document htmlDocument = loadSeoDocument("/");
+
+        Element clickyLoader = htmlDocument.head().selectFirst("script[src=\"https://static.getclicky.com/js\"]");
+        assertNotNull(clickyLoader, "Missing Clicky loader script tag");
+        assertEquals("101501246", clickyLoader.attr("data-id"));
+        assertTrue(clickyLoader.hasAttr("async"), "Clicky loader must load asynchronously");
+
+        boolean inlineInitializerPresent = htmlDocument.head().select("script").stream()
+                .anyMatch(scriptTag -> scriptTag.html().contains("clicky_site_ids"));
+        assertFalse(inlineInitializerPresent, "Inline Clicky initializer violates the CSP");
     }
 
     private Document loadSeoDocument(String path) throws Exception {
