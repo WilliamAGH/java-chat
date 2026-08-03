@@ -28,6 +28,10 @@ function denySiteStorageAccess(): void {
 function restoreSiteStorageAccess(): void {
   if (originalLocalStorageDescriptor) {
     Object.defineProperty(window, "localStorage", originalLocalStorageDescriptor);
+  } else {
+    // No own descriptor to restore (storage inherited from the prototype):
+    // deleting the override re-exposes the inherited accessor for later tests.
+    Reflect.deleteProperty(window, "localStorage");
   }
 }
 
