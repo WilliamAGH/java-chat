@@ -61,7 +61,7 @@ function probeSiteStorageAccess(): SiteStorageAccess {
  * storage) are deliberate disabled states, not failures: the function returns
  * quietly and auth controls stay hidden.
  *
- * @throws Error when the publishable key is absent or `Clerk.load()` fails.
+ * @throws Error when `Clerk.load()` rejects (misconfigured key, network or SDK failure).
  */
 export async function loadClerkAuthentication(): Promise<void> {
   if (clerkClient) {
