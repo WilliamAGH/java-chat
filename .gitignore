@@ -83,3 +83,17 @@ classpath.txt
 category/
 findbugsfilter.xsd
 messages.xml
+
+### App Store Connect CLI (asc) transient state ###
+### Repo-local config (.asc/*.json) stays tracked; run artifacts do not ###
+.asc/runs/
+.asc/reports/
+.asc/release/checkpoints/
+
+### App Store screenshot working artifacts ###
+### Canonical assets stay tracked: screenshots/final/, screenshots/captions/ ###
+screenshots/raw/
+screenshots/framed-test/
+screenshots/rejected/
+screenshots/review/
+screenshots/asc-review/
