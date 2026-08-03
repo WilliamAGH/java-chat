@@ -1,0 +1,57 @@
+{
+  "env": {
+    "APP_ID": "6796580187",
+    "VERSION": "1.0",
+    "METADATA_PATH": "metadata",
+    "SCREENSHOT_PATH": "screenshots/final/en-US"
+  },
+  "before_all": "asc auth status",
+  "workflows": {
+    "release-assets": {
+      "private": true,
+      "description": "Validates canonical metadata and every local screenshot set.",
+      "steps": [
+        {
+          "name": "validate_metadata",
+          "run": "asc metadata validate --dir $METADATA_PATH"
+        },
+        {
+          "name": "validate_iphone_screenshots",
+          "run": "asc screenshots validate --path $SCREENSHOT_PATH/iphone --device-type IPHONE_69"
+        },
+        {
+          "name": "validate_ipad_screenshots",
+          "run": "asc screenshots validate --path $SCREENSHOT_PATH/ipad --device-type IPAD_PRO_3GEN_129"
+        },
+        {
+          "name": "validate_mac_screenshots",
+          "run": "asc screenshots validate --path $SCREENSHOT_PATH/mac --device-type DESKTOP"
+        }
+      ]
+    },
+    "ios-release-preflight": {
+      "description": "Validates local App Store assets and performs the read-only iOS release check.",
+      "steps": [
+        {
+          "workflow": "release-assets"
+        },
+        {
+          "name": "validate_ios_listing",
+          "run": "asc validate --app $APP_ID --version $VERSION --platform IOS"
+        }
+      ]
+    },
+    "mac-release-preflight": {
+      "description": "Validates local App Store assets and performs the read-only Mac release check.",
+      "steps": [
+        {
+          "workflow": "release-assets"
+        },
+        {
+          "name": "validate_mac_listing_only",
+          "run": "asc validate --app $APP_ID --version $VERSION --platform MAC_OS"
+        }
+      ]
+    }
+  }
+}

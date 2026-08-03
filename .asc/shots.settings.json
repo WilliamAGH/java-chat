@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "app": {
+    "bundle_id": "ai.javachat",
+    "project": "mobile/iosApp/JavaChat.xcodeproj",
+    "scheme": "JavaChat",
+    "simulator_udid": "booted"
+  },
+  "paths": {
+    "plan": ".asc/screenshots.json",
+    "raw_dir": "./screenshots/raw/en-US/iphone",
+    "framed_dir": "./screenshots/final/en-US/iphone"
+  },
+  "pipeline": {
+    "frame_enabled": true,
+    "upload_enabled": false
+  },
+  "upload": {
+    "version_localization_id": "d4c9161f-0343-47ed-b4f0-73f1cf37a424",
+    "device_type": "IPHONE_69",
+    "source_dir": "./screenshots/final/en-US/iphone"
+  }
+}

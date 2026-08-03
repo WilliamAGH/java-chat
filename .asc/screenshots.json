@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "app": {
+    "bundle_id": "ai.javachat",
+    "udid": "booted",
+    "output_dir": "./screenshots/raw/en-US/iphone"
+  },
+  "steps": [
+    {
+      "action": "launch"
+    },
+    {
+      "action": "wait",
+      "duration_ms": 8000
+    },
+    {
+      "action": "screenshot",
+      "name": "01-welcome"
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "iphone": [
+    {
+      "headline": "Ask Anything About Java",
+      "subtitle": "Start with a question or prompt"
+    },
+    {
+      "headline": "Read Answers Clearly",
+      "subtitle": "Formatted code stays easy to scan"
+    },
+    {
+      "headline": "Learn From Real Code",
+      "subtitle": "See Java concepts in context"
+    },
+    {
+      "headline": "Choose Your Next Lesson",
+      "subtitle": "Tap a focused topic to begin"
+    },
+    {
+      "headline": "Ask as You Learn",
+      "subtitle": "Ask follow-ups inside each lesson"
+    }
+  ],
+  "ipad": [
+    {
+      "headline": "Ask Anything About Java",
+      "subtitle": "Turn the big screen into a study space"
+    },
+    {
+      "headline": "Read Answers Clearly",
+      "subtitle": "Give explanations and code more room"
+    },
+    {
+      "headline": "Ask as You Learn",
+      "subtitle": "Keep follow-ups tied to each lesson"
+    },
+    {
+      "headline": "Choose Your Next Lesson",
+      "subtitle": "Browse the lesson catalog at a glance"
+    },
+    {
+      "headline": "Study Side by Side",
+      "subtitle": "Read a lesson with its focused chat"
+    }
+  ],
+  "mac": [
+    {
+      "headline": "Ask Anything About Java",
+      "subtitle": "Start a focused Java session on Mac"
+    },
+    {
+      "headline": "Read Answers Clearly",
+      "subtitle": "Read formatted code in a focused workspace"
+    },
+    {
+      "headline": "Choose Your Next Lesson",
+      "subtitle": "Browse Java and JVM topics at a glance"
+    }
+  ]
+}

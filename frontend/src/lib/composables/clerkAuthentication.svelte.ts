@@ -30,13 +30,38 @@ export const clerkAuthentication = new ClerkAuthenticationState();
 
 let clerkClient: Clerk | null = null;
 
+/** Key read by the storage probe; never persisted, so any name outside real keys works. */
+const STORAGE_ACCESS_PROBE_KEY = "java-chat-storage-access-probe";
+
+/** Outcome of the site-storage probe; `denial` is the error the browser threw. */
+type SiteStorageAccess = { accessible: true } | { accessible: false; denial: unknown };
+
+/**
+ * Probes whether this browser grants the page access to site storage.
+ * Kiosk and hardened-privacy browsers (e.g. e-ink display frames with "block
+ * site data" enabled) make the `window.localStorage` getter itself throw a
+ * SecurityError; `@clerk/clerk-js` reads it unguarded during `Clerk.load()`
+ * and cannot keep a session without it, so sign-in is impossible there.
+ */
+function probeSiteStorageAccess(): SiteStorageAccess {
+  try {
+    window.localStorage.getItem(STORAGE_ACCESS_PROBE_KEY);
+    return { accessible: true };
+  } catch (storageAccessDenial) {
+    return { accessible: false, denial: storageAccessDenial };
+  }
+}
+
 /**
  * Loads Clerk exactly once and starts mirroring its session into
  * {@link clerkAuthentication}. Failures surface as an error toast and a
  * rethrown error — the chat itself works unauthenticated, but a broken auth
- * configuration must never be silent ([RC1f]).
+ * configuration must never be silent ([RC1f]). Environments where auth cannot
+ * exist (no publishable key in the build, or a browser that denies site
+ * storage) are deliberate disabled states, not failures: the function returns
+ * quietly and auth controls stay hidden.
  *
- * @throws Error when the publishable key is absent or `Clerk.load()` fails.
+ * @throws Error when `Clerk.load()` rejects (misconfigured key, network or SDK failure).
  */
 export async function loadClerkAuthentication(): Promise<void> {
   if (clerkClient) {
@@ -48,6 +73,18 @@ export async function loadClerkAuthentication(): Promise<void> {
     // VITE_CLERK_PUBLISHABLE_KEY until Clerk launches there, so auth controls
     // stay hidden. Dev deployments and local .env.local provide the key.
     console.info("Clerk authentication disabled: no VITE_CLERK_PUBLISHABLE_KEY in this build.");
+    return;
+  }
+  const siteStorageAccess = probeSiteStorageAccess();
+  if (!siteStorageAccess.accessible) {
+    // Environment gate, not an error: sign-in cannot work where the browser
+    // denies site storage, so auth controls stay hidden — same deliberate
+    // disabled state as a build without a publishable key. Skipping here also
+    // avoids downloading the SDK chunks on such devices.
+    console.info(
+      "Clerk authentication disabled: this browser denies site storage access.",
+      siteStorageAccess.denial,
+    );
     return;
   }
   // Dynamic imports keep the ~700 kB Clerk SDK out of the first-paint chunk;
