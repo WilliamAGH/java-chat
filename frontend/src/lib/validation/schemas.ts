@@ -9,6 +9,13 @@
 
 import { z } from "zod/v4";
 
+// The deployed CSP (`app.content-security-policy`) has no 'unsafe-eval', so
+// Zod's JIT fast path can never activate; without `jitless` its cached
+// `allowsEval` probe calls `new Function("")` once per page load, which the
+// browser reports as a `securitypolicyviolation` even though Zod swallows the
+// throw (zod/v4/core/util.cjs `allowsEval`).
+z.config({ jitless: true });
+
 // =============================================================================
 // SSE Stream Event Schemas
 // =============================================================================
