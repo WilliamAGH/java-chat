@@ -27,7 +27,15 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
     /** Probe latency above this marks a slow provider response without inferring its remote cause. */
     private static final long SLOW_PROBE_THRESHOLD_MILLIS = 5_000L;
 
-    /** Escalates only after a probe condition repeats on the next observation. */
+    /**
+     * Escalates only after a probe condition repeats on the next observation.
+     *
+     * <p>The escalation stays at WARN even when repeated: a background probe failure is a
+     * monitoring signal, never a user-facing request failure, and ERROR lines feed the
+     * critical java-chat-error-log Grafana alert. Provider-health paging is owned by the
+     * dependencies health group (java-chat-dependencies-degraded) and the gateway's own
+     * availability rules, so a routine gateway redeploy must not page here.</p>
+     */
     private static final int REPEATED_PROBE_ALERT_COUNT = 2;
 
     private static final long NANOS_PER_MILLISECOND = 1_000_000L;
@@ -178,7 +186,7 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
                     .log(() -> "event=embedding_model_probe_failed outcome=failure model=" + logSafeModelName
                             + " durationMs=" + probeDurationMillis + " consecutiveFailures=" + consecutiveFailureCount);
         } else if (consecutiveFailureCount == REPEATED_PROBE_ALERT_COUNT) {
-            log.atError()
+            log.atWarn()
                     .setCause(embeddingUnavailableException)
                     .log(() -> "event=embedding_model_probe_failure_loop outcome=failure model=" + logSafeModelName
                             + " durationMs=" + probeDurationMillis + " consecutiveFailures=" + consecutiveFailureCount);

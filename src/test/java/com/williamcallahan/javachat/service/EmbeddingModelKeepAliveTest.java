@@ -124,7 +124,8 @@ class EmbeddingModelKeepAliveTest {
 
         assertEquals(Status.DOWN, keepAlive.health().getStatus());
         assertEquals(1, eventCount(Level.WARN, "event=embedding_model_probe_failed"));
-        assertEquals(1, eventCount(Level.ERROR, "event=embedding_model_probe_failure_loop"));
+        assertEquals(1, eventCount(Level.WARN, "event=embedding_model_probe_failure_loop"));
+        assertEquals(0, eventCount(Level.ERROR, "event=embedding_model_probe_"));
 
         keepAlive.retryUnavailableEmbeddingModel();
 
