@@ -11,6 +11,11 @@ vi.mock("../services/contact", () => {
 
 import ContactPage from "./ContactPage.svelte";
 
+// Independent expectations keep accidental user-facing copy changes visible.
+const EXPECTED_CONTACT_NAME_REQUIRED_GUIDANCE = "Enter your name";
+const EXPECTED_CONTACT_EMAIL_INVALID_GUIDANCE = "Enter a valid email address";
+const EXPECTED_CONTACT_MESSAGE_REQUIRED_GUIDANCE = "Enter a message";
+
 function renderContactPage() {
   const renderedPage = render(ContactPage);
   const contactForm = renderedPage.container.querySelector("form");
@@ -88,6 +93,9 @@ describe("ContactPage submission states", () => {
     await waitFor(() =>
       expect(renderedPage.container.querySelector("#contact-name-error")).not.toBeNull(),
     );
+    expect(renderedPage.getByText(EXPECTED_CONTACT_NAME_REQUIRED_GUIDANCE)).toBeInTheDocument();
+    expect(renderedPage.getByText(EXPECTED_CONTACT_EMAIL_INVALID_GUIDANCE)).toBeInTheDocument();
+    expect(renderedPage.getByText(EXPECTED_CONTACT_MESSAGE_REQUIRED_GUIDANCE)).toBeInTheDocument();
     expect(renderedPage.container.querySelector("#contact-message-error")).not.toBeNull();
     expect(renderedPage.getByLabelText("Name")).toHaveAttribute("aria-invalid", "true");
     expect(renderedPage.getByLabelText("Email")).toHaveAttribute("aria-invalid", "true");

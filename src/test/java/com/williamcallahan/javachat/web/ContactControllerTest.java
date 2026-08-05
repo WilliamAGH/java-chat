@@ -134,6 +134,42 @@ class ContactControllerTest {
     }
 
     @Test
+    void nonPositiveRenderTimestampsDoNotConsumeRateLimitCapacity() throws Exception {
+        String senderIp = "198.51.100.8";
+        long[] spamRenderTimestamps = {0L, -1L, Long.MIN_VALUE};
+        for (long renderedAtEpochMillis : spamRenderTimestamps) {
+            mockMvc.perform(post(CONTACT_ENDPOINT)
+                            .with(csrf())
+                            .with(remoteAddress(senderIp))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(submissionJson(
+                                    "Invalid Timestamp",
+                                    "invalid-timestamp@example.test",
+                                    "This request must not consume rate-limit capacity.",
+                                    "",
+                                    renderedAtEpochMillis)))
+                    .andExpect(status().isAccepted())
+                    .andExpect(jsonPath("$.status").value("accepted"));
+        }
+        verify(javaMailSender, never()).send(any(MimeMessage.class));
+
+        mockMvc.perform(post(CONTACT_ENDPOINT)
+                        .with(csrf())
+                        .with(remoteAddress(senderIp))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(submissionJson(
+                                "Legitimate Sender",
+                                "legitimate@example.test",
+                                "This request should retain the available rate-limit capacity.",
+                                "",
+                                legitimateRenderedAt())))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("accepted"));
+
+        verify(javaMailSender, times(1)).send(any(MimeMessage.class));
+    }
+
+    @Test
     void fourthAcceptedSubmissionFromSameIpIsRateLimited() throws Exception {
         String senderIp = "198.51.100.4";
         for (int submissionIndex = 0; submissionIndex < 3; submissionIndex++) {
