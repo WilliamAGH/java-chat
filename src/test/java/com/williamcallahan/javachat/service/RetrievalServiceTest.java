@@ -47,6 +47,23 @@ class RetrievalServiceTest {
                     .max(Comparator.comparingInt(source -> Integer.parseInt(source.javaRelease())))
                     .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
                     .orElseThrow();
+    private static final int DOCUMENTATION_CITATION_CANDIDATE_LIMIT = 10;
+    private static final String JAVA_21_RELEASE = "21";
+    private static final String JAVA_24_RELEASE = "24";
+    private static final String EXACT_LIST_OF_QUERY = "Compare Java 21 and Java 24 for java.util.List.of(E, E).";
+    private static final String JAVA_21_EXACT_LIST_DOCUMENT_ID = "java-21-exact";
+    private static final String JAVA_24_EXACT_LIST_DOCUMENT_ID = "java-24-exact";
+    private static final String JAVA_21_EXACT_LIST_CONTENT_HASH = "exact-hash-21";
+    private static final String JAVA_24_EXACT_LIST_CONTENT_HASH = "exact-hash-24";
+    private static final String EXACT_LIST_OVERLOAD_TEXT =
+            "static <E> List<E> of(E e1, E e2) Returns an unmodifiable list containing two elements";
+    private static final String EXACT_LIST_OVERLOAD_ANCHOR = "of(E,E)";
+    private static final String JAVA_UTIL_PACKAGE = "java.util";
+    private static final String JAVA_LIST_API_PAGE = "List.html";
+    private static final String JAVA_21_LIST_API_URL =
+            "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/List.html";
+    private static final String JAVA_24_LIST_API_URL =
+            "https://docs.oracle.com/en/java/javase/24/docs/api/java.base/java/util/List.html";
     private static final Duration STAGE_DEADLINE_ASSERTION_TOLERANCE = Duration.ofSeconds(1);
 
     @Test
@@ -460,33 +477,46 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint java21Constraint = officialDocumentationConstraint.withDocVersions(List.of("21"));
-        RetrievalConstraint java24Constraint = officialDocumentationConstraint.withDocVersions(List.of("24"));
-        String exactComparisonQuery = "Compare Java 21 and Java 24 for java.util.List.of(E, E).";
-        Document java21ExactOverload = exactListOfOverloadDocument("java-21-exact", "21", "exact-hash-21");
-        Document java24ExactOverload = exactListOfOverloadDocument("java-24-exact", "24", "exact-hash-24");
+        RetrievalConstraint java21Constraint =
+                officialDocumentationConstraint.withDocVersions(List.of(JAVA_21_RELEASE));
+        RetrievalConstraint java24Constraint =
+                officialDocumentationConstraint.withDocVersions(List.of(JAVA_24_RELEASE));
+        Document java21ExactOverload = exactListOfOverloadDocument(
+                JAVA_21_EXACT_LIST_DOCUMENT_ID, JAVA_21_RELEASE, JAVA_21_EXACT_LIST_CONTENT_HASH);
+        Document java24ExactOverload = exactListOfOverloadDocument(
+                JAVA_24_EXACT_LIST_DOCUMENT_ID, JAVA_24_RELEASE, JAVA_24_EXACT_LIST_CONTENT_HASH);
         when(hybridSearchService.searchDocumentationCitationsOutcomes(
-                        eq(exactComparisonQuery), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong()))
+                        eq(EXACT_LIST_OF_QUERY),
+                        eq(DOCUMENTATION_CITATION_CANDIDATE_LIMIT),
+                        eq(List.of(java21Constraint, java24Constraint)),
+                        anyLong()))
                 .thenReturn(List.of(
                         new HybridSearchService.SearchOutcome(List.of(java21ExactOverload), List.of()),
                         new HybridSearchService.SearchOutcome(List.of(java24ExactOverload), List.of())));
 
         RetrievalService.CitationOutcome citationOutcome =
-                retrievalService.discoverCitations(exactComparisonQuery, officialDocumentationConstraint);
+                retrievalService.discoverCitations(EXACT_LIST_OF_QUERY, officialDocumentationConstraint);
 
         assertEquals(
-                List.of(
-                        "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/List.html",
-                        "https://docs.oracle.com/en/java/javase/24/docs/api/java.base/java/util/List.html"),
+                List.of(JAVA_21_LIST_API_URL, JAVA_24_LIST_API_URL),
                 citationOutcome.citations().stream()
                         .map(citation -> citation.getUrl())
                         .toList());
         assertEquals(
-                List.of("of(E,E)", "of(E,E)"),
+                List.of(EXACT_LIST_OVERLOAD_ANCHOR, EXACT_LIST_OVERLOAD_ANCHOR),
                 citationOutcome.citations().stream()
                         .map(citation -> citation.getAnchor())
                         .toList());
         assertEquals(0, citationOutcome.failedConversionCount());
+        verify(hybridSearchService)
+                .searchDocumentationCitationsOutcomes(
+                        eq(EXACT_LIST_OF_QUERY),
+                        eq(DOCUMENTATION_CITATION_CANDIDATE_LIMIT),
+                        eq(List.of(java21Constraint, java24Constraint)),
+                        anyLong());
+        verify(hybridSearchService, never())
+                .searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), anyLong());
     }
 
     @Test
@@ -797,16 +827,16 @@ class RetrievalServiceTest {
                         .orElseThrow();
         return Document.builder()
                 .id(documentId)
-                .text("static <E> List<E> of(E e1, E e2) Returns an unmodifiable list containing two elements")
+                .text(EXACT_LIST_OVERLOAD_TEXT)
                 .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, documentVersion)
                 .metadata(QdrantPayloadFieldSchema.HASH_FIELD, contentHash)
                 .metadata(
                         QdrantPayloadFieldSchema.URL_FIELD,
-                        documentationSource.remoteBaseUrl() + "java.base/java/util/List.html")
+                        documentationSource.remoteBaseUrl() + "java.base/java/util/" + JAVA_LIST_API_PAGE)
                 .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
-                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.util")
-                .metadata(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, "List.html")
-                .metadata(QdrantPayloadFieldSchema.ANCHOR_FIELD, "of(E,E)")
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, JAVA_UTIL_PACKAGE)
+                .metadata(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, JAVA_LIST_API_PAGE)
+                .metadata(QdrantPayloadFieldSchema.ANCHOR_FIELD, EXACT_LIST_OVERLOAD_ANCHOR)
                 .build();
     }
 
