@@ -453,6 +453,43 @@ class RetrievalServiceTest {
     }
 
     @Test
+    void multiVersionExactCitationDiscoveryReturnsAuthoritativeOverloadFromEveryRequestedRelease() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint java21Constraint = officialDocumentationConstraint.withDocVersions(List.of("21"));
+        RetrievalConstraint java24Constraint = officialDocumentationConstraint.withDocVersions(List.of("24"));
+        String exactComparisonQuery = "Compare Java 21 and Java 24 for java.util.List.of(E, E).";
+        Document java21ExactOverload = exactListOfOverloadDocument("java-21-exact", "21", "exact-hash-21");
+        Document java24ExactOverload = exactListOfOverloadDocument("java-24-exact", "24", "exact-hash-24");
+        when(hybridSearchService.searchDocumentationCitationsOutcomes(
+                        eq(exactComparisonQuery), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong()))
+                .thenReturn(List.of(
+                        new HybridSearchService.SearchOutcome(List.of(java21ExactOverload), List.of()),
+                        new HybridSearchService.SearchOutcome(List.of(java24ExactOverload), List.of())));
+
+        RetrievalService.CitationOutcome citationOutcome =
+                retrievalService.discoverCitations(exactComparisonQuery, officialDocumentationConstraint);
+
+        assertEquals(
+                List.of(
+                        "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/List.html",
+                        "https://docs.oracle.com/en/java/javase/24/docs/api/java.base/java/util/List.html"),
+                citationOutcome.citations().stream()
+                        .map(citation -> citation.getUrl())
+                        .toList());
+        assertEquals(
+                List.of("of(E,E)", "of(E,E)"),
+                citationOutcome.citations().stream()
+                        .map(citation -> citation.getAnchor())
+                        .toList());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
     void exactJavaSyntaxInNonJavaScopeDoesNotDispatchJavaApiCitationRetrieval() {
         HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         RerankerService rerankerService = mock(RerankerService.class);
