@@ -122,6 +122,12 @@ export const CONTACT_NAME_MAX_LENGTH = 100;
 /** Longest message body accepted by POST /api/contact; mirrored in the form's maxlength. */
 export const CONTACT_MESSAGE_MAX_LENGTH = 5000;
 
+const CONTACT_NAME_REQUIRED_MESSAGE = "Enter your name";
+const CONTACT_NAME_TOO_LONG_MESSAGE = `Name must be ${CONTACT_NAME_MAX_LENGTH} characters or fewer`;
+const CONTACT_EMAIL_INVALID_MESSAGE = "Enter a valid email address";
+const CONTACT_MESSAGE_REQUIRED_MESSAGE = "Enter a message";
+const CONTACT_MESSAGE_TOO_LONG_MESSAGE = `Message must be ${CONTACT_MESSAGE_MAX_LENGTH} characters or fewer`;
+
 /**
  * Submission contract for POST /api/contact.
  *
@@ -134,17 +140,17 @@ export const ContactSubmissionSchema = z.object({
   name: z
     .string()
     .trim()
-    .min(1, { error: "Enter your name" })
+    .min(1, { error: CONTACT_NAME_REQUIRED_MESSAGE })
     .max(CONTACT_NAME_MAX_LENGTH, {
-      error: `Name must be ${CONTACT_NAME_MAX_LENGTH} characters or fewer`,
+      error: CONTACT_NAME_TOO_LONG_MESSAGE,
     }),
-  email: z.email({ error: "Enter a valid email address" }),
+  email: z.email({ error: CONTACT_EMAIL_INVALID_MESSAGE }),
   message: z
     .string()
     .trim()
-    .min(1, { error: "Enter a message" })
+    .min(1, { error: CONTACT_MESSAGE_REQUIRED_MESSAGE })
     .max(CONTACT_MESSAGE_MAX_LENGTH, {
-      error: `Message must be ${CONTACT_MESSAGE_MAX_LENGTH} characters or fewer`,
+      error: CONTACT_MESSAGE_TOO_LONG_MESSAGE,
     }),
   website: z.string(),
   renderedAt: z.int().positive(),
