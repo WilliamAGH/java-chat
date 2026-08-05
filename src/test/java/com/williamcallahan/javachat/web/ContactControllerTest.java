@@ -17,6 +17,8 @@ import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -127,6 +129,25 @@ class ContactControllerTest {
                         .with(remoteAddress("198.51.100.7"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestJson))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("accepted"));
+
+        verify(javaMailSender, never()).send(any(MimeMessage.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0L, -1L, Long.MIN_VALUE})
+    void nonPositiveRenderTimestampIsDroppedSilentlyWithoutSendingMail(long renderedAtEpochMillis) throws Exception {
+        mockMvc.perform(post(CONTACT_ENDPOINT)
+                        .with(csrf())
+                        .with(remoteAddress("198.51.100.8"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(submissionJson(
+                                "Invalid Timestamp",
+                                "invalid-timestamp@example.test",
+                                "This request must not reach email delivery.",
+                                "",
+                                renderedAtEpochMillis)))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.status").value("accepted"));
 

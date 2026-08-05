@@ -96,7 +96,7 @@ public class ContactSubmissionUseCase {
             return true;
         }
         Long renderedAt = contactSubmission.renderedAt();
-        if (renderedAt == null) {
+        if (renderedAt == null || renderedAt <= 0) {
             return true;
         }
         long submissionAgeMillis = contactSubmission.receivedAt().toEpochMilli() - renderedAt.longValue();
