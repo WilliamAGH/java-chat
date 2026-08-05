@@ -88,6 +88,9 @@ describe("ContactPage submission states", () => {
     await waitFor(() =>
       expect(renderedPage.container.querySelector("#contact-name-error")).not.toBeNull(),
     );
+    expect(renderedPage.getByText("Enter your name")).toBeInTheDocument();
+    expect(renderedPage.getByText("Enter a valid email address")).toBeInTheDocument();
+    expect(renderedPage.getByText("Enter a message")).toBeInTheDocument();
     expect(renderedPage.container.querySelector("#contact-message-error")).not.toBeNull();
     expect(renderedPage.getByLabelText("Name")).toHaveAttribute("aria-invalid", "true");
     expect(renderedPage.getByLabelText("Email")).toHaveAttribute("aria-invalid", "true");

@@ -131,9 +131,21 @@ export const CONTACT_MESSAGE_MAX_LENGTH = 5000;
  * reject submissions that arrive faster than a human can type.
  */
 export const ContactSubmissionSchema = z.object({
-  name: z.string().trim().min(1).max(CONTACT_NAME_MAX_LENGTH),
-  email: z.email(),
-  message: z.string().trim().min(1).max(CONTACT_MESSAGE_MAX_LENGTH),
+  name: z
+    .string()
+    .trim()
+    .min(1, { error: "Enter your name" })
+    .max(CONTACT_NAME_MAX_LENGTH, {
+      error: `Name must be ${CONTACT_NAME_MAX_LENGTH} characters or fewer`,
+    }),
+  email: z.email({ error: "Enter a valid email address" }),
+  message: z
+    .string()
+    .trim()
+    .min(1, { error: "Enter a message" })
+    .max(CONTACT_MESSAGE_MAX_LENGTH, {
+      error: `Message must be ${CONTACT_MESSAGE_MAX_LENGTH} characters or fewer`,
+    }),
   website: z.string(),
   renderedAt: z.int().positive(),
 });
