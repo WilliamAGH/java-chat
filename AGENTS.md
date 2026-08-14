@@ -191,7 +191,7 @@ alwaysApply: true
 - [VR1c] **Runtime**: `make run &`, hit `/actuator/health` and changed endpoints; then stop.
 - [VR1d] **Validate each slice**: After completing an end-to-end slice ([CC1e]), run `make build` and `make test` before starting the next slice.
 - [VR1e] **Direct-Owner Cleanup Handoff**: Name the direct production owner, list redundant artifacts deleted, identify each intentional small boundary-local duplication and why it avoids schema machinery, and cite tests that exercise the behavior. Do not create a manifest, catalog, contract, registry, or parity report for handoff.
-- [VR1f] **Completion Tail**: When verification loops are green: commit, merge the task worktree to `dev`, push, and watch any CI run to a terminal verdict.
+- [VR1f] **Completion Tail**: When verification loops are green: commit, merge the task worktree to `dev`, push, and watch any CI run to a terminal verdict. GitHub issues are filed only for material defects or features (behavior, correctness, security, performance, data quality, or a governed contract); pedantic/nitpick/style-only findings are fixed in place or dropped, never filed. Fixes and issue scope follow the minimalism bar — reuse before new code, simplify before completing, per the `ponytail` and `ce-simplify-code` skills.
 
 ## [JD1] Javadoc Standards
 
