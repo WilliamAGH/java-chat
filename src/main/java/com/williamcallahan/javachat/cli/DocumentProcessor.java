@@ -462,29 +462,17 @@ public class DocumentProcessor {
      */
     private record EnvironmentConfig(
             String docsDirectory,
-            String qdrantHost,
-            String qdrantPort,
-            String appPort,
             String docSetFilter,
             boolean includeQuickSets) {
         private static final String DOCS_DIR_DEFAULT = "data/docs";
-        private static final String QDRANT_HOST_DEFAULT = "localhost";
-        private static final String QDRANT_PORT_DEFAULT = "8086";
-        private static final String APP_PORT_DEFAULT = "8085";
         private static final String ENV_DOCS_DIR = "DOCS_DIR";
-        private static final String ENV_QDRANT_HOST = "QDRANT_HOST";
-        private static final String ENV_QDRANT_PORT = "QDRANT_PORT";
-        private static final String ENV_APP_PORT = "PORT";
         private static final String ENV_DOCS_SETS = "DOCS_SETS";
         private static final String ENV_DOCS_INCLUDE_QUICK = "DOCS_INCLUDE_QUICK";
 
         static EnvironmentConfig fromEnvironment() {
             return new EnvironmentConfig(
                     envOrDefault(ENV_DOCS_DIR, DOCS_DIR_DEFAULT),
-                    envOrDefault(ENV_QDRANT_HOST, QDRANT_HOST_DEFAULT),
-                    envOrDefault(ENV_QDRANT_PORT, QDRANT_PORT_DEFAULT),
-                    envOrDefault(ENV_APP_PORT, APP_PORT_DEFAULT),
-                    optionalEnv(ENV_DOCS_SETS),
+                    envOrDefault(ENV_DOCS_SETS, ""),
                     envBooleanOrDefault(ENV_DOCS_INCLUDE_QUICK, false));
         }
 
