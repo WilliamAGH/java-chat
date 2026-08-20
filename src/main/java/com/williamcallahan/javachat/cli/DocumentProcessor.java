@@ -460,10 +460,7 @@ public class DocumentProcessor {
     /**
      * Environment configuration consolidated from system environment variables.
      */
-    private record EnvironmentConfig(
-            String docsDirectory,
-            String docSetFilter,
-            boolean includeQuickSets) {
+    private record EnvironmentConfig(String docsDirectory, String docSetFilter, boolean includeQuickSets) {
         private static final String DOCS_DIR_DEFAULT = "data/docs";
         private static final String ENV_DOCS_DIR = "DOCS_DIR";
         private static final String ENV_DOCS_SETS = "DOCS_SETS";
