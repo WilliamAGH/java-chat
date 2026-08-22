@@ -441,6 +441,10 @@ public final class DocsSourceRegistry {
             String docType,
             String docVersion,
             DocumentationCitationPathStyle citationPathStyle) {
+        /**
+         * Preserves literal citation paths for existing documentation sources whose mirrors retain canonical
+         * filenames.
+         */
         public DocumentationSource(
                 String citationBaseUrl,
                 String relativeMirrorPath,
