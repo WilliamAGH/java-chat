@@ -4,7 +4,7 @@ import Header from "./Header.svelte";
 import { clerkAuthentication } from "../composables/clerkAuthentication.svelte";
 
 afterEach(() => {
-  clerkAuthentication.isLoaded = false;
+  clerkAuthentication.phase = "loading";
   clerkAuthentication.signedInUser = null;
 });
 
@@ -48,7 +48,7 @@ describe("Header authentication controls", () => {
   });
 
   it("offers sign-in and sign-up once Clerk is loaded and no user is signed in", () => {
-    clerkAuthentication.isLoaded = true;
+    clerkAuthentication.phase = "ready";
 
     const { getAllByRole } = render(Header, {
       props: { currentView: "chat" },
