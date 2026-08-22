@@ -71,6 +71,8 @@ src/main/resources/static/theme-boot.js
 ### Local scratchpad ###
 tmp/
 bin/
+!cli/bin/
+!cli/bin/**
 dogfood-output/
 lesson-curation-work/
 

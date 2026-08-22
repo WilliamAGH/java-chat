@@ -3,7 +3,7 @@
 
 include config/make/common.mk
 
-.PHONY: all help clean build test test-shell test-qdrant-integration lint lint-ast lint-frontend format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-doc-sets process-github-repo full-pipeline frontend-install frontend-build
+.PHONY: all help clean build test test-shell test-cli test-qdrant-integration lint lint-ast lint-frontend format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-doc-sets process-github-repo full-pipeline frontend-install frontend-build
 
 all: help ## Default target (alias)
 
@@ -35,6 +35,9 @@ test-shell: ## Run deterministic ingestion and fetch shell contract tests
 	bash scripts/test_process_all_to_qdrant_environment.sh
 	bash scripts/test_process_all_to_qdrant_postconditions.sh
 	bash scripts/test_prune_retired_java_api_vectors.sh
+
+test-cli: ## Run command-line client tests
+	cd cli && npm test
 
 test-qdrant-integration: ## Run synthetic hybrid-contract checks against local Qdrant 1.18.3
 	bash scripts/test_qdrant_1_18_integration.sh

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -13,8 +14,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.williamcallahan.javachat.adapters.out.clerk.ClerkApiKeyVerifier;
+import com.williamcallahan.javachat.application.auth.ApiKeyOperationUnavailableException;
+import com.williamcallahan.javachat.application.auth.VerifiedApiKey;
 import com.williamcallahan.javachat.web.CsrfController;
 import jakarta.servlet.http.Cookie;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -22,6 +27,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -35,7 +42,8 @@ import org.springframework.web.bind.annotation.RestController;
 })
 class SecurityConfigTest {
     private static final String CSRF_REFRESH_ENDPOINT = "/api/security/csrf";
-    private static final String CSRF_PROTECTED_ENDPOINT = "/api/security/csrf-test";
+    private static final String CSRF_PROTECTED_ENDPOINT = "/api/chat/stream";
+    private static final String API_KEY_SUBJECT_ENDPOINT = "/api/me";
     private static final String LOGOUT_ENDPOINT = "/logout";
     private static final String CSRF_COOKIE_NAME = "XSRF-TOKEN";
     private static final String CSRF_HEADER_NAME = "X-XSRF-TOKEN";
@@ -53,9 +61,19 @@ class SecurityConfigTest {
     private static final String HTML_SHELL_PATH = "/index.html";
     private static final String NON_CACHEABLE_RESOURCE_CACHE_CONTROL = "no-store";
     private static final String CSRF_REFRESH_CACHE_CONTROL = "no-store, must-revalidate";
+    private static final String API_KEY_SECRET = "ak_secret_0123456789abcdef0123456789abcdef";
+    private static final String API_KEY_BEARER = "Bearer " + API_KEY_SECRET;
+    private static final String SESSION_TOKEN_BEARER = "Bearer eyJhbGciOiJSUzI1NiJ9.payload.signature";
+    private static final String API_KEY_UNAVAILABLE_MESSAGE =
+            "API key verification is temporarily unavailable. Please retry.";
+    private static final String API_KEY_ID = "ak_0123456789abcdef0123456789abcdef";
+    private static final String API_KEY_SUBJECT = "user_0123456789abcdefghijklmnopq";
 
     @Autowired
     MockMvc mockMvc;
+
+    @MockitoBean
+    ClerkApiKeyVerifier clerkApiKeyVerifier;
 
     @Test
     void acceptsCookieAndHeaderTokenWithoutServerSession() throws Exception {
@@ -74,6 +92,46 @@ class SecurityConfigTest {
 
         assertNull(protectedPostExchange.getRequest().getSession(false));
         assertNull(protectedPostExchange.getResponse().getCookie("JSESSIONID"));
+    }
+
+    @Test
+    void skipsCsrfExchangeForApiKeyBearerRequests() throws Exception {
+        // Reaching key verification at all proves CSRF was bypassed: with a token
+        // requirement in force this request would have stopped at 403 instead.
+        when(clerkApiKeyVerifier.verify(API_KEY_SECRET))
+                .thenThrow(new ApiKeyOperationUnavailableException("Clerk unavailable"));
+        mockMvc.perform(post(CSRF_PROTECTED_ENDPOINT).header(HttpHeaders.AUTHORIZATION, API_KEY_BEARER))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.message").value(API_KEY_UNAVAILABLE_MESSAGE));
+    }
+
+    @Test
+    void rejectsUnknownApiKeyAfterCsrfExemption() throws Exception {
+        when(clerkApiKeyVerifier.verify(API_KEY_SECRET)).thenReturn(Optional.empty());
+
+        mockMvc.perform(post(CSRF_PROTECTED_ENDPOINT).header(HttpHeaders.AUTHORIZATION, API_KEY_BEARER))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON));
+    }
+
+    @Test
+    void keepsCsrfProtectionForBearerTokensThatAreNotApiKeys() throws Exception {
+        // The exemption must stay narrow: a Clerk session token still travels
+        // alongside cookies, so widening it would reopen the cross-site path.
+        mockMvc.perform(post(CSRF_PROTECTED_ENDPOINT).header(HttpHeaders.AUTHORIZATION, SESSION_TOKEN_BEARER))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value(CSRF_INVALID_MESSAGE));
+    }
+
+    @Test
+    void authenticatesApiKeyBearerWithoutCsrfExchange() throws Exception {
+        when(clerkApiKeyVerifier.verify(API_KEY_SECRET))
+                .thenReturn(Optional.of(new VerifiedApiKey(API_KEY_ID, API_KEY_SUBJECT)));
+
+        mockMvc.perform(post(API_KEY_SUBJECT_ENDPOINT).header(HttpHeaders.AUTHORIZATION, API_KEY_BEARER))
+                .andExpect(status().isOk())
+                .andExpect(content().string(API_KEY_SUBJECT));
     }
 
     @Test
@@ -202,6 +260,17 @@ class SecurityConfigTest {
         @PostMapping(CSRF_PROTECTED_ENDPOINT)
         public ResponseEntity<Void> acceptProtectedPost() {
             return ResponseEntity.noContent().build();
+        }
+
+        /**
+         * Returns the verified API-key subject so the real filter-chain outcome is observable.
+         *
+         * @param authentication API-key identity installed by the authentication filter
+         * @return the owning Clerk subject
+         */
+        @PostMapping(value = API_KEY_SUBJECT_ENDPOINT, produces = MediaType.TEXT_PLAIN_VALUE)
+        public ResponseEntity<String> apiKeySubject(Authentication authentication) {
+            return ResponseEntity.ok(authentication.getName());
         }
     }
 }

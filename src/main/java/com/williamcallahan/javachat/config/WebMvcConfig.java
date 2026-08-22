@@ -96,8 +96,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
      * Registers SPA view controllers that forward routes to index.html.
      *
      * <p>Only the routes the SPA actually publishes ({@code /}, {@code /chat},
-     * {@code /guided}, {@code /learn}, {@code /privacy}, {@code /contact} and
-     * lesson-detail paths) forward to the client shell; the frontend owns
+     * {@code /guided}, {@code /learn}, {@code /privacy}, {@code /contact},
+     * {@code /cli/authorize}, and lesson-detail paths) forward to the client shell; the frontend owns
      * canonical recovery for nested lesson paths. Anything else falls through
      * to the static resource chain and the error controller, so unknown URLs
      * return a real 404 instead of a soft-404 index page. Explicit depth
@@ -114,6 +114,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addViewController("/learn").setViewName(SPA_INDEX_VIEW);
         registry.addViewController("/privacy").setViewName(SPA_INDEX_VIEW);
         registry.addViewController("/contact").setViewName(SPA_INDEX_VIEW);
+        registry.addViewController("/cli/authorize").setViewName(SPA_INDEX_VIEW);
         registry.addViewController("/guided/{lessonPath:[^\\.]*}").setViewName(SPA_INDEX_VIEW);
         registry.addViewController("/learn/{lessonPath:[^\\.]*}").setViewName(SPA_INDEX_VIEW);
         registry.addViewController("/guided/{lessonPath:[^\\.]*}/{nestedLessonPath:[^\\.]*}")

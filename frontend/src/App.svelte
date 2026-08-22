@@ -5,6 +5,7 @@
   import LearnView from './lib/components/LearnView.svelte'
   import PrivacyPage from './lib/components/PrivacyPage.svelte'
   import ContactPage from './lib/components/ContactPage.svelte'
+  import CliAuthorizationPage from './lib/components/CliAuthorizationPage.svelte'
   import ToastContainer from './lib/components/ToastContainer.svelte'
   import { refreshCsrfToken } from './lib/services/csrf'
   import { loadClerkAuthentication } from './lib/composables/clerkAuthentication.svelte'
@@ -33,7 +34,9 @@
   })
 
   onMount(() => {
-    void refreshCsrfToken()
+    if (currentView !== 'cli-authorize') {
+      void refreshCsrfToken()
+    }
     // Failure already surfaced to the user as a toast inside the composable;
     // rethrown error lands in the console for diagnostics ([RC1f]: no silence).
     loadClerkAuthentication().catch((clerkLoadFailure: unknown) => {
@@ -91,8 +94,10 @@
       <LearnView bind:selectedSlug={currentLessonSlug} />
     {:else if currentView === 'privacy'}
       <PrivacyPage onInternalNavigate={navigateToInternalPath} />
-    {:else}
+    {:else if currentView === 'contact'}
       <ContactPage onInternalNavigate={navigateToInternalPath} />
+    {:else}
+      <CliAuthorizationPage />
     {/if}
   </main>
 

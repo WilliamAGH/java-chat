@@ -1,12 +1,18 @@
 package com.williamcallahan.javachat.web;
 
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.williamcallahan.javachat.adapters.out.clerk.ClerkApiKeyVerifier;
+import com.williamcallahan.javachat.application.auth.VerifiedApiKey;
 import com.williamcallahan.javachat.service.EmbeddingClient;
 import io.qdrant.client.QdrantClient;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.Answers;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +41,8 @@ import org.springframework.test.web.servlet.MockMvc;
 class AuthenticatedUserEndpointSecurityIntegrationTest {
 
     private static final String CLERK_USER_ID = "user_2abcDEFGHijkLMNopq";
+    private static final String CLERK_API_KEY_SECRET = "ak_secret_0123456789abcdef0123456789abcdef";
+    private static final String CLERK_API_KEY_ID = "ak_0123456789abcdef0123456789abcdef";
 
     @Autowired
     MockMvc mockMvc;
@@ -44,6 +52,9 @@ class AuthenticatedUserEndpointSecurityIntegrationTest {
 
     @MockitoBean
     QdrantClient qdrantClient;
+
+    @MockitoBean
+    ClerkApiKeyVerifier clerkApiKeyVerifier;
 
     @Test
     void anonymousRequestIsRejected() throws Exception {
@@ -55,6 +66,27 @@ class AuthenticatedUserEndpointSecurityIntegrationTest {
         mockMvc.perform(get("/api/me").with(jwt().jwt(sessionToken -> sessionToken.subject(CLERK_USER_ID))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.userId").value(CLERK_USER_ID));
+    }
+
+    @Test
+    void verifiedApiKeyBypassesSessionJwtAuthentication() throws Exception {
+        when(clerkApiKeyVerifier.verify(CLERK_API_KEY_SECRET))
+                .thenReturn(Optional.of(new VerifiedApiKey(CLERK_API_KEY_ID, CLERK_USER_ID)));
+
+        mockMvc.perform(get("/api/me").header("Authorization", "Bearer " + CLERK_API_KEY_SECRET))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value(CLERK_USER_ID));
+    }
+
+    @Test
+    void verifiedApiKeyCanRevokeItself() throws Exception {
+        when(clerkApiKeyVerifier.verify(CLERK_API_KEY_SECRET))
+                .thenReturn(Optional.of(new VerifiedApiKey(CLERK_API_KEY_ID, CLERK_USER_ID)));
+
+        mockMvc.perform(delete("/api/me/api-key").header("Authorization", "Bearer " + CLERK_API_KEY_SECRET))
+                .andExpect(status().isNoContent());
+
+        verify(clerkApiKeyVerifier).revoke(CLERK_API_KEY_ID);
     }
 
     @Test

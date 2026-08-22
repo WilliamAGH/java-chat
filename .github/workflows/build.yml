@@ -50,6 +50,10 @@ jobs:
       - name: Test frontend
         run: npm run test
 
+      - name: Test command-line client
+        working-directory: cli
+        run: npm test && npm run pack:check
+
       - name: Build frontend
         run: npm run build
 
