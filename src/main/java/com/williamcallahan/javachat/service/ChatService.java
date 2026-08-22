@@ -277,24 +277,18 @@ public class ChatService {
         List<ContextDocumentSegment> segments = new ArrayList<>();
         for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
             Document doc = contextDocs.get(docIndex);
-            Object rawUrlValue = doc.getMetadata().get(QdrantPayloadFieldSchema.URL_FIELD);
-            String rawUrl = rawUrlValue != null ? rawUrlValue.toString() : "";
+            String rawUrl = DocumentFactory.metadataText(doc, QdrantPayloadFieldSchema.URL_FIELD);
             String normalizedUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
-            Object sourceNameMetadata = doc.getMetadata().get(QdrantPayloadFieldSchema.SOURCE_NAME_FIELD);
-            Object docSetMetadata = doc.getMetadata().get(QdrantPayloadFieldSchema.DOC_SET_FIELD);
-            Object docVersionMetadata = doc.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD);
-            String sourceName = sourceNameMetadata == null
-                    ? ""
-                    : sourceNameMetadata.toString().trim();
-            String docSet =
-                    docSetMetadata == null ? "" : docSetMetadata.toString().trim();
+            String sourceName = DocumentFactory.metadataText(doc, QdrantPayloadFieldSchema.SOURCE_NAME_FIELD)
+                    .trim();
+            String docSet = DocumentFactory.metadataText(doc, QdrantPayloadFieldSchema.DOC_SET_FIELD)
+                    .trim();
             String sourceFamily = sourceName.isBlank() ? docSet : sourceName;
             if (sourceFamily.isBlank()) {
                 sourceFamily = UNSPECIFIED_SOURCE_RECORD_FIELD;
             }
-            String sourceVersion = docVersionMetadata == null
-                    ? ""
-                    : docVersionMetadata.toString().trim();
+            String sourceVersion = DocumentFactory.metadataText(doc, QdrantPayloadFieldSchema.DOC_VERSION_FIELD)
+                    .trim();
             if (sourceVersion.isBlank()) {
                 sourceVersion = UNSPECIFIED_SOURCE_RECORD_FIELD;
             }

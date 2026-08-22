@@ -174,7 +174,6 @@
   --color-text-muted: rgba(31, 30, 28, 0.36);
 
   /* Accent - Deepened terracotta (5.2:1 on --color-bg-primary) */
-  --color-accent: #b04a26;
   --color-accent-hover: #9c3f1e;
   --color-accent-muted: rgba(176, 74, 38, 0.14);
   --color-accent-subtle: rgba(176, 74, 38, 0.07);
