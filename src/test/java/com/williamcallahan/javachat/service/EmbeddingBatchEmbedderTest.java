@@ -156,6 +156,20 @@ class EmbeddingBatchEmbedderTest {
                 .anyMatch(requestedTextBatch -> requestedTextBatch.size() == expectedFinalBatchSize));
     }
 
+    @Test
+    void boundsConcurrentProviderRequests() {
+        int documentCount = EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE
+                * (EmbeddingBatchEmbedder.MAX_CONCURRENT_EMBEDDING_REQUESTS + 1);
+        RecordingEmbeddingClient embeddingClient = new RecordingEmbeddingClient(
+                EMBEDDING_DIMENSIONS,
+                (requestIndex, textBatch) -> repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR));
+
+        EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(documentCount));
+
+        assertTrue(embeddingClient.maximumConcurrentRequests.get()
+                <= EmbeddingBatchEmbedder.MAX_CONCURRENT_EMBEDDING_REQUESTS);
+    }
+
     private static List<Document> sequentialDocuments(int documentCount) {
         return IntStream.range(0, documentCount)
                 .mapToObj(EmbeddingBatchEmbedderTest::javaDocument)
@@ -182,6 +196,8 @@ class EmbeddingBatchEmbedderTest {
         private final int embeddingDimensions;
         private final BiFunction<Integer, List<String>, List<float[]>> batchEmbeddingFunction;
         private final AtomicInteger requestSequence = new AtomicInteger();
+        private final AtomicInteger activeRequests = new AtomicInteger();
+        private final AtomicInteger maximumConcurrentRequests = new AtomicInteger();
         private final List<List<String>> requestedTextBatches = Collections.synchronizedList(new ArrayList<>());
         private final List<LlmGatewayTier> requestedTiers = Collections.synchronizedList(new ArrayList<>());
 
@@ -196,7 +212,13 @@ class EmbeddingBatchEmbedderTest {
             int requestIndex = requestSequence.getAndIncrement();
             requestedTextBatches.add(List.copyOf(texts));
             requestedTiers.add(requestTier);
-            return batchEmbeddingFunction.apply(requestIndex, texts);
+            int activeRequestCount = activeRequests.incrementAndGet();
+            maximumConcurrentRequests.accumulateAndGet(activeRequestCount, Math::max);
+            try {
+                return batchEmbeddingFunction.apply(requestIndex, texts);
+            } finally {
+                activeRequests.decrementAndGet();
+            }
         }
 
         @Override
