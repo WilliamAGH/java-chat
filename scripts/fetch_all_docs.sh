@@ -296,8 +296,12 @@ validate_staged_documentation_mirror() {
     local malformed_path
     malformed_path="$(find "$staging_directory" -type f \( \
         -name '._*' -o -name '*.tmp' -o -name '*.part' -o -name '*~' \
-        -o -name '*\?*' -o -iname '*%3f*' -o -iname '*SNAPSHOT*' \
-        -o -iname '*-ea*' -o -iname '*-eap*' -o -iname 'eap-*' \) -print -quit)"
+        -o -name '*\?*' -o -iname '*%3f*' \
+        -o -iname 'SNAPSHOT' -o -iname 'SNAPSHOT-*' \
+        -o -iname '*-SNAPSHOT-*' -o -iname '*-SNAPSHOT.html' -o -iname '*-SNAPSHOT.htm' \
+        -o -iname '*-ea-*' -o -iname '*-ea.html' -o -iname '*-ea.htm' \
+        -o -iname '*-eap-*' -o -iname '*-eap.html' -o -iname '*-eap.htm' \
+        -o -iname 'eap-*' \) -print -quit)"
     if [ -n "$malformed_path" ]; then
         log "${RED}✗ $documentation_source_name staging contains a forbidden path: $malformed_path${NC}"
         return 1
@@ -359,6 +363,8 @@ fetch_source() {
     local seed_discovery_url=""
     local seed_source_prefix=""
     local seed_reject_regex=""
+    local seed_additional_discovery_url=""
+    local request_delay_seconds="0"
     local single_page_only="false"
     local java25_specification_pdfs="false"
     local superseded_relative_mirror_path=""
@@ -383,6 +389,8 @@ fetch_source() {
             --seed-discovery-url) seed_discovery_url="$2"; shift 2 ;;
             --seed-source-prefix) seed_source_prefix="$2"; shift 2 ;;
             --seed-reject-regex) seed_reject_regex="$2"; shift 2 ;;
+            --seed-additional-discovery-url) seed_additional_discovery_url="$2"; shift 2 ;;
+            --request-delay-seconds) request_delay_seconds="$2"; shift 2 ;;
             --single-page) single_page_only="true"; shift ;;
             --java25-specification-pdfs) java25_specification_pdfs="true"; shift ;;
             --superseded-mirror-path) superseded_relative_mirror_path="$2"; shift 2 ;;
@@ -405,6 +413,18 @@ fetch_source() {
     fi
     if [ -n "$seed_reject_regex" ] && [ -z "$seed_discovery_url" ]; then
         echo "A discovery-only rejection requires structured discovery: $name" >&2
+        return 1
+    fi
+    if [ -n "$seed_additional_discovery_url" ] && [ "$seed_document_type" != "html-links" ]; then
+        echo "Additional documentation discovery requires HTML link discovery: $name" >&2
+        return 1
+    fi
+    if [[ ! "$request_delay_seconds" =~ ^[0-9]+$ ]]; then
+        echo "Documentation request delay must be a nonnegative integer: $name" >&2
+        return 1
+    fi
+    if [ "$request_delay_seconds" -gt 0 ] && [ -z "$seed_discovery_url" ]; then
+        echo "Documentation request delay requires structured discovery: $name" >&2
         return 1
     fi
     if [ "$java25_specification_pdfs" = "true" ] \
@@ -514,7 +534,9 @@ fetch_source() {
             "$seed_document_type" \
             "$seed_discovery_url" \
             "$seed_source_prefix" \
-            "$seed_reject_regex" || documentation_fetch_status=$?
+            "$seed_reject_regex" \
+            "$request_delay_seconds" \
+            "$seed_additional_discovery_url" || documentation_fetch_status=$?
     else
         fetch_docs_mirror \
             "$url" \
@@ -588,6 +610,12 @@ fetch_named_official_source() {
         scala) "$source_dispatch" fetch_source --url "https://docs.scala-lang.org/scala3/reference/" --mirror-path "scala" --name "Scala 3 Documentation" --source-version "3-stable" --identity-regex "Scala 3" --cut-directories 2 --minimum-html-files 300 --seed-document-type html-links --seed-discovery-url "https://docs.scala-lang.org/scala3/reference/" --seed-source-prefix "https://docs.scala-lang.org/scala3/reference/" --seed-reject-regex "/index\\.html$" ;;
         groovy) "$source_dispatch" fetch_source --url "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" --mirror-path "groovy/5.0.7" --name "Groovy 5.0.7 Documentation" --source-version "5.0.7" --identity-regex "Groovy.*5\\.0\\.7|5\\.0\\.7.*Groovy" --cut-directories 4 --minimum-html-files 9 --reject-regex "/(gdk|templating|type-checking-extensions)\\.html$" --seed-document-type html-links --seed-discovery-url "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" --seed-source-prefix "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" ;;
         clojure) "$source_dispatch" fetch_source --url "https://clojure.org/guides/" --mirror-path "clojure" --name "Clojure Guides" --source-version "stable-current" --identity-regex "Clojure" --cut-directories 1 --minimum-html-files 20 --reject-regex "/guides/guides$" --seed-document-type xml-sitemap --seed-discovery-url "https://clojure.org/sitemap.xml" --seed-source-prefix "https://clojure.org/guides/" ;;
+        docker) "$source_dispatch" fetch_source --url "https://docs.docker.com/" --mirror-path "docker" --name "Docker Documentation" --source-version "current" --identity-regex "Docker" --cut-directories 0 --minimum-html-files 1600 --seed-document-type xml-sitemap --seed-discovery-url "https://docs.docker.com/sitemap.xml" --seed-source-prefix "https://docs.docker.com/" --seed-reject-regex '^https://docs\.docker\.com/(build/(buildkit/dockerfile-release-notes|release-notes)|enterprise/security/provisioning/scim|reference/cli/docker/(build|builder/build|exec|images|info|mcp/(feature|tools)/list|ps|pull|push|run)|scout/release-notes/cli)/$' ;;
+        dokploy) "$source_dispatch" fetch_source --url "https://docs.dokploy.com/" --mirror-path "dokploy" --name "Dokploy Documentation" --source-version "current" --identity-regex "Dokploy" --cut-directories 0 --minimum-html-files 200 --seed-document-type xml-sitemap --seed-discovery-url "https://docs.dokploy.com/sitemap.xml" --seed-source-prefix "https://docs.dokploy.com/" ;;
+        infisical) "$source_dispatch" fetch_source --url "https://infisical.com/docs/" --mirror-path "infisical" --name "Infisical Documentation" --source-version "current" --identity-regex "Infisical" --cut-directories 1 --minimum-html-files 2200 --seed-document-type xml-sitemap --seed-discovery-url "https://infisical.com/docs/sitemap.xml" --seed-source-prefix "https://infisical.com/docs/" ;;
+        doppler-guides) "$source_dispatch" fetch_source --url "https://docs.doppler.com/docs/" --mirror-path "doppler/docs" --name "Doppler Guides" --source-version "current" --identity-regex "Doppler" --cut-directories 1 --minimum-html-files 200 --seed-document-type html-links --seed-discovery-url "https://docs.doppler.com/docs/start" --seed-source-prefix "https://docs.doppler.com/docs/" --seed-reject-regex '^https://docs\.doppler\.com/docs/(enclave-installation(-docker|-serverless)?|enclave-service-tokens)$' --request-delay-seconds 1 ;;
+        doppler-reference) "$source_dispatch" fetch_source --url "https://docs.doppler.com/reference/" --mirror-path "doppler/reference" --name "Doppler API Reference" --source-version "current" --identity-regex "Doppler" --cut-directories 1 --minimum-html-files 130 --seed-document-type html-links --seed-discovery-url "https://docs.doppler.com/reference/api" --seed-source-prefix "https://docs.doppler.com/reference/" --request-delay-seconds 1 ;;
+        doppler-changelog) "$source_dispatch" fetch_source --url "https://docs.doppler.com/changelog/" --mirror-path "doppler/changelog" --name "Doppler Changelog" --source-version "current" --identity-regex "Doppler" --cut-directories 1 --minimum-html-files 20 --seed-document-type html-links --seed-discovery-url "https://docs.doppler.com/changelog/" --seed-source-prefix "https://docs.doppler.com/changelog/" --seed-additional-discovery-url "https://docs.doppler.com/changelog?page=2" --request-delay-seconds 1 ;;
         spring-boot) "$source_dispatch" fetch_source --url "https://docs.spring.io/spring-boot/reference/" --mirror-path "spring-boot" --name "Spring Boot Reference" --source-version "stable-current" --identity-regex "Spring Boot" --cut-directories 2 --minimum-html-files 89 --seed-document-type html-links --seed-discovery-url "https://docs.spring.io/spring-boot/reference/index.html" --seed-source-prefix "https://docs.spring.io/spring-boot/reference/" ;;
         quarkus) "$source_dispatch" fetch_source --url "https://quarkus.io/guides/" --mirror-path "quarkus" --name "Quarkus Guides" --source-version "stable-current" --identity-regex "Quarkus" --cut-directories 1 --minimum-html-files 200 --reject-regex "%7[BbDd]" --seed-document-type html-links --seed-discovery-url "https://quarkus.io/guides/" --seed-source-prefix "https://quarkus.io/guides/" ;;
         java/java21-complete) "$source_dispatch" fetch_source --java-release 21 --url "https://docs.oracle.com/en/java/javase/21/docs/api/" --mirror-path "java/java21-complete" --name "Java 21 Complete API" --source-version "21-ga" --identity-regex "Overview \\(Java SE 21 &amp; JDK 21\\)" --required-identity-page "api/index.html" --required-identity-text "Overview (Java SE 21 & JDK 21)" --cut-directories 5 --minimum-html-files 5000 ;;
@@ -644,7 +672,8 @@ fetch_selected_official_sources() {
 
 fetch_all_official_sources() {
     local source_identifier
-    for source_identifier in dev-java kotlin scala groovy clojure spring-boot quarkus \
+    for source_identifier in dev-java kotlin scala groovy clojure docker dokploy infisical \
+        doppler-guides doppler-reference doppler-changelog spring-boot quarkus \
         java/java21-complete java/java24-complete java/java25-complete \
         spring-ai-reference spring-ai-api-stable spring-framework-reference spring-framework-api \
         oracle-java25-release-notes ibm-java25-overview jetbrains-java25-article; do

@@ -51,6 +51,23 @@ assert_no_source_dispatch() {
     fi
 }
 
+assert_documentation_mirror_path_policy() {
+    local policy_test_directory="$TEST_WORK_DIRECTORY/path-policy"
+    mkdir -p "$policy_test_directory"
+    printf '<html>Doppler</html>\n' > "$policy_test_directory/dns-made-easy.html"
+    printf '<html>Doppler</html>\n' > "$policy_test_directory/secret-snapshots.html"
+    validate_staged_documentation_mirror "$policy_test_directory" "Path Policy" 1 "Doppler"
+    printf '<html>Doppler</html>\n' > "$policy_test_directory/reference-2.0-eap.html"
+    if validate_staged_documentation_mirror "$policy_test_directory" "Path Policy" 1 "Doppler"; then
+        fail_documentation_fetch_test "early-access documentation path was accepted"
+    fi
+    command rm "$policy_test_directory/reference-2.0-eap.html"
+    printf '<html>Doppler</html>\n' > "$policy_test_directory/reference-SNAPSHOT.html"
+    if validate_staged_documentation_mirror "$policy_test_directory" "Path Policy" 1 "Doppler"; then
+        fail_documentation_fetch_test "snapshot documentation path was accepted"
+    fi
+}
+
 write_java25_specification_byte_gate_stub() {
     local downloaded_specification_path="$1"
     local title_fragment="$2"
@@ -84,6 +101,8 @@ DOCS_ROOT="$TEST_DOCS_ROOT"
 log() {
     :
 }
+
+assert_documentation_mirror_path_policy
 
 fetch_discovered_documentation_seed() {
     printf '%s\n' "$@" > "$DISCOVERED_FETCH_CAPTURE"
@@ -124,6 +143,8 @@ assert_captured_arguments "$DISCOVERED_FETCH_CAPTURE" \
     xml-sitemap \
     "https://docs.example.invalid/sitemap.xml" \
     "https://docs.example.invalid/reference/" \
+    "" \
+    0 \
     ""
 
 if [ -f "$TEST_DOCS_ROOT/example/reference/robots.txt" ]; then
@@ -214,6 +235,38 @@ assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
     "https://kotlinlang.org/sitemap.xml" \
     --seed-source-prefix \
     "https://kotlinlang.org/docs/"
+
+if ! (
+    run_documentation_fetch --doc-sets=doppler-guides > /dev/null
+); then
+    fail_documentation_fetch_test "named Doppler guides selection did not complete"
+fi
+
+assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
+    --url \
+    "https://docs.doppler.com/docs/" \
+    --mirror-path \
+    "doppler/docs" \
+    --name \
+    "Doppler Guides" \
+    --source-version \
+    current \
+    --identity-regex \
+    Doppler \
+    --cut-directories \
+    1 \
+    --minimum-html-files \
+    200 \
+    --seed-document-type \
+    html-links \
+    --seed-discovery-url \
+    "https://docs.doppler.com/docs/start" \
+    --seed-source-prefix \
+    "https://docs.doppler.com/docs/" \
+    --seed-reject-regex \
+    '^https://docs\.doppler\.com/docs/(enclave-installation(-docker|-serverless)?|enclave-service-tokens)$' \
+    --request-delay-seconds \
+    1
 
 if ! (
     set --

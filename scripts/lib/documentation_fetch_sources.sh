@@ -333,6 +333,8 @@ fetch_discovered_documentation_seed() {
     local seed_discovery_url="$9"
     local seed_source_prefix="${10}"
     local seed_reject_regex="${11:-}"
+    local request_delay_seconds="${12:-0}"
+    local seed_additional_discovery_url="${13:-}"
     if [ -z "$seed_reject_regex" ]; then
         seed_reject_regex="$reject_regex"
     fi
@@ -385,6 +387,58 @@ fetch_discovered_documentation_seed() {
         log "${RED}✗ Structured discovery failed for $name${NC}"
         return 1
     fi
+    if [ -n "$seed_additional_discovery_url" ]; then
+        local additional_discovery_file
+        local additional_seed_file
+        local additional_mirror_paths_file
+        if ! additional_discovery_file="$(mktemp "$target_dir/.documentation-additional-discovery.XXXXXX")" \
+            || ! additional_seed_file="$(mktemp "$target_dir/.documentation-additional-seed.XXXXXX")" \
+            || ! additional_mirror_paths_file="$(mktemp "$target_dir/.documentation-additional-paths.XXXXXX")"; then
+            rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file" \
+                "${additional_discovery_file:-}" "${additional_seed_file:-}" "${additional_mirror_paths_file:-}"
+            cd - > /dev/null
+            log "${RED}✗ Could not create additional discovery files for $name${NC}"
+            return 1
+        fi
+        local additional_wget_discovery_arguments=(
+            --quiet
+            --output-document="$additional_discovery_file"
+            --max-redirect=0
+            "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}"
+        )
+        if ! wget "${additional_wget_discovery_arguments[@]}" "$seed_additional_discovery_url" \
+            || ! python3 "$SCRIPT_DIR/documentation_seed.py" \
+                --document-type "$seed_document_type" \
+                --input "$additional_discovery_file" \
+                --discovery-url "$seed_discovery_url" \
+                --source-prefix "$seed_source_prefix" \
+                --canonical-prefix "$canonical_prefix" \
+                --reject-regex "$seed_reject_regex" \
+                --output "$additional_seed_file" \
+                --mirror-path-output "$additional_mirror_paths_file" \
+                --cut-directories "$cut_directories"; then
+            rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file" \
+                "$additional_discovery_file" "$additional_seed_file" "$additional_mirror_paths_file"
+            cd - > /dev/null
+            log "${RED}✗ Additional structured discovery failed for $name${NC}"
+            return 1
+        fi
+        cat "$additional_seed_file" >> "$generated_seed_file"
+        LC_ALL=C sort -u -o "$generated_seed_file" "$generated_seed_file"
+        if ! python3 "$SCRIPT_DIR/documentation_seed.py" \
+            --project-mirror-paths-file \
+            --input "$generated_seed_file" \
+            --output "$mirror_paths_file" \
+            --required-prefix "$canonical_prefix" \
+            --cut-directories "$cut_directories"; then
+            rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file" \
+                "$additional_discovery_file" "$additional_seed_file" "$additional_mirror_paths_file"
+            cd - > /dev/null
+            log "${RED}✗ Combined structured discovery failed for $name${NC}"
+            return 1
+        fi
+        rm -f "$additional_discovery_file" "$additional_seed_file" "$additional_mirror_paths_file"
+    fi
     if [ ! -s "$generated_seed_file" ] || [ ! -s "$mirror_paths_file" ]; then
         rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file"
         cd - > /dev/null
@@ -404,6 +458,13 @@ fetch_discovered_documentation_seed() {
         cd - > /dev/null
         return 1
     fi
+    if [ "${FORCE_REFRESH:-false}" != "true" ] \
+        && verify_seeded_html_mirror "$target_dir" "$name" "$mirror_paths_file"; then
+        rm -f "$mirror_paths_file"
+        cd - > /dev/null
+        validate_fetch_result 0 "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed"
+        return
+    fi
 
     local wget_seed_arguments=(
         --timestamping
@@ -420,6 +481,17 @@ fetch_discovered_documentation_seed() {
         "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}"
         --user-agent="java-chat-doc-fetcher/1.0"
     )
+    if [ "$request_delay_seconds" -gt 0 ]; then
+        wget_seed_arguments+=(--wait="$request_delay_seconds")
+        local wget_help
+        wget_help="$(wget --help 2>/dev/null)"
+        if [[ "$wget_help" == *"--max-threads"* ]]; then
+            wget_seed_arguments+=(--max-threads=1)
+        fi
+        if [[ "$wget_help" == *"--retry-on-http-error"* ]]; then
+            wget_seed_arguments+=(--retry-on-http-error=429)
+        fi
+    fi
     if [ -n "$reject_regex" ]; then
         wget_seed_arguments+=(--reject-regex="$reject_regex")
     fi
