@@ -273,32 +273,32 @@ public class ChatService {
     /**
      * Builds context document segments from retrieved documents.
      */
-    private List<ContextDocumentSegment> buildContextSegments(List<Document> contextDocs) {
+    private List<ContextDocumentSegment> buildContextSegments(List<Document> contextDocuments) {
         List<ContextDocumentSegment> segments = new ArrayList<>();
-        for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
-            Document doc = contextDocs.get(docIndex);
-            String rawUrl = DocumentFactory.metadataText(doc, QdrantPayloadFieldSchema.URL_FIELD);
+        for (int documentIndex = 0; documentIndex < contextDocuments.size(); documentIndex++) {
+            Document document = contextDocuments.get(documentIndex);
+            String rawUrl = DocumentFactory.metadataText(document, QdrantPayloadFieldSchema.URL_FIELD);
             String normalizedUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
-            String sourceName = DocumentFactory.metadataText(doc, QdrantPayloadFieldSchema.SOURCE_NAME_FIELD)
+            String sourceName = DocumentFactory.metadataText(document, QdrantPayloadFieldSchema.SOURCE_NAME_FIELD)
                     .trim();
-            String docSet = DocumentFactory.metadataText(doc, QdrantPayloadFieldSchema.DOC_SET_FIELD)
+            String documentationSet = DocumentFactory.metadataText(document, QdrantPayloadFieldSchema.DOC_SET_FIELD)
                     .trim();
-            String sourceFamily = sourceName.isBlank() ? docSet : sourceName;
+            String sourceFamily = sourceName.isBlank() ? documentationSet : sourceName;
             if (sourceFamily.isBlank()) {
                 sourceFamily = UNSPECIFIED_SOURCE_RECORD_FIELD;
             }
-            String sourceVersion = DocumentFactory.metadataText(doc, QdrantPayloadFieldSchema.DOC_VERSION_FIELD)
+            String sourceVersion = DocumentFactory.metadataText(document, QdrantPayloadFieldSchema.DOC_VERSION_FIELD)
                     .trim();
             if (sourceVersion.isBlank()) {
                 sourceVersion = UNSPECIFIED_SOURCE_RECORD_FIELD;
             }
             String sourceRecordHeader =
                     "[SOURCE RECORD family=\"" + sourceFamily + "\" version=\"" + sourceVersion + "\"]";
-            String documentContent = doc.getText();
+            String documentContent = document.getText();
             String documentText = sourceRecordHeader + "\n" + (documentContent == null ? "" : documentContent);
 
             segments.add(new ContextDocumentSegment(
-                    docIndex + 1, doc.getId(), normalizedUrl, documentText, estimateTokens(documentText)));
+                    documentIndex + 1, document.getId(), normalizedUrl, documentText, estimateTokens(documentText)));
         }
         return segments;
     }

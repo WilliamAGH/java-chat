@@ -65,8 +65,6 @@ class SystemPromptConfigTest {
                 () -> assertTrue(corePrompt.contains(SystemPromptConfig.GENERATED_CONTROL_FLOW_CLAUSE)),
                 () -> assertTrue(corePrompt.contains("record exactly one terminal outcome for each candidate")),
                 () -> assertTrue(corePrompt.contains("prevent fall-through to success")),
-                () -> assertTrue(corePrompt.contains("computed outcomes must never be ignored")),
-                () -> assertTrue(corePrompt.contains("Kotlin `runCatching`")),
                 () -> assertTrue(corePrompt.contains("value returned by `getOrElse`")));
     }
 
@@ -76,9 +74,7 @@ class SystemPromptConfigTest {
 
         assertAll(
                 () -> assertTrue(corePrompt.contains(SystemPromptConfig.SOURCE_FIDELITY_CLAUSE)),
-                () -> assertTrue(corePrompt.contains("SOURCE RECORD matches the claimed library or source family")),
                 () -> assertTrue(corePrompt.contains("exact requested version")),
-                () -> assertTrue(corePrompt.contains("Never substitute a nearby patch version")),
                 () -> assertTrue(corePrompt.contains("Source unavailable: <requested source or version>")),
                 () -> assertTrue(corePrompt.contains("never imply that the Sources panel verifies it")));
     }

@@ -117,7 +117,6 @@ class ChatServiceTest {
                         QdrantPayloadFieldSchema.URL_FIELD,
                         "https://docs.spring.io/spring-framework/reference/data-access.html")
                 .metadata(QdrantPayloadFieldSchema.SOURCE_NAME_FIELD, "Spring Framework Reference")
-                .metadata(QdrantPayloadFieldSchema.DOC_SET_FIELD, "spring-framework-reference")
                 .build();
         when(retrievalService.retrieveWithLimitOutcome(
                         eq("Spring 7.0.7 transaction behavior"),

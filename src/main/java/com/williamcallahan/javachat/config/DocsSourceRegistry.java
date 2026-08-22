@@ -948,7 +948,7 @@ public final class DocsSourceRegistry {
         return Optional.of(PUBLIC_PDFS_BASE + baseName);
     }
 
-    /** Canonicalizes common duplicated path segments in HTTP documentation URLs. */
+    /** Canonicalizes duplicated segments and retired Spring reference aliases in HTTP documentation URLs. */
     public static String canonicalizeHttpDocUrl(String url) {
         if (url == null || url.isBlank()) {
             return url;
