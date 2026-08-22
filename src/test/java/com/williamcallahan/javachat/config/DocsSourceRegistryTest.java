@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.config;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationCitationPathStyle;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSource;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
 import java.nio.file.Path;
@@ -103,9 +104,8 @@ class DocsSourceRegistryTest {
         documentationSources.forEach(documentationSource -> {
             String localDocumentationFileUrl =
                     "file:///data/docs/" + documentationSource.relativeMirrorPath() + "/index.html";
-            String expectedOfficialDocumentationUrl = documentationSource.citationBaseUrl().endsWith("/")
-                    ? documentationSource.citationBaseUrl() + "index.html"
-                    : documentationSource.citationBaseUrl();
+            String expectedOfficialDocumentationUrl = documentationSource.citationBaseUrl()
+                    + documentationSource.citationPathStyle().citationRelativePath("index.html");
             assertEquals(
                     expectedOfficialDocumentationUrl, DocsSourceRegistry.normalizeDocUrl(localDocumentationFileUrl));
             assertEquals(
@@ -125,6 +125,42 @@ class DocsSourceRegistryTest {
                         .map(DocumentationSource::relativeMirrorPath)
                         .distinct()
                         .count());
+    }
+
+    @Test
+    void restoresExtensionlessCanonicalRoutesForMirroredPlatformDocumentation() {
+        assertEquals(
+                "https://docs.docker.com/engine/swarm/",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/docker/engine/swarm/index.html"));
+        assertEquals(
+                "https://docs.dokploy.com/docs/core/backups",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/dokploy/docs/core/backups.html"));
+        assertEquals(
+                "https://infisical.com/docs/integrations/platforms/infisical-agent",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/infisical/integrations/platforms/infisical-agent.html"));
+        assertEquals(
+                "https://docs.doppler.com/docs/mcp",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/doppler/docs/mcp.html"));
+        assertEquals(
+                "https://docs.doppler.com/reference/projects-list",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/doppler/reference/projects-list.html"));
+        assertEquals(
+                "https://docs.doppler.com/changelog/june-2026",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/doppler/changelog/june-2026.html"));
+        assertEquals(
+                DocumentationCitationPathStyle.EXTENSIONLESS_HTML,
+                DocsSourceRegistry.documentationSourceForRelativeMirrorPath("docker")
+                        .orElseThrow()
+                        .citationPathStyle());
+    }
+
+    @Test
+    void keepsArchiveCitationsOnTheVerifiedArtifactUrl() {
+        assertEquals(
+                "https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-databind/2.22.2/jackson-databind-2.22.2-javadoc.jar",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/jackson/2.22.2/api/com/fasterxml/jackson/databind/ObjectMapper.html"));
     }
 
     @Test

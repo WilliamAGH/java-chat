@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import html.parser
 import json
 import re
 import sys
@@ -33,6 +34,29 @@ class JavadocIndexUrls:
 
     def index_file_1(self) -> str:
         return urllib.parse.urljoin(self.base_url, "index-files/index-1.html")
+
+
+class JavadocLinkParser(html.parser.HTMLParser):
+    """Collects Javadoc anchor targets without interpreting HTML through regular expressions."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.link_targets: list[str] = []
+
+    def handle_starttag(self, tag: str, attributes: list[tuple[str, str | None]]) -> None:
+        if tag.casefold() != "a":
+            return
+        for attribute_name, attribute_text in attributes:
+            if attribute_name.casefold() == "href" and attribute_text is not None:
+                self.link_targets.append(attribute_text)
+
+
+def parse_link_targets(index_html: str) -> list[str]:
+    """Returns anchor targets from one Javadoc page."""
+    link_parser = JavadocLinkParser()
+    link_parser.feed(index_html)
+    link_parser.close()
+    return link_parser.link_targets
 
 
 def fetch_text(url: str) -> str:
@@ -96,9 +120,13 @@ def encode_url(url: str) -> str:
 
 
 def parse_index_files(index_1_html: str) -> set[str]:
-    # Collect all "index-N.html" references from index-1.
-    matches = set(re.findall(r'href="(index-[0-9]+\\.html)"', index_1_html))
-    return {m for m in matches if m.startswith("index-") and m.endswith(".html")}
+    return {
+        link_target
+        for link_target in parse_link_targets(index_1_html)
+        if link_target.startswith("index-")
+        and link_target.removeprefix("index-").removesuffix(".html").isdigit()
+        and link_target.endswith(".html")
+    }
 
 
 def root_pages_for_release(base_url: str) -> tuple[str, ...]:
@@ -127,8 +155,9 @@ def root_pages_from_index(index_html: str) -> tuple[str, ...]:
     """Returns root HTML pages linked by a non-JDK standard-doclet index."""
     root_pages = {
         html.unescape(link_target).split("#", 1)[0]
-        for link_target in re.findall(r'href="([^"]+\.html(?:#[^"]*)?)"', index_html)
-        if "/" not in html.unescape(link_target).split("#", 1)[0]
+        for link_target in parse_link_targets(index_html)
+        if html.unescape(link_target).split("#", 1)[0].endswith(".html")
+        and "/" not in html.unescape(link_target).split("#", 1)[0]
     }
     root_pages.add("index.html")
     return tuple(sorted(root_pages))
