@@ -2,11 +2,15 @@ package com.williamcallahan.javachat.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import com.williamcallahan.javachat.application.ingestion.LocalDocumentationIngestionUseCase;
+import com.williamcallahan.javachat.config.QdrantIndexInitializer;
 import com.williamcallahan.javachat.service.ProgressTracker;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -77,6 +81,20 @@ class DocumentProcessorSelectionTest {
 
         assertEquals(DOCSET_GROOVY_MIRROR_PATH, groovyDocumentationSet.relativePath());
         assertEquals("groovy", groovyDocumentationSet.indexedDocSet());
+    }
+
+    @Test
+    void initializesQdrantBeforeStartingDocumentProcessing() {
+        QdrantIndexInitializer qdrantIndexInitializer = mock(QdrantIndexInitializer.class);
+        IllegalStateException initializationFailure = new IllegalStateException("initialization failed");
+        doThrow(initializationFailure).when(qdrantIndexInitializer).ensureCollectionsAndIndexes();
+
+        IllegalStateException observedFailure = assertThrows(
+                IllegalStateException.class,
+                () -> documentProcessor.processDocuments(qdrantIndexInitializer).run());
+
+        assertSame(initializationFailure, observedFailure);
+        verify(qdrantIndexInitializer).ensureCollectionsAndIndexes();
     }
 
     private List<DocumentationSet> selectDocumentationSets(final String docSetFilter, final boolean includeQuickSets) {
