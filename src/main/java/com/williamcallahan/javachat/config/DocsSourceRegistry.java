@@ -141,7 +141,7 @@ public final class DocsSourceRegistry {
                     "kotlin",
                     "Kotlin Documentation",
                     "kotlin",
-                    "official",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
                     "language-reference",
                     "2.4.10"),
             new DocumentationSource(
@@ -149,7 +149,7 @@ public final class DocsSourceRegistry {
                     "scala",
                     "Scala 3 Documentation",
                     "scala",
-                    "official",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
                     "language-reference",
                     ""),
             new DocumentationSource(
@@ -157,7 +157,7 @@ public final class DocsSourceRegistry {
                     "groovy/5.0.7",
                     "Groovy 5.0.7 Documentation",
                     "groovy",
-                    "official",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
                     "language-reference",
                     "5.0.7"),
             new DocumentationSource(
@@ -165,7 +165,7 @@ public final class DocsSourceRegistry {
                     "clojure",
                     "Clojure Guides",
                     "clojure",
-                    "official",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
                     "language-guide",
                     ""),
             new DocumentationSource(
@@ -231,7 +231,8 @@ public final class DocsSourceRegistry {
                     "jackson/2.22.2/api",
                     "official",
                     "api-docs",
-                    "2.22.2"),
+                    "2.22.2",
+                    DocumentationCitationPathStyle.FIXED_URL),
             new DocumentationSource(
                     "https://javadoc.io/doc/com.fasterxml.jackson.core/jackson-databind/2.21.2/",
                     "jackson/2.21.2/api",
@@ -247,7 +248,8 @@ public final class DocsSourceRegistry {
                     "jackson/3.2.2/api",
                     "official",
                     "api-docs",
-                    "3.2.2"),
+                    "3.2.2",
+                    DocumentationCitationPathStyle.FIXED_URL),
             new DocumentationSource(
                     "https://javadoc.io/doc/tools.jackson.core/jackson-databind/3.1.2/",
                     "jackson/3.1.2/api",
@@ -263,7 +265,62 @@ public final class DocsSourceRegistry {
                     "lombok/1.18.46/api",
                     "official",
                     "api-docs",
-                    "1.18.46"),
+                    "1.18.46",
+                    DocumentationCitationPathStyle.FIXED_URL),
+            new DocumentationSource(
+                    "https://docs.docker.com/",
+                    "docker",
+                    "Docker Documentation",
+                    "docker",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://docs.dokploy.com/",
+                    "dokploy",
+                    "Dokploy Documentation",
+                    "dokploy",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://infisical.com/docs/",
+                    "infisical",
+                    "Infisical Documentation",
+                    "infisical",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://docs.doppler.com/docs/",
+                    "doppler/docs",
+                    "Doppler Guides",
+                    "doppler-guides",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-guide",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://docs.doppler.com/reference/",
+                    "doppler/reference",
+                    "Doppler API Reference",
+                    "doppler-reference",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "api-docs",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://docs.doppler.com/changelog/",
+                    "doppler/changelog",
+                    "Doppler Changelog",
+                    "doppler-changelog",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "release-notes",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
             new DocumentationSource(
                     "https://platform.claude.com/docs/en/",
                     "anthropic/api",
@@ -420,7 +477,10 @@ public final class DocsSourceRegistry {
             String docType,
             String docVersion,
             DocumentationCitationPathStyle citationPathStyle) {
-        /** Creates a source whose canonical citation paths match mirrored filenames literally. */
+        /**
+         * Preserves literal citation paths for existing documentation sources whose mirrors retain canonical
+         * filenames.
+         */
         public DocumentationSource(
                 String citationBaseUrl,
                 String relativeMirrorPath,
@@ -456,6 +516,8 @@ public final class DocsSourceRegistry {
     public enum DocumentationCitationPathStyle {
         /** Keeps the mirrored relative path unchanged. */
         LITERAL,
+        /** Uses the configured artifact URL for every mirrored archive page. */
+        FIXED_URL,
         /** Removes the HTML filename synthesized for an extensionless canonical route. */
         EXTENSIONLESS_HTML;
 
@@ -562,6 +624,9 @@ public final class DocsSourceRegistry {
         }
 
         Optional<String> resolveCitationUrl(String mirroredRelativePath) {
+            if (citationPathStyle == DocumentationCitationPathStyle.FIXED_URL) {
+                return Optional.of(citationBaseUrl);
+            }
             return joinBaseAndRel(citationBaseUrl, citationPathStyle.citationRelativePath(mirroredRelativePath));
         }
     }
@@ -826,9 +891,6 @@ public final class DocsSourceRegistry {
     private static Optional<String> joinBaseAndRel(String baseUrl, String relativePath) {
         Optional<String> joinedUrl = Optional.empty();
         if (baseUrl != null) {
-            if (!baseUrl.endsWith(PATH_SEPARATOR_TEXT)) {
-                return Optional.of(baseUrl);
-            }
             String normalizedBase = trimTrailingSlashes(baseUrl);
             String normalizedRelativePath = relativePath == null
                     ? EMPTY_TEXT

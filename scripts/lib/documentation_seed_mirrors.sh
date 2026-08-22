@@ -58,6 +58,22 @@ discard_documentation_fetch_staging_directory() {
     find "$staging_directory" -depth -delete
 }
 
+# Copies a published mirror into writable validation staging without shared mutable inodes.
+copy_documentation_mirror_to_staging() {
+    local published_directory="$1"
+    local staging_directory="$2"
+    if [ "$(uname -s)" = "Darwin" ]; then
+        cp -cRp "$published_directory/." "$staging_directory/" 2>/dev/null \
+            || cp -Rp "$published_directory/." "$staging_directory/"
+        return
+    fi
+    if cp --help 2>/dev/null | grep -Fq -- "--reflink"; then
+        cp -a --reflink=auto -- "$published_directory/." "$staging_directory/"
+        return
+    fi
+    cp -Rp "$published_directory/." "$staging_directory/"
+}
+
 restore_retired_documentation_mirror() {
     local retired_mirror_path="$1"
     local active_mirror_path="$2"

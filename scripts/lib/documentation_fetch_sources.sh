@@ -175,6 +175,25 @@ fetch_java25_specification_pdfs() {
         "The Java® Virtual Machine Specification"
 }
 
+# Revalidates the published Java 25 specifications before an incremental mirror is reused.
+validate_java25_specification_pdfs() {
+    local target_directory="$1"
+    local source_name="$2"
+    if ! require_java25_specification_pdf_parser; then
+        return 1
+    fi
+    validate_java25_specification_pdf \
+        "$target_directory/docs.oracle.com/javase/specs/jls/se25/jls25.pdf" \
+        "$source_name JLS 25" \
+        "Language Specification" \
+        "The Java® Language Specification" \
+        && validate_java25_specification_pdf \
+            "$target_directory/docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf" \
+            "$source_name JVMS 25" \
+            "Virtual Machine Specification" \
+            "The Java® Virtual Machine Specification"
+}
+
 # Fetches one governed article without recursively following unrelated page links.
 fetch_single_documentation_page() {
     local url="$1"
@@ -324,19 +343,46 @@ fetch_docs_mirror() {
 
 # Fetches an explicit seed discovered from structured XML or HTML.
 fetch_discovered_documentation_seed() {
-    local canonical_prefix="$1"
-    local target_dir="$2"
-    local name="$3"
-    local cut_directories="$4"
-    local minimum_html_files="$5"
-    local reject_regex="${6:-}"
-    local partial_mirror_allowed="$7"
-    local seed_document_type="$8"
-    local seed_discovery_url="$9"
-    local seed_source_prefix="${10}"
-    local seed_reject_regex="${11:-}"
-    shift 11
-    local -a supplemental_seed_urls=("$@")
+    local canonical_prefix=""
+    local target_dir=""
+    local name=""
+    local cut_directories=""
+    local minimum_html_files=""
+    local reject_regex=""
+    local partial_mirror_allowed="false"
+    local seed_document_type=""
+    local seed_discovery_url=""
+    local seed_source_prefix=""
+    local seed_reject_regex=""
+    local request_delay_seconds="0"
+    local seed_additional_discovery_url=""
+    local -a supplemental_seed_urls=()
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --canonical-prefix) canonical_prefix="$2"; shift 2 ;;
+            --target-dir) target_dir="$2"; shift 2 ;;
+            --name) name="$2"; shift 2 ;;
+            --cut-directories) cut_directories="$2"; shift 2 ;;
+            --minimum-html-files) minimum_html_files="$2"; shift 2 ;;
+            --reject-regex) reject_regex="$2"; shift 2 ;;
+            --partial-mirror-allowed) partial_mirror_allowed="$2"; shift 2 ;;
+            --seed-document-type) seed_document_type="$2"; shift 2 ;;
+            --seed-discovery-url) seed_discovery_url="$2"; shift 2 ;;
+            --seed-source-prefix) seed_source_prefix="$2"; shift 2 ;;
+            --seed-reject-regex) seed_reject_regex="$2"; shift 2 ;;
+            --request-delay-seconds) request_delay_seconds="$2"; shift 2 ;;
+            --seed-additional-discovery-url) seed_additional_discovery_url="$2"; shift 2 ;;
+            --supplemental-seed-url) supplemental_seed_urls+=("$2"); shift 2 ;;
+            *) echo "Unknown discovered documentation option: $1" >&2; return 1 ;;
+        esac
+    done
+    if [ -z "$canonical_prefix" ] || [ -z "$target_dir" ] || [ -z "$name" ] \
+        || [ -z "$cut_directories" ] || [ -z "$minimum_html_files" ] \
+        || [ -z "$seed_document_type" ] || [ -z "$seed_discovery_url" ] \
+        || [ -z "$seed_source_prefix" ]; then
+        echo "Discovered documentation fetch requires canonical source, target, identity, and discovery options" >&2
+        return 1
+    fi
     if [ -z "$seed_reject_regex" ]; then
         seed_reject_regex="$reject_regex"
     fi
@@ -405,6 +451,54 @@ fetch_discovered_documentation_seed() {
             return 1
         fi
     fi
+    if [ -n "$seed_additional_discovery_url" ]; then
+        local additional_discovery_file
+        local additional_seed_file
+        local additional_mirror_paths_file
+        if ! additional_discovery_file="$(mktemp "$target_dir/.documentation-additional-discovery.XXXXXX")" \
+            || ! additional_seed_file="$(mktemp "$target_dir/.documentation-additional-seed.XXXXXX")" \
+            || ! additional_mirror_paths_file="$(mktemp "$target_dir/.documentation-additional-paths.XXXXXX")"; then
+            rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file" \
+                "${additional_discovery_file:-}" "${additional_seed_file:-}" "${additional_mirror_paths_file:-}"
+            cd - > /dev/null
+            log "${RED}✗ Could not create additional discovery files for $name${NC}"
+            return 1
+        fi
+        local additional_wget_discovery_arguments=(
+            --quiet
+            --output-document="$additional_discovery_file"
+            --max-redirect=0
+            "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}"
+        )
+        if ! wget2 "${additional_wget_discovery_arguments[@]}" "$seed_additional_discovery_url" \
+            || ! python3 "$SCRIPT_DIR/documentation_seed.py" \
+                --document-type "$seed_document_type" \
+                --input "$additional_discovery_file" \
+                --discovery-url "$seed_discovery_url" \
+                --source-prefix "$seed_source_prefix" \
+                --canonical-prefix "$canonical_prefix" \
+                --reject-regex "$seed_reject_regex" \
+                --output "$additional_seed_file" \
+                --mirror-path-output "$additional_mirror_paths_file" \
+                --cut-directories "$cut_directories"; then
+            rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file" \
+                "$additional_discovery_file" "$additional_seed_file" "$additional_mirror_paths_file"
+            cd - > /dev/null
+            log "${RED}✗ Additional structured discovery failed for $name${NC}"
+            return 1
+        fi
+        cat "$additional_seed_file" >> "$generated_seed_file"
+        LC_ALL=C sort -u -o "$generated_seed_file" "$generated_seed_file"
+        if ! write_documentation_seed_mirror_paths \
+            "$canonical_prefix" "$generated_seed_file" "$cut_directories" "$mirror_paths_file" "$name"; then
+            rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file" \
+                "$additional_discovery_file" "$additional_seed_file" "$additional_mirror_paths_file"
+            cd - > /dev/null
+            log "${RED}✗ Combined structured discovery failed for $name${NC}"
+            return 1
+        fi
+        rm -f "$additional_discovery_file" "$additional_seed_file" "$additional_mirror_paths_file"
+    fi
     if [ ! -s "$generated_seed_file" ] || [ ! -s "$mirror_paths_file" ]; then
         rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file"
         cd - > /dev/null
@@ -424,15 +518,15 @@ fetch_discovered_documentation_seed() {
         cd - > /dev/null
         return 1
     fi
-
-    local existing_seeded_html_count
-    existing_seeded_html_count="$(count_html_files "$target_dir")"
-    if [ "$FORCE_REFRESH" != "true" ] \
-        && [ "$existing_seeded_html_count" -ge "$minimum_html_files" ] \
+    if [ "${FORCE_REFRESH:-false}" != "true" ] \
         && verify_seeded_html_mirror "$target_dir" "$name" "$mirror_paths_file"; then
         rm -f "$mirror_paths_file"
-        log "${GREEN}✓ $name already fetched: $existing_seeded_html_count HTML files (complete seed coverage)${NC}"
-        return 0
+        cd - > /dev/null
+        if validate_fetch_result 0 "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed"; then
+            DOCUMENTATION_SOURCE_ALREADY_COMPLETE="true"
+            return 0
+        fi
+        return 1
     fi
 
     local wget_seed_arguments=(
@@ -450,6 +544,9 @@ fetch_discovered_documentation_seed() {
         "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}"
         --user-agent="java-chat-doc-fetcher/1.0"
     )
+    if [ "$request_delay_seconds" -gt 0 ]; then
+        wget_seed_arguments+=(--wait="$request_delay_seconds")
+    fi
     if [ -n "$reject_regex" ]; then
         wget_seed_arguments+=(--reject-regex="$reject_regex")
     fi

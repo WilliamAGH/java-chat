@@ -87,14 +87,14 @@ class DocumentProcessorSelectionTest {
     void initializesQdrantBeforeStartingDocumentProcessing() {
         QdrantIndexInitializer qdrantIndexInitializer = mock(QdrantIndexInitializer.class);
         IllegalStateException initializationFailure = new IllegalStateException("initialization failed");
-        doThrow(initializationFailure).when(qdrantIndexInitializer).ensureCollectionsAndIndexes();
+        doThrow(initializationFailure).when(qdrantIndexInitializer).requireCollectionsAndIndexesReady();
 
         IllegalStateException observedFailure = assertThrows(
                 IllegalStateException.class,
                 () -> documentProcessor.processDocuments(qdrantIndexInitializer).run());
 
         assertSame(initializationFailure, observedFailure);
-        verify(qdrantIndexInitializer).ensureCollectionsAndIndexes();
+        verify(qdrantIndexInitializer).requireCollectionsAndIndexesReady();
     }
 
     private List<DocumentationSet> selectDocumentationSets(final String docSetFilter, final boolean includeQuickSets) {

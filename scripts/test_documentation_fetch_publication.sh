@@ -24,6 +24,18 @@ log() {
     :
 }
 
+COPY_TEST_PUBLISHED="$PUBLICATION_TEST_WORK_DIRECTORY/copy-published"
+COPY_TEST_STAGING="$PUBLICATION_TEST_WORK_DIRECTORY/copy-staging"
+mkdir -p "$COPY_TEST_PUBLISHED" "$COPY_TEST_STAGING"
+printf '%s\n' "published" > "$COPY_TEST_PUBLISHED/index.html"
+copy_documentation_mirror_to_staging "$COPY_TEST_PUBLISHED" "$COPY_TEST_STAGING"
+if [ "$COPY_TEST_PUBLISHED/index.html" -ef "$COPY_TEST_STAGING/index.html" ]; then
+    fail_publication_test "validation staging shared a mutable inode with the published mirror"
+fi
+printf '%s\n' "staged" > "$COPY_TEST_STAGING/index.html"
+[ "$(< "$COPY_TEST_PUBLISHED/index.html")" = "published" ] \
+    || fail_publication_test "staging mutation changed the published mirror"
+
 create_documentation_quarantine_directory() {
     local quarantine_directory="$PUBLICATION_TEST_WORK_DIRECTORY/quarantine/$1-$2-$PUBLICATION_TEST_CASE"
     mkdir -p "$quarantine_directory"

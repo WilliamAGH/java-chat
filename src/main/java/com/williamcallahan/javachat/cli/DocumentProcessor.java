@@ -154,7 +154,7 @@ public class DocumentProcessor {
     @Bean
     public CommandLineRunner processDocuments(QdrantIndexInitializer qdrantIndexInitializer) {
         return commandLineArguments -> {
-            qdrantIndexInitializer.ensureCollectionsAndIndexes();
+            qdrantIndexInitializer.requireCollectionsAndIndexesReady();
             runDocumentProcessing(commandLineArguments);
         };
     }
