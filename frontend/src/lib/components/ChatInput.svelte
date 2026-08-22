@@ -241,7 +241,7 @@
 
   .hint-text {
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .hint-text kbd {

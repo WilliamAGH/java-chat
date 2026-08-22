@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.IntStream;
 import org.springframework.ai.document.Document;
 
 /**
@@ -13,7 +14,8 @@ import org.springframework.ai.document.Document;
  */
 final class EmbeddingBatchEmbedder {
 
-    static final int EMBEDDING_REQUEST_BATCH_SIZE = 4;
+    static final int EMBEDDING_REQUEST_BATCH_SIZE = 8;
+    static final int MAX_CONCURRENT_EMBEDDING_REQUESTS = 8;
 
     private EmbeddingBatchEmbedder() {}
 
@@ -31,15 +33,29 @@ final class EmbeddingBatchEmbedder {
                     "Embedding dimensions must be positive but were " + expectedEmbeddingDimensions);
         }
 
+        int embeddingRequestCount = Math.ceilDiv(documents.size(), EMBEDDING_REQUEST_BATCH_SIZE);
         List<float[]> allEmbeddings = new ArrayList<>(documents.size());
-        for (int batchStartIndex = 0;
-                batchStartIndex < documents.size();
-                batchStartIndex += EMBEDDING_REQUEST_BATCH_SIZE) {
-            int batchEndIndex = Math.min(batchStartIndex + EMBEDDING_REQUEST_BATCH_SIZE, documents.size());
-            List<Document> documentBatch = documents.subList(batchStartIndex, batchEndIndex);
-            List<float[]> batchEmbeddings = embedSingleBatch(
-                    embeddingClient, documentBatch, batchStartIndex, batchEndIndex, expectedEmbeddingDimensions);
-            allEmbeddings.addAll(batchEmbeddings);
+        for (int requestWaveStartIndex = 0;
+                requestWaveStartIndex < embeddingRequestCount;
+                requestWaveStartIndex += MAX_CONCURRENT_EMBEDDING_REQUESTS) {
+            int currentWaveStartIndex = requestWaveStartIndex;
+            int requestWaveEndIndex =
+                    Math.min(requestWaveStartIndex + MAX_CONCURRENT_EMBEDDING_REQUESTS, embeddingRequestCount);
+            List<List<float[]>> orderedEmbeddingWave = IntStream.range(currentWaveStartIndex, requestWaveEndIndex)
+                    .parallel()
+                    .mapToObj(requestIndex -> {
+                        int batchStartIndex = requestIndex * EMBEDDING_REQUEST_BATCH_SIZE;
+                        int batchEndIndex = Math.min(batchStartIndex + EMBEDDING_REQUEST_BATCH_SIZE, documents.size());
+                        List<Document> documentBatch = documents.subList(batchStartIndex, batchEndIndex);
+                        return embedSingleBatch(
+                                embeddingClient,
+                                documentBatch,
+                                batchStartIndex,
+                                batchEndIndex,
+                                expectedEmbeddingDimensions);
+                    })
+                    .toList();
+            orderedEmbeddingWave.forEach(allEmbeddings::addAll);
         }
         return List.copyOf(allEmbeddings);
     }

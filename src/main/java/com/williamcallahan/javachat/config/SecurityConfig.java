@@ -1,8 +1,10 @@
 package com.williamcallahan.javachat.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.williamcallahan.javachat.adapters.in.web.security.ClerkApiKeyAuthenticationFilter;
 import com.williamcallahan.javachat.adapters.in.web.security.ClerkAuthorizedPartyValidator;
 import com.williamcallahan.javachat.adapters.in.web.security.CsrfAccessDeniedHandler;
+import com.williamcallahan.javachat.adapters.out.clerk.ClerkApiKeyVerifier;
 import java.util.List;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
@@ -19,6 +21,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
@@ -107,7 +111,8 @@ public class SecurityConfig {
             CorsConfigurationSource corsConfigurationSource,
             ObjectMapper objectMapper,
             ObjectProvider<JwtDecoder> clerkJwtDecoder,
-            AppProperties appProperties)
+            AppProperties appProperties,
+            ClerkApiKeyVerifier clerkApiKeyVerifier)
             throws Exception {
         CookieCsrfTokenRepository csrfTokenRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
         csrfTokenRepository.setCookieCustomizer(csrfCookie -> csrfCookie.sameSite("Lax"));
@@ -115,7 +120,12 @@ public class SecurityConfig {
         CsrfAccessDeniedHandler accessDeniedHandler = new CsrfAccessDeniedHandler(objectMapper);
 
         http.cors(c -> c.configurationSource(corsConfigurationSource))
-                .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository).csrfTokenRequestHandler(requestHandler))
+                .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository)
+                        .csrfTokenRequestHandler(requestHandler)
+                        // CSRF defends cookie-borne sessions. An API-key bearer is never sent
+                        // ambiently by a browser, so the token exchange would only block
+                        // non-browser clients without removing any cross-site risk.
+                        .ignoringRequestMatchers(ClerkApiKeyAuthenticationFilter::isClerkApiKeyRequest))
                 .exceptionHandling(exceptions -> exceptions.accessDeniedHandler(accessDeniedHandler))
                 .authorizeHttpRequests(auth -> auth.requestMatchers(
                                 "/",
@@ -141,13 +151,21 @@ public class SecurityConfig {
                         .contentSecurityPolicy(contentSecurityPolicy ->
                                 contentSecurityPolicy.policyDirectives(appProperties.getContentSecurityPolicy())))
                 .httpBasic(b -> b.disable())
-                .formLogin(f -> f.disable());
+                .formLogin(f -> f.disable())
+                .addFilterBefore(
+                        new ClerkApiKeyAuthenticationFilter(clerkApiKeyVerifier, objectMapper),
+                        BearerTokenAuthenticationFilter.class);
         // Clerk is enabled per environment (dev and prod profiles): without the
         // decoder bean there is no resource server, and /api/me's authenticated()
         // rule deterministically denies every request in that deployment.
         JwtDecoder activeClerkJwtDecoder = clerkJwtDecoder.getIfAvailable();
         if (activeClerkJwtDecoder != null) {
-            http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(activeClerkJwtDecoder)));
+            DefaultBearerTokenResolver clerkSessionTokenResolver = new DefaultBearerTokenResolver();
+            http.oauth2ResourceServer(oauth2 -> oauth2.bearerTokenResolver(
+                            request -> ClerkApiKeyAuthenticationFilter.isClerkApiKeyRequest(request)
+                                    ? null
+                                    : clerkSessionTokenResolver.resolve(request))
+                    .jwt(jwt -> jwt.decoder(activeClerkJwtDecoder)));
         }
         return http.build();
     }

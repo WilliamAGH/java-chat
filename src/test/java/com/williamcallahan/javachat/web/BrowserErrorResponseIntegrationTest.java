@@ -126,6 +126,7 @@ class BrowserErrorResponseIntegrationTest {
                 "/learn",
                 "/privacy",
                 "/contact",
+                "/cli/authorize",
                 "/learn/records",
                 "/learn/records/fields",
                 "/guided/records/fields");

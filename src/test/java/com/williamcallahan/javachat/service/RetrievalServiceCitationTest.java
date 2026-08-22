@@ -58,6 +58,26 @@ class RetrievalServiceCitationTest {
     }
 
     @Test
+    void repairsLegacySpringBootSqlCitationBeforeEmission() {
+        Document legacySpringBootSqlReference = Document.builder()
+                .id("spring-boot-sql")
+                .text("SQL database reference")
+                .metadata(
+                        QdrantPayloadFieldSchema.URL_FIELD,
+                        "https://docs.spring.io/spring-boot/reference/reference/data/sql.html")
+                .metadata(QdrantPayloadFieldSchema.TITLE_FIELD, "SQL Databases :: Spring Boot")
+                .build();
+
+        RetrievalService.CitationOutcome citationOutcome =
+                citationService().toCitations(List.of(legacySpringBootSqlReference));
+
+        assertEquals(
+                "https://docs.spring.io/spring-boot/reference/data/sql.html",
+                citationOutcome.citations().getFirst().getUrl());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
     void collapsesDocumentsWithTheSameExactJavadocMemberAnchor() {
         String stringJavadocUrl = javaLangStringJavadocUrl();
         RetrievalService.CitationOutcome citationOutcome = citationService()

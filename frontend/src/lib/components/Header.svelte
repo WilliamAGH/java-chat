@@ -62,7 +62,7 @@
          them as separate `space-between` children let the avatar drift
          across the header on wide viewports. -->
     <div class="header-actions">
-      {#if clerkAuthentication.isLoaded}
+      {#if clerkAuthentication.phase === 'ready'}
         <div class="auth-controls">
           {#if clerkAuthentication.signedInUser}
             <div class="user-button-host" {@attach attachUserButton}></div>

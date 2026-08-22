@@ -122,7 +122,7 @@ def read_html_links_urls(discovery_file: pathlib.Path) -> list[str]:
 
 
 def seed_url_to_mirror_path(seed_url: str, cut_directories: int) -> str:
-    """Projects a canonical HTML URL onto wget's no-host, cut-directory mirror path."""
+    """Projects a canonical HTML URL onto Wget2's no-host, cut-directory mirror path."""
     require_remote_url(seed_url, allow_http=False, require_trailing_slash=False)
     parsed_seed_url = urllib.parse.urlsplit(seed_url)
     decoded_path_segments = [
@@ -147,6 +147,16 @@ def seed_url_to_mirror_path(seed_url: str, cut_directories: int) -> str:
     if not mirror_path_segments[-1].lower().endswith((".html", ".htm")):
         mirror_path_segments[-1] += ".html"
     return "/".join(mirror_path_segments)
+
+
+def prefer_directory_urls(seed_urls: list[str]) -> list[str]:
+    """Drops an extensionless alias when the same discovered page has a canonical directory URL."""
+    discovered_url_set = set(seed_urls)
+    return [
+        seed_url
+        for seed_url in seed_urls
+        if seed_url.endswith("/") or f"{seed_url}/" not in discovered_url_set
+    ]
 
 
 def require_remote_url(remote_url: str, allow_http: bool, require_trailing_slash: bool) -> None:
@@ -422,6 +432,7 @@ def main() -> int:
         parsed_arguments.source_prefix,
         parsed_arguments.canonical_prefix,
     )
+    seed_urls = prefer_directory_urls(seed_urls)
     if parsed_arguments.reject_regex:
         try:
             rejected_seed_url = re.compile(parsed_arguments.reject_regex)

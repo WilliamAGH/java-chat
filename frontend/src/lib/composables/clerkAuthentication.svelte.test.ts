@@ -64,7 +64,7 @@ describe("loadClerkAuthentication", () => {
 
     await expect(loadClerkAuthentication()).resolves.toBeUndefined();
 
-    expect(clerkAuthentication.isLoaded).toBe(false);
+    expect(clerkAuthentication.phase).toBe("disabled");
     expect(get(toasts)).toEqual([]);
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       expect.stringContaining("denies site storage access"),
@@ -81,7 +81,7 @@ describe("loadClerkAuthentication", () => {
 
     await expect(loadClerkAuthentication()).resolves.toBeUndefined();
 
-    expect(clerkAuthentication.isLoaded).toBe(false);
+    expect(clerkAuthentication.phase).toBe("disabled");
     expect(get(toasts)).toEqual([]);
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       expect.stringContaining("no VITE_CLERK_PUBLISHABLE_KEY"),

@@ -23,8 +23,8 @@ collections and state remain read-only for rollback; never clear or rewrite them
 ## Scrape (fetch HTML mirrors)
 
 The scrape phase mirrors upstream documentation into the configured `DOCS_DIR` (default `data/docs/`) using
-`wget`. Java 25 specification validation also requires MuPDF's `mutool`; install both with
-`brew install wget mupdf` on macOS or `apt install wget mupdf-tools` on Ubuntu.
+Wget2. Java 25 specification validation also requires MuPDF's `mutool`; install both with
+`brew install wget2 mupdf` on macOS or `apt install wget2 mupdf-tools` on Ubuntu.
 
 ### Source ownership
 
@@ -34,7 +34,7 @@ provenance values it consumes at runtime.
 
 Structured sitemap and navigation discovery are implemented directly by `scripts/documentation_seed.py`.
 Discovered URLs must match the exact source prefix and are deterministically mapped onto the fetch URL before
-`wget` receives the seed list. Seeded fetches reject redirects and every nonzero `wget` status, reconcile stale
+Wget2 receives the seed list. Seeded fetches reject redirects and every nonzero Wget2 status, reconcile stale
 HTML against exact current seed paths before fetching, and verify exact path coverage afterward. Recursive mirrors
 convert local HTML links, omit page requisites, reject known binary asset extensions, and remain bounded by
 `--no-parent`.
@@ -75,7 +75,7 @@ source dispatch is the owner of accepted identifiers.
 - Publication requires a successful fetch, the source-specific HTML minimum, the expected stable-version identity, and clean paths with no preview, temporary, malformed, query-duplicate, or non-content files.
 - A validated stage atomically replaces its canonical root. The previous canonical root is preserved until replacement succeeds, and quarantine data remains available through downstream verification.
 - No partial mirror is published as a successful canonical source.
-- Java API sources use a deterministic Python seed generator (`scripts/oracle_javadoc_seed.py`) to avoid incomplete recursive crawls.
+- Javadoc sources use the deterministic `scripts/javadoc_seed.py` generator to avoid incomplete recursive crawls.
 
 ---
 

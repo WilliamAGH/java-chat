@@ -5,7 +5,7 @@ import { CSRF_INVALID_MESSAGE } from "../services/csrf";
 
 describe("MessageBubble", () => {
   it("does not render copy action for user messages", () => {
-    const { container } = render(MessageBubble, {
+    const { container, getByRole } = render(MessageBubble, {
       props: {
         message: { messageId: "msg-test-user", role: "user", messageText: "Hello", timestamp: 1 },
         index: 0,
@@ -13,6 +13,10 @@ describe("MessageBubble", () => {
     });
 
     expect(container.querySelector(".bubble-actions")).toBeNull();
+    const userBubble = getByRole("region", { name: "Your message" });
+    expect(userBubble).toHaveAttribute("tabindex", "0");
+    userBubble.focus();
+    expect(userBubble).toHaveFocus();
   });
 
   it("renders copy action for assistant messages", () => {
@@ -29,6 +33,7 @@ describe("MessageBubble", () => {
     });
 
     expect(container.querySelector(".bubble-actions")).not.toBeNull();
+    expect(container.querySelector(".bubble")).not.toHaveAttribute("tabindex");
     const copyButton = getByRole("button", { name: /copy message/i });
     expect(copyButton).toBeVisible();
 
