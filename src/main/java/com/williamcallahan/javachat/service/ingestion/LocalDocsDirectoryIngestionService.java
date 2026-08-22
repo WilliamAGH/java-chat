@@ -26,7 +26,7 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public final class LocalDocsDirectoryIngestionService implements LocalDocumentationIngestionUseCase {
-    private static final int LOCAL_INGESTION_FILE_BATCH_SIZE = 32;
+    private static final int LOCAL_INGESTION_FILE_BATCH_SIZE = 256;
     private static final int LOCAL_INGESTION_MAX_INVENTORY_FILES = 1_000_000;
     private static final int INVENTORY_DIGEST_BUFFER_SIZE = 8192;
     private static final String INVENTORY_DIGEST_ALGORITHM = "SHA-256";

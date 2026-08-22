@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.IntStream;
 import org.springframework.ai.document.Document;
 
 /**
@@ -31,16 +32,24 @@ final class EmbeddingBatchEmbedder {
                     "Embedding dimensions must be positive but were " + expectedEmbeddingDimensions);
         }
 
+        int embeddingRequestCount = Math.ceilDiv(documents.size(), EMBEDDING_REQUEST_BATCH_SIZE);
+        List<List<float[]>> orderedEmbeddingBatches = IntStream.range(0, embeddingRequestCount)
+                .parallel()
+                .mapToObj(requestIndex -> {
+                    int batchStartIndex = requestIndex * EMBEDDING_REQUEST_BATCH_SIZE;
+                    int batchEndIndex = Math.min(batchStartIndex + EMBEDDING_REQUEST_BATCH_SIZE, documents.size());
+                    List<Document> documentBatch = documents.subList(batchStartIndex, batchEndIndex);
+                    return embedSingleBatch(
+                            embeddingClient,
+                            documentBatch,
+                            batchStartIndex,
+                            batchEndIndex,
+                            expectedEmbeddingDimensions);
+                })
+                .toList();
+
         List<float[]> allEmbeddings = new ArrayList<>(documents.size());
-        for (int batchStartIndex = 0;
-                batchStartIndex < documents.size();
-                batchStartIndex += EMBEDDING_REQUEST_BATCH_SIZE) {
-            int batchEndIndex = Math.min(batchStartIndex + EMBEDDING_REQUEST_BATCH_SIZE, documents.size());
-            List<Document> documentBatch = documents.subList(batchStartIndex, batchEndIndex);
-            List<float[]> batchEmbeddings = embedSingleBatch(
-                    embeddingClient, documentBatch, batchStartIndex, batchEndIndex, expectedEmbeddingDimensions);
-            allEmbeddings.addAll(batchEmbeddings);
-        }
+        orderedEmbeddingBatches.forEach(allEmbeddings::addAll);
         return List.copyOf(allEmbeddings);
     }
 

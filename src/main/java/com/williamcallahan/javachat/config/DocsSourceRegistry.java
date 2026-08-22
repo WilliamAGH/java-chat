@@ -268,6 +268,15 @@ public final class DocsSourceRegistry {
                     "1.18.46",
                     DocumentationCitationPathStyle.FIXED_URL),
             new DocumentationSource(
+                    "https://projectlombok.org/features/",
+                    "lombok/1.18.46/reference",
+                    "Lombok 1.18.46 Feature Reference",
+                    "lombok/1.18.46/reference",
+                    "official",
+                    "reference",
+                    "1.18.46",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
                     "https://docs.docker.com/",
                     "docker",
                     "Docker Documentation",
