@@ -608,16 +608,16 @@ if ! (
         fi
         builtin command "$@"
     }
-    JAVA25_MISSING_PARSER_WGET_CALLS=0
-    wget() {
-        JAVA25_MISSING_PARSER_WGET_CALLS=$((JAVA25_MISSING_PARSER_WGET_CALLS + 1))
+    JAVA25_MISSING_PARSER_WGET2_CALLS=0
+    wget2() {
+        JAVA25_MISSING_PARSER_WGET2_CALLS=$((JAVA25_MISSING_PARSER_WGET2_CALLS + 1))
         return 1
     }
     if fetch_java25_specification_pdfs \
         "$TEST_WORK_DIRECTORY/java25-missing-parser-stage" "Java 25 Complete API"; then
         exit 1
     fi
-    [ "$JAVA25_MISSING_PARSER_WGET_CALLS" -eq 0 ]
+    [ "$JAVA25_MISSING_PARSER_WGET2_CALLS" -eq 0 ]
 ); then
     fail_documentation_fetch_test "missing mutool did not fail before Java 25 specification downloads"
 fi
@@ -627,7 +627,7 @@ if ! grep -Fq -- "brew install mupdf" "$JAVA25_MISSING_PARSER_LOG" \
 fi
 
 JAVA25_PDF_SUCCESS_ROOT="$TEST_WORK_DIRECTORY/java25-pdf-success"
-JAVA25_PDF_SUCCESS_CAPTURE="$JAVA25_PDF_SUCCESS_ROOT/wget-arguments"
+JAVA25_PDF_SUCCESS_CAPTURE="$JAVA25_PDF_SUCCESS_ROOT/wget2-arguments"
 JAVA25_PDF_SUCCESS_PARSER_CAPTURE="$JAVA25_PDF_SUCCESS_ROOT/mutool-arguments"
 if ! (
     set --
@@ -643,20 +643,20 @@ if ! (
         mkdir -p "$JAVA25_PDF_SUCCESS_ROOT" "$JAVA25_PDF_SUCCESS_STAGE"
         printf '%s\n' "$JAVA25_PDF_SUCCESS_STAGE"
     }
-    generate_java_api_javadoc_seed() {
+    generate_javadoc_seed() {
         :
     }
-    reconcile_java_api_seed_mirror() {
+    reconcile_javadoc_seed_mirror() {
         :
     }
-    fetch_java_api_javadoc_seed() {
+    fetch_javadoc_seed() {
         printf '<html>Java 25 API</html>\n' > "$1/index.html"
         cd - > /dev/null
     }
     validate_staged_documentation_identity() {
         :
     }
-    wget() {
+    wget2() {
         local wget_argument
         local output_document=""
         local requested_url=""
@@ -769,20 +769,20 @@ if ! (
         mkdir -p "$JAVA25_PDF_FAILURE_STAGE"
         printf '%s\n' "$JAVA25_PDF_FAILURE_STAGE"
     }
-    generate_java_api_javadoc_seed() {
+    generate_javadoc_seed() {
         :
     }
-    reconcile_java_api_seed_mirror() {
+    reconcile_javadoc_seed_mirror() {
         :
     }
-    fetch_java_api_javadoc_seed() {
+    fetch_javadoc_seed() {
         printf '<html>Java 25 API</html>\n' > "$1/index.html"
         cd - > /dev/null
     }
     validate_staged_documentation_identity() {
         :
     }
-    wget() {
+    wget2() {
         local wget_argument
         local output_document=""
         local requested_url=""
@@ -937,14 +937,14 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     --single-page
 
 SINGLE_PAGE_STAGE="$TEST_WORK_DIRECTORY/single-page-stage"
-SINGLE_PAGE_WGET_CAPTURE="$TEST_WORK_DIRECTORY/single-page-wget"
+SINGLE_PAGE_WGET2_CAPTURE="$TEST_WORK_DIRECTORY/single-page-wget2"
 mkdir -p "$SINGLE_PAGE_STAGE"
 printf '<html><body>stale recursive page</body></html>\n' > "$SINGLE_PAGE_STAGE/unrelated.html"
 LOG_FILE="$TEST_WORK_DIRECTORY/single-page.log"
-wget() {
+wget2() {
     local wget_argument
     local output_document=""
-    printf '%s\n' "$@" > "$SINGLE_PAGE_WGET_CAPTURE"
+    printf '%s\n' "$@" > "$SINGLE_PAGE_WGET2_CAPTURE"
     for wget_argument in "$@"; do
         case "$wget_argument" in
             --output-document=*) output_document="${wget_argument#--output-document=}" ;;
@@ -967,14 +967,14 @@ if ! (
 ); then
     fail_documentation_fetch_test "governed single-page fetch did not complete"
 fi
-unset -f wget
+unset -f wget2
 if [ ! -f "$SINGLE_PAGE_STAGE/25-relnote-issues.html" ]; then
     fail_documentation_fetch_test "governed single-page fetch used the wrong projected path"
 fi
 if [ -f "$SINGLE_PAGE_STAGE/unrelated.html" ]; then
     fail_documentation_fetch_test "governed single-page fetch retained an unrelated resumed page"
 fi
-if ! grep -Fqx -- "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "$SINGLE_PAGE_WGET_CAPTURE"; then
+if ! grep -Fqx -- "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "$SINGLE_PAGE_WGET2_CAPTURE"; then
     fail_documentation_fetch_test "governed single-page fetch did not use the verified browser request identity"
 fi
 
@@ -1042,25 +1042,25 @@ if ! (
     DOCS_ROOT="$TEST_WORK_DIRECTORY/java-post-fetch/data/docs"
     LOG_FILE="$TEST_WORK_DIRECTORY/java-post-fetch.log"
     JAVA_POST_FETCH_TARGET_DIRECTORY="$DOCS_ROOT/java/java25-complete"
-    JAVA_POST_FETCH_WGET_ARGUMENTS="$TEST_WORK_DIRECTORY/java-post-fetch-wget-arguments"
+    JAVA_POST_FETCH_WGET2_ARGUMENTS="$TEST_WORK_DIRECTORY/java-post-fetch-wget2-arguments"
     mkdir -p "$JAVA_POST_FETCH_TARGET_DIRECTORY"
     printf '%s\n%s\n' \
         "https://docs.example.invalid/Record.html" \
         "https://docs.example.invalid/String.html" \
-        > "$JAVA_POST_FETCH_TARGET_DIRECTORY/.oracle-javadoc-seed.txt"
+        > "$JAVA_POST_FETCH_TARGET_DIRECTORY/.javadoc-seed.txt"
     log() {
         :
     }
-    wget() {
-        printf '%s\n' "$@" > "$JAVA_POST_FETCH_WGET_ARGUMENTS"
+    wget2() {
+        printf '%s\n' "$@" > "$JAVA_POST_FETCH_WGET2_ARGUMENTS"
         printf '<html>Record</html>\n' > "$JAVA_POST_FETCH_TARGET_DIRECTORY/Record.html"
     }
-    write_java_api_seed_mirror_paths() {
+    write_javadoc_seed_mirror_paths() {
         printf '%s\n%s\n' Record.html String.html > "$4"
     }
     if (
         cd "$JAVA_POST_FETCH_TARGET_DIRECTORY"
-        fetch_java_api_javadoc_seed \
+        fetch_javadoc_seed \
             "$JAVA_POST_FETCH_TARGET_DIRECTORY" \
             "Java post-fetch verification" \
             0 \
@@ -1073,7 +1073,7 @@ if ! (
     fi
     [ -f "$JAVA_POST_FETCH_TARGET_DIRECTORY/Record.html" ] || exit 1
     [ ! -f "$JAVA_POST_FETCH_TARGET_DIRECTORY/String.html" ] || exit 1
-    grep -Fxq -- "--max-redirect=0" "$JAVA_POST_FETCH_WGET_ARGUMENTS"
+    grep -Fxq -- "--max-redirect=0" "$JAVA_POST_FETCH_WGET2_ARGUMENTS"
 ); then
     fail_documentation_fetch_test "Java seed fetch did not reject redirects or verify fetched seed paths"
 fi
@@ -1087,17 +1087,17 @@ if ! (
     JAVA_QUARANTINE_TARGET_DIRECTORY="$DOCS_ROOT/java/java25-complete"
     mkdir -p "$JAVA_QUARANTINE_TARGET_DIRECTORY/java.base/java/lang"
     printf '%s\n' "https://docs.example.invalid/java.base/java/lang/Record.html" \
-        > "$JAVA_QUARANTINE_TARGET_DIRECTORY/.oracle-javadoc-seed.txt"
+        > "$JAVA_QUARANTINE_TARGET_DIRECTORY/.javadoc-seed.txt"
     printf '<html>Canonical</html>\n' \
         > "$JAVA_QUARANTINE_TARGET_DIRECTORY/java.base/java/lang/Record.html"
     printf '<html>Stale</html>\n' > "$JAVA_QUARANTINE_TARGET_DIRECTORY/Record.html"
     log() {
         :
     }
-    write_java_api_seed_mirror_paths() {
+    write_javadoc_seed_mirror_paths() {
         printf '%s\n' "java.base/java/lang/Record.html" > "$4"
     }
-    reconcile_java_api_seed_mirror \
+    reconcile_javadoc_seed_mirror \
         "https://docs.example.invalid/" \
         "$JAVA_QUARANTINE_TARGET_DIRECTORY" \
         "Java stale-page quarantine" \
@@ -1116,7 +1116,7 @@ if ! (
     LOG_FILE="$TEST_WORK_DIRECTORY/java-seed-generation.log"
     JAVA_SEED_TARGET_DIRECTORY="$TEST_WORK_DIRECTORY/java-seed-generation"
     mkdir -p "$JAVA_SEED_TARGET_DIRECTORY"
-    printf 'retained-seed\n' > "$JAVA_SEED_TARGET_DIRECTORY/.oracle-javadoc-seed.txt"
+    printf 'retained-seed\n' > "$JAVA_SEED_TARGET_DIRECTORY/.javadoc-seed.txt"
     log() {
         :
     }
@@ -1130,12 +1130,12 @@ if ! (
         done
         return 1
     }
-    if generate_java_api_javadoc_seed \
+    if generate_javadoc_seed \
         "https://docs.example.invalid/" \
         "$JAVA_SEED_TARGET_DIRECTORY" > /dev/null 2>&1; then
         exit 1
     fi
-    [ "$(< "$JAVA_SEED_TARGET_DIRECTORY/.oracle-javadoc-seed.txt")" = "retained-seed" ]
+    [ "$(< "$JAVA_SEED_TARGET_DIRECTORY/.javadoc-seed.txt")" = "retained-seed" ]
 ); then
     fail_documentation_fetch_test "failed Java seed generation replaced the active seed"
 fi

@@ -165,6 +165,102 @@ public final class DocsSourceRegistry {
                     "language-guide",
                     ""),
             new DocumentationSource(
+                    "https://www.jooq.org/doc/3.21.7/manual/",
+                    "jooq/3.21/manual",
+                    "jOOQ 3.21.7 Manual",
+                    "jooq/3.21/manual",
+                    "official",
+                    "framework-reference",
+                    "3.21.7"),
+            new DocumentationSource(
+                    "https://www.jooq.org/javadoc/3.21.7/",
+                    "jooq/3.21/api",
+                    "jOOQ 3.21.7 API",
+                    "jooq/3.21/api",
+                    "official",
+                    "api-docs",
+                    "3.21.7"),
+            new DocumentationSource(
+                    "https://docs.python.org/release/3.14.7/",
+                    "python/3.14",
+                    "Python 3.14.7 Documentation",
+                    "python/3.14",
+                    "official",
+                    "language-reference",
+                    "3.14.7"),
+            new DocumentationSource(
+                    "https://www.postgresql.org/docs/17/",
+                    "postgresql/17",
+                    "PostgreSQL 17 Documentation",
+                    "postgresql/17",
+                    "official",
+                    "database-reference",
+                    "17.11"),
+            new DocumentationSource(
+                    "https://www.postgresql.org/docs/18/",
+                    "postgresql/18",
+                    "PostgreSQL 18 Documentation",
+                    "postgresql/18",
+                    "official",
+                    "database-reference",
+                    "18.6"),
+            new DocumentationSource(
+                    "https://javadoc.io/doc/com.zaxxer/HikariCP/7.1.0/",
+                    "hikaricp/7.1.0/api",
+                    "HikariCP 7.1.0 API",
+                    "hikaricp/7.1.0/api",
+                    "official",
+                    "api-docs",
+                    "7.1.0"),
+            new DocumentationSource(
+                    "https://javadoc.io/doc/com.zaxxer/HikariCP/7.0.2/",
+                    "hikaricp/7.0.2/api",
+                    "HikariCP 7.0.2 API (Spring Boot 4.0.6)",
+                    "hikaricp/7.0.2/api",
+                    "official",
+                    "api-docs",
+                    "7.0.2"),
+            new DocumentationSource(
+                    "https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-databind/2.22.2/jackson-databind-2.22.2-javadoc.jar",
+                    "jackson/2.22.2/api",
+                    "Jackson Databind 2.22.2 API",
+                    "jackson/2.22.2/api",
+                    "official",
+                    "api-docs",
+                    "2.22.2"),
+            new DocumentationSource(
+                    "https://javadoc.io/doc/com.fasterxml.jackson.core/jackson-databind/2.21.2/",
+                    "jackson/2.21.2/api",
+                    "Jackson Databind 2.21.2 API (Spring Boot 4.0.6)",
+                    "jackson/2.21.2/api",
+                    "official",
+                    "api-docs",
+                    "2.21.2"),
+            new DocumentationSource(
+                    "https://repo.maven.apache.org/maven2/tools/jackson/core/jackson-databind/3.2.2/jackson-databind-3.2.2-javadoc.jar",
+                    "jackson/3.2.2/api",
+                    "Jackson Databind 3.2.2 API",
+                    "jackson/3.2.2/api",
+                    "official",
+                    "api-docs",
+                    "3.2.2"),
+            new DocumentationSource(
+                    "https://javadoc.io/doc/tools.jackson.core/jackson-databind/3.1.2/",
+                    "jackson/3.1.2/api",
+                    "Jackson Databind 3.1.2 API (Spring Boot 4.0.6)",
+                    "jackson/3.1.2/api",
+                    "official",
+                    "api-docs",
+                    "3.1.2"),
+            new DocumentationSource(
+                    "https://repo.maven.apache.org/maven2/org/projectlombok/lombok/1.18.46/lombok-1.18.46-javadoc.jar",
+                    "lombok/1.18.46/api",
+                    "Lombok 1.18.46 API (Spring Boot 4.0.6)",
+                    "lombok/1.18.46/api",
+                    "official",
+                    "api-docs",
+                    "1.18.46"),
+            new DocumentationSource(
                     "https://docs.spring.io/spring-boot/reference/",
                     "spring-boot",
                     "Spring Boot Reference",
@@ -212,6 +308,14 @@ public final class DocsSourceRegistry {
                     "official",
                     "api-docs",
                     ""),
+            new DocumentationSource(
+                    "https://docs.spring.io/spring-framework/docs/7.0.7/javadoc-api/",
+                    "spring-framework/7.0.7/api",
+                    "Spring Framework 7.0.7 API",
+                    "spring-framework/7.0.7/api",
+                    "official",
+                    "api-docs",
+                    "7.0.7"),
             new DocumentationSource(
                     ORACLE_JAVASE_BASE,
                     "oracle/javase",
@@ -620,6 +724,9 @@ public final class DocsSourceRegistry {
     private static Optional<String> joinBaseAndRel(String baseUrl, String relativePath) {
         Optional<String> joinedUrl = Optional.empty();
         if (baseUrl != null) {
+            if (!baseUrl.endsWith(PATH_SEPARATOR_TEXT)) {
+                return Optional.of(baseUrl);
+            }
             String normalizedBase = trimTrailingSlashes(baseUrl);
             String normalizedRelativePath = relativePath == null
                     ? EMPTY_TEXT

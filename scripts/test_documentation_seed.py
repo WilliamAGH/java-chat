@@ -12,7 +12,7 @@ from unittest import mock
 
 DOCUMENTATION_SEED_SCRIPT_DIRECTORY = pathlib.Path(__file__).resolve().parent
 DOCUMENTATION_SEED_SCRIPT_PATH = DOCUMENTATION_SEED_SCRIPT_DIRECTORY / "documentation_seed.py"
-ORACLE_JAVADOC_SEED_SCRIPT_PATH = DOCUMENTATION_SEED_SCRIPT_DIRECTORY / "oracle_javadoc_seed.py"
+JAVADOC_SEED_SCRIPT_PATH = DOCUMENTATION_SEED_SCRIPT_DIRECTORY / "javadoc_seed.py"
 INVALID_REMOTE_URLS_FIXTURE_PATH = (
     DOCUMENTATION_SEED_SCRIPT_DIRECTORY
     / "testdata"
@@ -28,14 +28,14 @@ if DOCUMENTATION_SEED_SPECIFICATION is None or DOCUMENTATION_SEED_SPECIFICATION.
 documentation_seed = importlib.util.module_from_spec(DOCUMENTATION_SEED_SPECIFICATION)
 DOCUMENTATION_SEED_SPECIFICATION.loader.exec_module(documentation_seed)
 
-ORACLE_JAVADOC_SEED_SPECIFICATION = importlib.util.spec_from_file_location(
-    "oracle_javadoc_seed", ORACLE_JAVADOC_SEED_SCRIPT_PATH
+JAVADOC_SEED_SPECIFICATION = importlib.util.spec_from_file_location(
+    "javadoc_seed", JAVADOC_SEED_SCRIPT_PATH
 )
-if ORACLE_JAVADOC_SEED_SPECIFICATION is None or ORACLE_JAVADOC_SEED_SPECIFICATION.loader is None:
-    raise ImportError(f"Cannot load Oracle Javadoc seed script: {ORACLE_JAVADOC_SEED_SCRIPT_PATH}")
-oracle_javadoc_seed = importlib.util.module_from_spec(ORACLE_JAVADOC_SEED_SPECIFICATION)
-sys.modules[ORACLE_JAVADOC_SEED_SPECIFICATION.name] = oracle_javadoc_seed
-ORACLE_JAVADOC_SEED_SPECIFICATION.loader.exec_module(oracle_javadoc_seed)
+if JAVADOC_SEED_SPECIFICATION is None or JAVADOC_SEED_SPECIFICATION.loader is None:
+    raise ImportError(f"Cannot load Javadoc seed script: {JAVADOC_SEED_SCRIPT_PATH}")
+javadoc_seed = importlib.util.module_from_spec(JAVADOC_SEED_SPECIFICATION)
+sys.modules[JAVADOC_SEED_SPECIFICATION.name] = javadoc_seed
+JAVADOC_SEED_SPECIFICATION.loader.exec_module(javadoc_seed)
 
 
 class DocumentationSeedSecurityTest(unittest.TestCase):
@@ -112,6 +112,16 @@ class DocumentationSeedSecurityTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "XML sitemap exceeds"):
                 documentation_seed.read_xml_sitemap_urls(oversized_sitemap_path)
 
+    def test_prefers_canonical_directory_url_over_extensionless_alias(self) -> None:
+        directory_url = "https://docs.example.invalid/reference/tutorial/"
+
+        self.assertEqual(
+            [directory_url],
+            documentation_seed.prefer_directory_urls(
+                [directory_url.removesuffix("/"), directory_url]
+            ),
+        )
+
     def test_projects_seed_file_in_one_canonical_batch(self) -> None:
         required_prefix = "https://docs.example.invalid/en/java/javase/25/docs/api/"
         with tempfile.TemporaryDirectory() as temporary_directory_name:
@@ -145,8 +155,8 @@ class DocumentationSeedSecurityTest(unittest.TestCase):
             )
 
 
-class OracleJavadocSeedTest(unittest.TestCase):
-    """Verifies Oracle Javadoc seed generation includes only canonical type pages."""
+class JavadocSeedTest(unittest.TestCase):
+    """Verifies Javadoc seed generation includes only canonical type pages."""
 
     def test_excludes_class_use_pages_from_type_seeds(self) -> None:
         base_url = "https://docs.example.invalid/jdk/api/"
@@ -158,13 +168,14 @@ class OracleJavadocSeedTest(unittest.TestCase):
                 'typeSearchIndex = [{"p":"java.util","l":"List"}];updateSearchResults();'
             ),
             base_url + "index-files/index-1.html": '<a href="index-2.html">2</a>',
+            base_url + "index.html": '<a href="overview-tree.html">Tree</a>',
         }
 
         def fetch_oracle_index(index_url: str) -> str:
             return oracle_index_fixture_by_url[index_url]
 
-        with mock.patch.object(oracle_javadoc_seed, "fetch_text", side_effect=fetch_oracle_index):
-            seed_urls = oracle_javadoc_seed.generate_seed_urls(base_url)
+        with mock.patch.object(javadoc_seed, "fetch_text", side_effect=fetch_oracle_index):
+            seed_urls = javadoc_seed.generate_seed_urls(base_url)
 
         self.assertIn(base_url + "java.base/java/util/List.html", seed_urls)
         self.assertFalse(any("/class-use/" in seed_url for seed_url in seed_urls))
@@ -184,11 +195,11 @@ class OracleJavadocSeedTest(unittest.TestCase):
 
             with self.subTest(java_release=java_release):
                 with mock.patch.object(
-                    oracle_javadoc_seed,
+                    javadoc_seed,
                     "fetch_text",
                     side_effect=oracle_index_fixture_by_url.__getitem__,
                 ):
-                    seed_urls = oracle_javadoc_seed.generate_seed_urls(base_url)
+                    seed_urls = javadoc_seed.generate_seed_urls(base_url)
 
                 self.assertNotIn(base_url + "allclasses.html", seed_urls)
                 release_specific_root_pages = (

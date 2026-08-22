@@ -24,6 +24,7 @@ test: test-shell ## Run tests (loads .env if present)
 	  $(LOCKED_GRADLEW) --no-daemon cleanTest test
 
 test-shell: ## Run deterministic ingestion and fetch shell contract tests
+	bash scripts/test_documentation_archives.sh
 	bash scripts/test_documentation_fetch_projection.sh
 	bash scripts/test_documentation_fetch_publication.sh
 	bash scripts/test_embedding_preflight.sh

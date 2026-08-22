@@ -8,6 +8,8 @@ DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS=(
     --tries=5
     --waitretry=1
     --retry-connrefused
+    --max-threads=1
+    --retry-on-http-error=429,500,502,503,504
 )
 if [[ "${DOCUMENTATION_SINGLE_PAGE_BROWSER_USER_AGENT:-}" != "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" ]]; then
     DOCUMENTATION_SINGLE_PAGE_BROWSER_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -125,7 +127,7 @@ fetch_java25_specification_pdf() {
         log "${RED}✗ Could not create a temporary PDF for $specification_name${NC}"
         return 1
     fi
-    if ! wget \
+    if ! wget2 \
         --output-document="$temporary_specification_path" \
         --max-redirect=0 \
         "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}" \
@@ -210,7 +212,7 @@ fetch_single_documentation_page() {
     fi
 
     local wget_exit_code
-    wget \
+    wget2 \
         --output-document="$target_page" \
         --max-redirect=0 \
         "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}" \
@@ -228,8 +230,8 @@ fetch_single_documentation_page() {
         "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed"
 }
 
-# Fetches a Java API using its explicit Javadoc seed.
-fetch_java_api_javadoc_seed() {
+# Fetches an API reference using its explicit Javadoc seed.
+fetch_javadoc_seed() {
     local target_dir="$1"
     local name="$2"
     local cut_dirs="$3"
@@ -237,7 +239,7 @@ fetch_java_api_javadoc_seed() {
     local reject_regex="${5:-}"
     local partial_mirror_allowed="$6"
     local remote_base_url="$7"
-    local seed_file="$target_dir/.oracle-javadoc-seed.txt"
+    local seed_file="$target_dir/.javadoc-seed.txt"
     local wget_seed_args=(
         --timestamping
         --no-host-directories
@@ -256,7 +258,7 @@ fetch_java_api_javadoc_seed() {
     fi
 
     local wget_exit_code
-    wget "${wget_seed_args[@]}" 2>&1 | tee -a "$LOG_FILE"
+    wget2 "${wget_seed_args[@]}" 2>&1 | tee -a "$LOG_FILE"
     wget_exit_code="${PIPESTATUS[0]}"
     cd - > /dev/null
     local fetched_html_count
@@ -264,7 +266,7 @@ fetch_java_api_javadoc_seed() {
     if [ "$wget_exit_code" -eq 0 ] \
         && [ "$fetched_html_count" -gt 0 ] \
         && { [ "$minimum_html_files" -le 0 ] || [ "$fetched_html_count" -ge "$minimum_html_files" ]; } \
-        && ! verify_java_api_seed_mirror "$remote_base_url" "$target_dir" "$name" "$cut_dirs"; then
+        && ! verify_javadoc_seed_mirror "$remote_base_url" "$target_dir" "$name" "$cut_dirs"; then
         return 1
     fi
     validate_fetch_result \
@@ -307,7 +309,7 @@ fetch_docs_mirror() {
     fi
 
     local wget_exit_code
-    wget "${wget_args[@]}" "$url" 2>&1 | tee -a "$LOG_FILE"
+    wget2 "${wget_args[@]}" "$url" 2>&1 | tee -a "$LOG_FILE"
     wget_exit_code="${PIPESTATUS[0]}"
     cd - > /dev/null
     local validation_status
@@ -364,7 +366,7 @@ fetch_discovered_documentation_seed() {
         "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}"
     )
 
-    if ! wget "${wget_discovery_arguments[@]}" "$seed_discovery_url"; then
+    if ! wget2 "${wget_discovery_arguments[@]}" "$seed_discovery_url"; then
         rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file"
         cd - > /dev/null
         log "${RED}✗ Failed to fetch structured discovery document for $name${NC}"
@@ -405,6 +407,16 @@ fetch_discovered_documentation_seed() {
         return 1
     fi
 
+    local existing_seeded_html_count
+    existing_seeded_html_count="$(count_html_files "$target_dir")"
+    if [ "$FORCE_REFRESH" != "true" ] \
+        && [ "$existing_seeded_html_count" -ge "$minimum_html_files" ] \
+        && verify_seeded_html_mirror "$target_dir" "$name" "$mirror_paths_file"; then
+        rm -f "$mirror_paths_file"
+        log "${GREEN}✓ $name already fetched: $existing_seeded_html_count HTML files (complete seed coverage)${NC}"
+        return 0
+    fi
+
     local wget_seed_arguments=(
         --timestamping
         --no-host-directories
@@ -424,7 +436,7 @@ fetch_discovered_documentation_seed() {
         wget_seed_arguments+=(--reject-regex="$reject_regex")
     fi
     local wget_exit_code
-    wget "${wget_seed_arguments[@]}" 2>&1 | tee -a "$LOG_FILE"
+    wget2 "${wget_seed_arguments[@]}" 2>&1 | tee -a "$LOG_FILE"
     wget_exit_code="${PIPESTATUS[0]}"
     cd - > /dev/null
     if [ "$wget_exit_code" -ne 0 ]; then

@@ -10,7 +10,7 @@ Command reference:
 
 ## Pipeline overview
 
-1. **Fetch** documentation into `DOCS_DIR` (defaults to `data/docs/`; HTML mirrors via `wget`).
+1. **Fetch** documentation into `DOCS_DIR` (defaults to `data/docs/`; HTML mirrors via Wget2).
 2. **Chunk** content using JTokkit's CL100K_BASE tokenizer (~900 tokens per chunk with 150-token overlap).
 3. **Deduplicate** chunks by SHA-256 hash — unchanged content is skipped on re-runs.
 4. **Embed** chunks with both dense vectors (semantic, from configured embedding provider) and sparse vectors (Lucene `StandardAnalyzer` tokens encoded as hashed term-frequency vectors).
@@ -24,7 +24,7 @@ Fetch all configured sources:
 make fetch-all
 ```
 
-This runs `scripts/fetch_all_docs.sh` (requires `wget` and MuPDF's `mutool`). See the canonical source
+This runs `scripts/fetch_all_docs.sh` (requires Wget2 and MuPDF's `mutool`). See the canonical source
 ownership, prerequisites, and edit workflow in
 [pipeline-commands.md](pipeline-commands.md#scrape-fetch-html-mirrors), along with flags (`--force`,
 `--include-quick`, `--no-clean`).
