@@ -1,7 +1,9 @@
 package com.williamcallahan.javachat.adapters.out.clerk;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.client.ExpectedCount.once;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
@@ -142,6 +144,38 @@ class ClerkApiKeyVerifierTest {
 
         verifier.revoke("ak_0123456789abcdef0123456789abcdef");
 
+        clerkServer.verify();
+    }
+
+    @Test
+    void stopsAdvertisingAvailabilityOnceClerkReportsFeatureDisabled() {
+        RestClient.Builder restClientBuilder = RestClient.builder();
+        MockRestServiceServer clerkServer =
+                MockRestServiceServer.bindTo(restClientBuilder).build();
+        ClerkApiKeyVerifier verifier = new ClerkApiKeyVerifier(restClientBuilder.build(), CLERK_SECRET_KEY);
+        assertTrue(verifier.isAvailable(), "a configured credential alone should still read as available");
+
+        // Verbatim body returned by Clerk when an instance has API keys switched off.
+        clerkServer
+                .expect(once(), requestTo(CLERK_VERIFY_ENDPOINT))
+                .andRespond(withRawStatus(403)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"errors":[{"message":"Feature not enabled",\
+                                "long_message":"The feature you are trying to access is not enabled for this instance.",\
+                                "code":"feature_not_enabled"}]}"""));
+
+        ApiKeyOperationUnavailableException featureDisabled =
+                assertThrows(ApiKeyOperationUnavailableException.class, () -> verifier.verify(PRESENTED_API_KEY));
+
+        // The operator, not a retry, is the only thing that clears this state, so
+        // the message has to name the fix rather than suggest waiting.
+        assertTrue(
+                featureDisabled.getMessage().contains("Enable API keys"),
+                "message must name the operator fix, was: " + featureDisabled.getMessage());
+        assertFalse(
+                verifier.isAvailable(),
+                "availability must stop promising a login Clerk has already refused for this instance");
         clerkServer.verify();
     }
 }

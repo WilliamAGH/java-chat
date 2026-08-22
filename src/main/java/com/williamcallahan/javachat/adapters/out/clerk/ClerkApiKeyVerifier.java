@@ -55,6 +55,10 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
     private static final String CLERK_SECRET_KEY_ENVIRONMENT_VARIABLE = "${CLERK_SECRET_KEY:}";
     private static final String SECRET_KEY_MISSING_MESSAGE =
             "Clerk API key verification requires CLERK_SECRET_KEY to be configured.";
+    private static final String CLERK_FEATURE_DISABLED_CODE = "feature_not_enabled";
+    private static final String FEATURE_DISABLED_MESSAGE = "Clerk API keys are not enabled for this instance (HTTP 403 "
+            + CLERK_FEATURE_DISABLED_CODE + "). Enable API keys for this Clerk instance in the Clerk dashboard;"
+            + " retrying cannot succeed.";
 
     private final RestClient clerkBackendApi;
     private final String clerkSecretKey;
@@ -63,6 +67,11 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
             .maximumSize(CLERK_VERIFICATION_CACHE_MAXIMUM_ENTRIES)
             .build();
     private final Semaphore verificationPermits = new Semaphore(CLERK_VERIFICATION_MAXIMUM_CONCURRENCY, true);
+    // Latched the first time Clerk reports the API-keys feature off for this
+    // instance. That state is operator-controlled and cannot clear itself within
+    // a process, so continuing to advertise availability would invite clients
+    // into a login that can never complete.
+    private volatile boolean apiKeyFeatureDisabled;
 
     /**
      * Builds the Clerk boundary with its own timeouts so a slow provider cannot
@@ -102,11 +111,17 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
      * <p>Environments without a Clerk server credential reject every API key
      * rather than guessing, so the caller can skip the network round trip.
      *
-     * @return true when a Clerk server credential is configured
+     * <p>A configured credential is necessary but not sufficient: Clerk gates
+     * API keys per instance, and a deployment whose instance has the feature off
+     * can authenticate nothing. Reporting availability from the credential alone
+     * told CLI clients to begin a login that Clerk then refused on every call.
+     *
+     * @return true when a Clerk server credential is configured and Clerk has not
+     *     reported the API-keys feature disabled for this instance
      */
     @Override
     public boolean isAvailable() {
-        return !clerkSecretKey.isEmpty();
+        return !clerkSecretKey.isEmpty() && !apiKeyFeatureDisabled;
     }
 
     /**
@@ -144,6 +159,10 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
         } catch (HttpStatusCodeException clerkRejection) {
             if (isRejectedCredential(clerkRejection.getStatusCode())) {
                 return Optional.empty();
+            }
+            if (isFeatureDisabled(clerkRejection)) {
+                apiKeyFeatureDisabled = true;
+                throw new ApiKeyOperationUnavailableException(FEATURE_DISABLED_MESSAGE, clerkRejection);
             }
             throw new ApiKeyOperationUnavailableException(
                     "Clerk returned HTTP " + clerkRejection.getStatusCode().value() + " while verifying an API key",
@@ -203,6 +222,18 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
      */
     private static boolean isRejectedCredential(HttpStatusCode status) {
         return status.isSameCodeAs(HttpStatus.BAD_REQUEST) || status.isSameCodeAs(HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * Recognizes Clerk's per-instance API-keys feature gate.
+     *
+     * <p>Matched on the stable {@code feature_not_enabled} error code rather than
+     * the status alone: a bare {@code 403} also covers credential and edge
+     * rejections, which are transient and must stay retryable.
+     */
+    private static boolean isFeatureDisabled(HttpStatusCodeException clerkRejection) {
+        return clerkRejection.getStatusCode().isSameCodeAs(HttpStatus.FORBIDDEN)
+                && clerkRejection.getResponseBodyAsString().contains(CLERK_FEATURE_DISABLED_CODE);
     }
 
     private record ClerkApiKeyVerificationRequest(String secret) {}
