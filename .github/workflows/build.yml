@@ -54,6 +54,12 @@ jobs:
         working-directory: cli
         run: npm test && npm run pack:check
 
+      - name: Install browser for accessibility tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Test answer accessibility in Chromium
+        run: npm run test:browser
+
       - name: Build frontend
         run: npm run build
 

@@ -13,6 +13,15 @@ describe("MessageBubble", () => {
     });
 
     expect(container.querySelector(".bubble-actions")).toBeNull();
+    const userBubble = container.querySelector(".bubble");
+    expect(userBubble).toHaveAttribute("tabindex", "0");
+    expect(userBubble).toHaveAttribute("role", "region");
+    expect(userBubble).toHaveAccessibleName("Your message");
+    if (!(userBubble instanceof HTMLElement)) {
+      throw new Error("Expected the user message bubble to render");
+    }
+    userBubble.focus();
+    expect(userBubble).toHaveFocus();
   });
 
   it("renders copy action for assistant messages", () => {
@@ -29,6 +38,7 @@ describe("MessageBubble", () => {
     });
 
     expect(container.querySelector(".bubble-actions")).not.toBeNull();
+    expect(container.querySelector(".bubble")).not.toHaveAttribute("tabindex");
     const copyButton = getByRole("button", { name: /copy message/i });
     expect(copyButton).toBeVisible();
 

@@ -31,6 +31,7 @@ import reactor.core.publisher.Flux;
 @Service
 public class ChatService {
     private static final Logger logger = LoggerFactory.getLogger(ChatService.class);
+    private static final String UNSPECIFIED_SOURCE_RECORD_FIELD = "unspecified";
 
     private final OpenAIStreamingService openAIStreamingService;
     private final RetrievalService retrievalService;
@@ -279,7 +280,28 @@ public class ChatService {
             Object rawUrlValue = doc.getMetadata().get(QdrantPayloadFieldSchema.URL_FIELD);
             String rawUrl = rawUrlValue != null ? rawUrlValue.toString() : "";
             String normalizedUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
-            String documentText = doc.getText();
+            Object sourceNameMetadata = doc.getMetadata().get(QdrantPayloadFieldSchema.SOURCE_NAME_FIELD);
+            Object docSetMetadata = doc.getMetadata().get(QdrantPayloadFieldSchema.DOC_SET_FIELD);
+            Object docVersionMetadata = doc.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD);
+            String sourceName = sourceNameMetadata == null
+                    ? ""
+                    : sourceNameMetadata.toString().trim();
+            String docSet =
+                    docSetMetadata == null ? "" : docSetMetadata.toString().trim();
+            String sourceFamily = sourceName.isBlank() ? docSet : sourceName;
+            if (sourceFamily.isBlank()) {
+                sourceFamily = UNSPECIFIED_SOURCE_RECORD_FIELD;
+            }
+            String sourceVersion = docVersionMetadata == null
+                    ? ""
+                    : docVersionMetadata.toString().trim();
+            if (sourceVersion.isBlank()) {
+                sourceVersion = UNSPECIFIED_SOURCE_RECORD_FIELD;
+            }
+            String sourceRecordHeader =
+                    "[SOURCE RECORD family=\"" + sourceFamily + "\" version=\"" + sourceVersion + "\"]";
+            String documentContent = doc.getText();
+            String documentText = sourceRecordHeader + "\n" + (documentContent == null ? "" : documentContent);
 
             segments.add(new ContextDocumentSegment(
                     docIndex + 1, doc.getId(), normalizedUrl, documentText, estimateTokens(documentText)));

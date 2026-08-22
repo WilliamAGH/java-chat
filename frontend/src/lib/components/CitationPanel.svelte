@@ -170,7 +170,7 @@
   .citation-trigger--expanded {
     background: var(--color-bg-secondary);
     border-color: var(--color-accent-muted);
-    color: var(--color-accent);
+    color: var(--color-text-primary);
   }
 
   .citation-trigger-icon {

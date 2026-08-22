@@ -55,11 +55,11 @@ public final class DocsSourceRegistry {
     private static final String API_PREFIX = "api/";
 
     private static final String SPRING_FRAMEWORK_REFERENCE_URL_PREFIX =
-            SPRING_DOCS_HTTPS_PREFIX + SPRING_FRAMEWORK_MARKER + "/reference/current";
+            SPRING_DOCS_HTTPS_PREFIX + SPRING_FRAMEWORK_MARKER + "/reference";
     private static final String SPRING_FRAMEWORK_JAVADOC_URL_PREFIX =
             SPRING_DOCS_HTTPS_PREFIX + SPRING_FRAMEWORK_MARKER + "/docs/current/javadoc-api";
     private static final String SPRING_BOOT_REFERENCE_URL_PREFIX =
-            SPRING_DOCS_HTTPS_PREFIX + SPRING_BOOT_MARKER + "/reference/current";
+            SPRING_DOCS_HTTPS_PREFIX + SPRING_BOOT_MARKER + "/reference";
     private static final String SPRING_BOOT_API_URL_PREFIX =
             SPRING_DOCS_HTTPS_PREFIX + SPRING_BOOT_MARKER + "/docs/current/api";
 
@@ -668,7 +668,8 @@ public final class DocsSourceRegistry {
                 .filter(source -> pathEndsWith(normalizedRoot, source.relativeMirrorPath()))
                 .findFirst()
                 .flatMap(source -> new CitationRoute(source.citationBaseUrl(), source.citationPathStyle())
-                        .resolveCitationUrl(relativeDocumentPath));
+                        .resolveCitationUrl(relativeDocumentPath))
+                .map(DocsSourceRegistry::canonicalizeHttpDocUrl);
     }
 
     private static boolean pathEndsWith(String normalizedRoot, String relativeMirrorPath) {
@@ -956,6 +957,11 @@ public final class DocsSourceRegistry {
         if (canonicalUrl.contains(SPRING_DOCS_HTTPS_PREFIX)) {
             canonicalUrl = canonicalUrl.replace(
                     "/spring-framework/docs/current/javadoc-api/java/", "/spring-framework/docs/current/javadoc-api/");
+            canonicalUrl = canonicalUrl
+                    .replace("/spring-framework/reference/reference/", "/spring-framework/reference/")
+                    .replace("/spring-framework/reference/current/", "/spring-framework/reference/")
+                    .replace("/spring-boot/reference/reference/", "/spring-boot/reference/")
+                    .replace("/spring-boot/reference/current/", "/spring-boot/reference/");
         }
         int protocolIndex = canonicalUrl.indexOf("://");
         String protocolPrefix = protocolIndex >= 0 ? canonicalUrl.substring(0, protocolIndex + 3) : "";

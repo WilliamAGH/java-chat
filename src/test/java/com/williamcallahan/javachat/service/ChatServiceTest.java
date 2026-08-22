@@ -19,6 +19,7 @@ import com.williamcallahan.javachat.model.Citation;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.ai.document.Document;
 
 /** Verifies chat answer context and static citations remain grounded in official documentation. */
 class ChatServiceTest {
@@ -102,5 +103,40 @@ class ChatServiceTest {
         assertEquals("official", answerContextConstraint.sourceKind());
         assertEquals(DocsSourceRegistry.officialDocumentationSourceIdentities(), answerContextConstraint.docSet());
         verify(retrievalService, never()).discoverCitations(anyString(), any(RetrievalConstraint.class));
+    }
+
+    @Test
+    void structuredPromptDoesNotInventVersionForUnversionedRetainedContext() {
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        SystemPromptConfig systemPromptConfig = mock(SystemPromptConfig.class);
+        when(systemPromptConfig.getCoreSystemPrompt()).thenReturn("Use exact source records.");
+        Document springReference = Document.builder()
+                .id("spring-reference-707")
+                .text("Transaction behavior")
+                .metadata(
+                        QdrantPayloadFieldSchema.URL_FIELD,
+                        "https://docs.spring.io/spring-framework/reference/data-access.html")
+                .metadata(QdrantPayloadFieldSchema.SOURCE_NAME_FIELD, "Spring Framework Reference")
+                .metadata(QdrantPayloadFieldSchema.DOC_SET_FIELD, "spring-framework-reference")
+                .build();
+        when(retrievalService.retrieveWithLimitOutcome(
+                        eq("Spring 7.0.7 transaction behavior"),
+                        eq(ModelConfiguration.RAG_LIMIT_CONSTRAINED),
+                        eq(ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED),
+                        any(RetrievalConstraint.class),
+                        any(),
+                        anyLong()))
+                .thenReturn(new RetrievalService.RetrievalOutcome(List.of(springReference), List.of()));
+        ChatService chatService = new ChatService(
+                mock(OpenAIStreamingService.class), retrievalService, systemPromptConfig, new AppProperties());
+
+        ChatService.StructuredPromptOutcome promptOutcome =
+                chatService.buildStructuredPromptWithContextOutcome(List.of(), "Spring 7.0.7 transaction behavior");
+
+        assertEquals(
+                "[CTX 1] https://docs.spring.io/spring-framework/reference/data-access.html\n"
+                        + "[SOURCE RECORD family=\"Spring Framework Reference\" version=\"unspecified\"]\n"
+                        + "Transaction behavior",
+                promptOutcome.structuredPrompt().contextDocuments().getFirst().content());
     }
 }
