@@ -87,6 +87,67 @@ test("streams text and citations through the public API", async (testContext) =>
   assert.equal(cliExecution.standardError, "");
 });
 
+test("renders enrichment markers split across stream chunks", async (testContext) => {
+  const apiServer = createServer((request, response) => {
+    if (request.url === "/api/me") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"userId":"user_cli"}');
+      return;
+    }
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    // The marker straddles three events, which is how the model actually emits
+    // it; a renderer that only inspects one chunk leaks the raw token.
+    response.end(
+      'event: text\ndata: {"text":"Sealed interfaces restrict implementors. {{remin"}\n\n' +
+        'event: text\ndata: {"text":"der: Permitted types must be final, sealed, or non-"}\n\n' +
+        'event: text\ndata: {"text":"sealed.}} Use them for closed hierarchies. {{unknown:kept}}"}\n\n',
+    );
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const address = apiServer.address();
+
+  const cliExecution = await runCli(
+    ["--host", `http://127.0.0.1:${address.port}`, "What is a sealed interface?"],
+    { JAVACHAT_API_KEY: TEST_API_KEY },
+  );
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.match(cliExecution.standardOutput, /Important Reminders: Permitted types must be final/);
+  assert.doesNotMatch(cliExecution.standardOutput, /\{\{reminder|\{\{remin/);
+  // Prose on both sides of the marker must survive the buffering.
+  assert.match(cliExecution.standardOutput, /Sealed interfaces restrict implementors\./);
+  assert.match(cliExecution.standardOutput, /Use them for closed hierarchies\./);
+  // An unrecognised token stays verbatim rather than gaining an invented heading.
+  assert.match(cliExecution.standardOutput, /\{\{unknown:kept\}\}/);
+});
+
+test("releases an unterminated enrichment marker instead of swallowing it", async (testContext) => {
+  const apiServer = createServer((request, response) => {
+    if (request.url === "/api/me") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"userId":"user_cli"}');
+      return;
+    }
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end('event: text\ndata: {"text":"Answer text. {{reminder: never closed"}\n\n');
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const address = apiServer.address();
+
+  const cliExecution = await runCli(
+    ["--host", `http://127.0.0.1:${address.port}`, "Anything"],
+    { JAVACHAT_API_KEY: TEST_API_KEY },
+  );
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.match(cliExecution.standardOutput, /Answer text\./);
+  assert.match(cliExecution.standardOutput, /never closed/);
+});
+
 test("rejects a successful non-SSE response", async (testContext) => {
   const apiServer = createServer((request, response) => {
     if (request.url === "/api/me") {

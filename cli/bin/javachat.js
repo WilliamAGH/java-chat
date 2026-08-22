@@ -23,6 +23,23 @@ const CREDENTIALS_DIRECTORY_MODE = 0o700;
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 const CITATION_DISPLAY_LIMIT = 5;
 
+// The assistant is instructed to emit enrichment markers (SystemPromptConfig's
+// MARKER_USAGE_PROMPT); the web client renders each as a titled callout. Titles
+// are restated here rather than shared because this is the terminal's own
+// presentation boundary, and a terminal has no icons or panels to reuse.
+const ENRICHMENT_MARKER_TITLES = new Map([
+  ["hint", "Helpful Hints"],
+  ["background", "Background Context"],
+  ["reminder", "Important Reminders"],
+  ["warning", "Warning"],
+  ["example", "Example"],
+]);
+const MARKER_OPEN = "{{";
+const MARKER_CLOSE = "}}";
+// A marker that never closes must not buffer the answer indefinitely; past this
+// length the held text is released verbatim and treated as ordinary prose.
+const MARKER_MAX_LENGTH = 4096;
+
 /** Resolves the credential file honouring XDG, so a home directory stays tidy. */
 function credentialsPath() {
   const configHome = env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
@@ -302,6 +319,70 @@ async function commandWhoami(host) {
  * Parses SSE by hand rather than pulling a dependency: the server emits a small
  * fixed set of event names and this keeps the CLI installable with no tree.
  */
+/**
+ * Renders one enrichment marker as a titled terminal block.
+ *
+ * An unrecognised token is returned untouched: inventing a heading for markup
+ * this client does not understand would misrepresent the answer.
+ */
+function renderEnrichmentMarker(markerBody) {
+  const separatorIndex = markerBody.indexOf(":");
+  const token =
+    separatorIndex === -1 ? "" : markerBody.slice(0, separatorIndex).trim().toLowerCase();
+  const title = ENRICHMENT_MARKER_TITLES.get(token);
+  if (!title) {
+    return `${MARKER_OPEN}${markerBody}${MARKER_CLOSE}`;
+  }
+  return `\n${title}: ${markerBody.slice(separatorIndex + 1).trim()}\n`;
+}
+
+/**
+ * Converts enrichment markers to terminal blocks while text is still streaming.
+ *
+ * Markers routinely straddle two SSE chunks, so text from an opening `{{` is
+ * held until its close arrives. Only that fragment is delayed; everything before
+ * it prints immediately, which keeps the answer streaming.
+ */
+function createEnrichmentMarkerRenderer() {
+  let heldText = "";
+  return {
+    /** Returns the text that is safe to print now. */
+    push(streamedText) {
+      heldText += streamedText;
+      let printable = "";
+      for (;;) {
+        const openIndex = heldText.indexOf(MARKER_OPEN);
+        if (openIndex === -1) {
+          // A lone trailing brace may become a marker once the next chunk lands.
+          const heldBraceLength = heldText.endsWith("{") ? 1 : 0;
+          printable += heldText.slice(0, heldText.length - heldBraceLength);
+          heldText = heldText.slice(heldText.length - heldBraceLength);
+          return printable;
+        }
+        printable += heldText.slice(0, openIndex);
+        heldText = heldText.slice(openIndex);
+        const closeIndex = heldText.indexOf(MARKER_CLOSE, MARKER_OPEN.length);
+        if (closeIndex === -1) {
+          if (heldText.length > MARKER_MAX_LENGTH) {
+            printable += heldText;
+            heldText = "";
+            continue;
+          }
+          return printable;
+        }
+        printable += renderEnrichmentMarker(heldText.slice(MARKER_OPEN.length, closeIndex));
+        heldText = heldText.slice(closeIndex + MARKER_CLOSE.length);
+      }
+    },
+    /** Releases an unterminated marker verbatim so no answer text is lost. */
+    flush() {
+      const unterminatedText = heldText;
+      heldText = "";
+      return unterminatedText;
+    },
+  };
+}
+
 async function commandAsk(host, question, options) {
   const environmentApiKey = env.JAVACHAT_API_KEY?.trim();
   const allHosts = environmentApiKey ? {} : await readCredentials();
@@ -345,12 +426,15 @@ async function commandAsk(host, question, options) {
   }
 
   const citations = [];
+  const markerRenderer = createEnrichmentMarkerRenderer();
   let sawText = false;
   let streamFailure = null;
 
   for await (const sseEvent of readServerSentEvents(streamResponse.body)) {
     if (sseEvent.event === "text") {
-      stdout.write(stripVTControlCharacters(JSON.parse(sseEvent.data).text ?? ""));
+      stdout.write(
+        stripVTControlCharacters(markerRenderer.push(JSON.parse(sseEvent.data).text ?? "")),
+      );
       sawText = true;
     } else if (sseEvent.event === "citation") {
       citations.push(
@@ -365,6 +449,7 @@ async function commandAsk(host, question, options) {
     }
   }
 
+  stdout.write(stripVTControlCharacters(markerRenderer.flush()));
   if (sawText) stdout.write("\n");
   if (streamFailure) {
     stderr.write(`\n${stripVTControlCharacters(String(streamFailure.message ?? ""))}\n`);
