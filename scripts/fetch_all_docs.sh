@@ -467,11 +467,12 @@ fetch_source() {
         return 1
     fi
     fetch_target_directory="$staging_directory"
-    if [ -n "$seed_discovery_url" ] \
+    if { [ -n "$seed_discovery_url" ] || [ -n "$archive_format" ] \
+            || [ -n "$java_release" ] || [ "$javadoc_seed" = "true" ]; } \
         && [ "$FORCE_REFRESH" != "true" ] \
         && [ -d "$target_dir" ] \
         && [ "$(count_html_files "$staging_directory")" -eq 0 ] \
-        && ! cp -al -- "$target_dir/." "$staging_directory/"; then
+        && ! cp -a --reflink=auto -- "$target_dir/." "$staging_directory/"; then
         discard_documentation_fetch_staging_directory "$staging_directory"
         log "${RED}✗ Could not seed validation staging from the published $name mirror${NC}"
         return 1
@@ -482,6 +483,17 @@ fetch_source() {
     existing_count="$(count_html_files "$fetch_target_directory")"
     if [ "$existing_count" -gt 0 ]; then
         log "${BLUE}ℹ Existing mirror: $existing_count HTML files${NC}"
+    fi
+    if [ -n "$archive_format" ] \
+        && [ "$FORCE_REFRESH" != "true" ] \
+        && [ "$existing_count" -ge "$min_files" ] \
+        && validate_staged_documentation_mirror \
+            "$staging_directory" "$name" "$min_files" "$identity_regex" "$forbidden_identity_regex" \
+        && validate_staged_documentation_identity \
+            "$staging_directory" "$name" "$required_identity_page" "$required_identity_text" "$expected_meta_version"; then
+        log "${GREEN}✓ $name already fetched: $existing_count HTML files (validated pinned archive)${NC}"
+        discard_documentation_fetch_staging_directory "$staging_directory"
+        return 0
     fi
     # Proactive cleanup for known legacy Spring mirror layouts that otherwise mask incomplete fetches.
     if [[ "$name" == *"Spring Framework Javadoc"* ]]; then
@@ -539,6 +551,7 @@ fetch_source() {
                     return 1
                 fi
                 java_api_fetch_required="false"
+                DOCUMENTATION_SOURCE_ALREADY_COMPLETE="true"
             else
                 log "${YELLOW}⚠ $name cached mirror is missing canonical seed paths; refetching${NC}"
             fi
