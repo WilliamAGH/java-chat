@@ -472,7 +472,7 @@ fetch_source() {
         && [ "$FORCE_REFRESH" != "true" ] \
         && [ -d "$target_dir" ] \
         && [ "$(count_html_files "$staging_directory")" -eq 0 ] \
-        && ! cp -a --reflink=auto -- "$target_dir/." "$staging_directory/"; then
+        && ! copy_documentation_mirror_to_staging "$target_dir" "$staging_directory"; then
         discard_documentation_fetch_staging_directory "$staging_directory"
         log "${RED}✗ Could not seed validation staging from the published $name mirror${NC}"
         return 1
@@ -492,7 +492,10 @@ fetch_source() {
         && validate_staged_documentation_identity \
             "$staging_directory" "$name" "$required_identity_page" "$required_identity_text" "$expected_meta_version"; then
         log "${GREEN}✓ $name already fetched: $existing_count HTML files (validated pinned archive)${NC}"
-        discard_documentation_fetch_staging_directory "$staging_directory"
+        if ! discard_documentation_fetch_staging_directory "$staging_directory"; then
+            log "${RED}✗ Could not discard validated archive staging for $name${NC}"
+            return 1
+        fi
         return 0
     fi
     # Proactive cleanup for known legacy Spring mirror layouts that otherwise mask incomplete fetches.
@@ -544,7 +547,13 @@ fetch_source() {
         fi
         existing_count="$(count_html_files "$fetch_target_directory")"
         if [ "$FORCE_REFRESH" != "true" ] && [ "$min_files" -gt 0 ] && [ "$existing_count" -ge "$min_files" ]; then
-            if verify_javadoc_seed_mirror "$url" "$fetch_target_directory" "$name" "$cut_dirs"; then
+            if verify_javadoc_seed_mirror "$url" "$fetch_target_directory" "$name" "$cut_dirs" \
+                && validate_staged_documentation_mirror \
+                    "$staging_directory" "$name" "$min_files" "$identity_regex" "$forbidden_identity_regex" \
+                && validate_staged_documentation_identity \
+                    "$staging_directory" "$name" "$required_identity_page" "$required_identity_text" "$expected_meta_version" \
+                && { [ "$java25_specification_pdfs" != "true" ] \
+                    || validate_java25_specification_pdfs "$staging_directory" "$name"; }; then
                 log "${GREEN}✓ $name already fetched: $existing_count HTML files (minimum: $min_files)${NC}"
                 if ! cd - > /dev/null; then
                     log "${RED}✗ Could not restore the working directory after checking $name${NC}"

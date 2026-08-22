@@ -175,6 +175,25 @@ fetch_java25_specification_pdfs() {
         "The Java® Virtual Machine Specification"
 }
 
+# Revalidates the published Java 25 specifications before an incremental mirror is reused.
+validate_java25_specification_pdfs() {
+    local target_directory="$1"
+    local source_name="$2"
+    if ! require_java25_specification_pdf_parser; then
+        return 1
+    fi
+    validate_java25_specification_pdf \
+        "$target_directory/docs.oracle.com/javase/specs/jls/se25/jls25.pdf" \
+        "$source_name JLS 25" \
+        "Language Specification" \
+        "The Java® Language Specification" \
+        && validate_java25_specification_pdf \
+            "$target_directory/docs.oracle.com/javase/specs/jvms/se25/jvms25.pdf" \
+            "$source_name JVMS 25" \
+            "Virtual Machine Specification" \
+            "The Java® Virtual Machine Specification"
+}
+
 # Fetches one governed article without recursively following unrelated page links.
 fetch_single_documentation_page() {
     local url="$1"
