@@ -103,9 +103,10 @@ class DocsSourceRegistryTest {
         documentationSources.forEach(documentationSource -> {
             String localDocumentationFileUrl =
                     "file:///data/docs/" + documentationSource.relativeMirrorPath() + "/index.html";
-            String expectedOfficialDocumentationUrl = documentationSource.citationBaseUrl().endsWith("/")
-                    ? documentationSource.citationBaseUrl() + "index.html"
-                    : documentationSource.citationBaseUrl();
+            String expectedOfficialDocumentationUrl =
+                    documentationSource.citationBaseUrl().endsWith("/")
+                            ? documentationSource.citationBaseUrl() + "index.html"
+                            : documentationSource.citationBaseUrl();
             assertEquals(
                     expectedOfficialDocumentationUrl, DocsSourceRegistry.normalizeDocUrl(localDocumentationFileUrl));
             assertEquals(
