@@ -105,7 +105,8 @@ class DocsSourceRegistryTest {
                     "file:///data/docs/" + documentationSource.relativeMirrorPath() + "/index.html";
             String expectedOfficialDocumentationUrl =
                     documentationSource.citationBaseUrl().endsWith("/")
-                            ? documentationSource.citationBaseUrl() + "index.html"
+                            ? documentationSource.citationBaseUrl()
+                                    + documentationSource.citationPathStyle().citationRelativePath("index.html")
                             : documentationSource.citationBaseUrl();
             assertEquals(
                     expectedOfficialDocumentationUrl, DocsSourceRegistry.normalizeDocUrl(localDocumentationFileUrl));
@@ -141,6 +142,22 @@ class DocsSourceRegistryTest {
         assertEquals(
                 documentationSource.citationBaseUrl() + "api/chat-client.html",
                 DocsSourceRegistry.resolveMirroredPath(arbitraryMirrorRoot, arbitraryDocumentFile)
+                        .orElseThrow());
+    }
+
+    @Test
+    void resolvesExtensionlessDocumentationCitationRoutes(@TempDir Path temporaryDirectory) {
+        DocumentationSource anthropicApiDocumentation = DocsSourceRegistry.documentationSources().stream()
+                .filter(documentationSource -> "anthropic/api".equals(documentationSource.relativeMirrorPath()))
+                .findFirst()
+                .orElseThrow();
+        Path anthropicApiMirrorRoot = temporaryDirectory.resolve(anthropicApiDocumentation.relativeMirrorPath());
+
+        assertEquals(
+                "https://platform.claude.com/docs/en/build-with-claude/overview",
+                DocsSourceRegistry.resolveMirroredPath(
+                                anthropicApiMirrorRoot,
+                                anthropicApiMirrorRoot.resolve("build-with-claude/overview.html"))
                         .orElseThrow());
     }
 

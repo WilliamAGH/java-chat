@@ -23,6 +23,10 @@ public final class DocsSourceRegistry {
     private static final String LOCAL_DOCS_BOOKS = LOCAL_DOCS_ROOT + "books/";
     private static final String PUBLIC_PDFS_BASE = "/pdfs/";
     private static final String PDF_EXTENSION = ".pdf";
+    private static final String HTML_EXTENSION = ".html";
+    private static final String HTM_EXTENSION = ".htm";
+    private static final String HTML_INDEX_FILE_NAME = "index.html";
+    private static final String HTM_INDEX_FILE_NAME = "index.htm";
     private static final String HTTPS_PREFIX = "https://";
     private static final String DOCS_ORACLE_HOST_MARKER = "docs.oracle.com/";
     private static final String SPRING_DOCS_HOST_MARKER = "docs.spring.io/";
@@ -261,6 +265,42 @@ public final class DocsSourceRegistry {
                     "api-docs",
                     "1.18.46"),
             new DocumentationSource(
+                    "https://platform.claude.com/docs/en/",
+                    "anthropic/api",
+                    "Anthropic API Documentation",
+                    "anthropic-api",
+                    "official",
+                    "api-docs",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://code.claude.com/docs/en/",
+                    "anthropic/claude-code",
+                    "Claude Code Documentation",
+                    "claude-code",
+                    "official",
+                    "tool-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://ampcode.com/",
+                    "amp-code",
+                    "Amp Code CLI Manual",
+                    "amp-code",
+                    "official",
+                    "tool-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://tinker-docs.thinkingmachines.ai/",
+                    "tinker",
+                    "Tinker Documentation",
+                    "tinker",
+                    "official",
+                    "api-docs",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
                     "https://docs.spring.io/spring-boot/reference/",
                     "spring-boot",
                     "Spring Boot Reference",
@@ -350,7 +390,7 @@ public final class DocsSourceRegistry {
             .toList();
 
     private static final String[] EMBEDDED_HOST_MARKERS = {DOCS_ORACLE_HOST_MARKER, SPRING_DOCS_HOST_MARKER};
-    private static final Map<String, String> LOCAL_PREFIX_TO_REMOTE_BASE = buildLocalPrefixLookup();
+    private static final Map<String, CitationRoute> LOCAL_PREFIX_TO_CITATION_ROUTE = buildLocalPrefixLookup();
 
     private DocsSourceRegistry() {}
 
@@ -378,7 +418,28 @@ public final class DocsSourceRegistry {
             String docSet,
             String sourceKind,
             String docType,
-            String docVersion) {
+            String docVersion,
+            DocumentationCitationPathStyle citationPathStyle) {
+        /** Creates a source whose canonical citation paths match mirrored filenames literally. */
+        public DocumentationSource(
+                String citationBaseUrl,
+                String relativeMirrorPath,
+                String displayName,
+                String docSet,
+                String sourceKind,
+                String docType,
+                String docVersion) {
+            this(
+                    citationBaseUrl,
+                    relativeMirrorPath,
+                    displayName,
+                    docSet,
+                    sourceKind,
+                    docType,
+                    docVersion,
+                    DocumentationCitationPathStyle.LITERAL);
+        }
+
         public DocumentationSource {
             Objects.requireNonNull(citationBaseUrl, "citationBaseUrl");
             Objects.requireNonNull(relativeMirrorPath, "relativeMirrorPath");
@@ -387,6 +448,34 @@ public final class DocsSourceRegistry {
             Objects.requireNonNull(sourceKind, "sourceKind");
             Objects.requireNonNull(docType, "docType");
             Objects.requireNonNull(docVersion, "docVersion");
+            Objects.requireNonNull(citationPathStyle, "citationPathStyle");
+        }
+    }
+
+    /** Describes how a mirrored HTML filename maps back to its canonical citation route. */
+    public enum DocumentationCitationPathStyle {
+        /** Keeps the mirrored relative path unchanged. */
+        LITERAL,
+        /** Removes the HTML filename synthesized for an extensionless canonical route. */
+        EXTENSIONLESS_HTML;
+
+        String citationRelativePath(String mirroredRelativePath) {
+            if (this == LITERAL || mirroredRelativePath == null) {
+                return mirroredRelativePath;
+            }
+            if (mirroredRelativePath.endsWith(HTML_INDEX_FILE_NAME)) {
+                return mirroredRelativePath.substring(0, mirroredRelativePath.length() - HTML_INDEX_FILE_NAME.length());
+            }
+            if (mirroredRelativePath.endsWith(HTM_INDEX_FILE_NAME)) {
+                return mirroredRelativePath.substring(0, mirroredRelativePath.length() - HTM_INDEX_FILE_NAME.length());
+            }
+            if (mirroredRelativePath.endsWith(HTML_EXTENSION)) {
+                return mirroredRelativePath.substring(0, mirroredRelativePath.length() - HTML_EXTENSION.length());
+            }
+            if (mirroredRelativePath.endsWith(HTM_EXTENSION)) {
+                return mirroredRelativePath.substring(0, mirroredRelativePath.length() - HTM_EXTENSION.length());
+            }
+            return mirroredRelativePath;
         }
     }
 
@@ -450,19 +539,31 @@ public final class DocsSourceRegistry {
         return environmentBaseUrl != null ? environmentBaseUrl : defaultBaseUrl;
     }
 
-    private static Map<String, String> buildLocalPrefixLookup() {
-        Map<String, String> prefixLookup = new LinkedHashMap<>();
+    private static Map<String, CitationRoute> buildLocalPrefixLookup() {
+        Map<String, CitationRoute> prefixLookup = new LinkedHashMap<>();
         for (JavaApiDocumentationSource javaApiDocumentationSource : JAVA_API_DOCUMENTATION_SOURCES) {
             prefixLookup.put(
                     LOCAL_DOCS_ROOT + javaApiDocumentationSource.relativeMirrorPath() + "/",
-                    javaApiDocumentationSource.remoteBaseUrl());
+                    new CitationRoute(
+                            javaApiDocumentationSource.remoteBaseUrl(), DocumentationCitationPathStyle.LITERAL));
         }
         for (DocumentationSource documentationSource : DOCUMENTATION_SOURCES) {
             prefixLookup.put(
                     LOCAL_DOCS_ROOT + documentationSource.relativeMirrorPath() + "/",
-                    documentationSource.citationBaseUrl());
+                    new CitationRoute(documentationSource.citationBaseUrl(), documentationSource.citationPathStyle()));
         }
         return Map.copyOf(prefixLookup);
+    }
+
+    private record CitationRoute(String citationBaseUrl, DocumentationCitationPathStyle citationPathStyle) {
+        private CitationRoute {
+            Objects.requireNonNull(citationBaseUrl, "citationBaseUrl");
+            Objects.requireNonNull(citationPathStyle, "citationPathStyle");
+        }
+
+        Optional<String> resolveCitationUrl(String mirroredRelativePath) {
+            return joinBaseAndRel(citationBaseUrl, citationPathStyle.citationRelativePath(mirroredRelativePath));
+        }
     }
 
     /** Resolves a file beneath a selected mirror root without assuming a literal host path. */
@@ -501,7 +602,8 @@ public final class DocsSourceRegistry {
         return DOCUMENTATION_SOURCES.stream()
                 .filter(source -> pathEndsWith(normalizedRoot, source.relativeMirrorPath()))
                 .findFirst()
-                .flatMap(source -> joinBaseAndRel(source.citationBaseUrl(), relativeDocumentPath));
+                .flatMap(source -> new CitationRoute(source.citationBaseUrl(), source.citationPathStyle())
+                        .resolveCitationUrl(relativeDocumentPath));
     }
 
     private static boolean pathEndsWith(String normalizedRoot, String relativeMirrorPath) {
@@ -680,13 +782,13 @@ public final class DocsSourceRegistry {
         Optional<String> mappedUrl = Optional.empty();
         if (localPath != null) {
             String normalizedPath = localPath.replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR);
-            for (Map.Entry<String, String> prefixEntry : LOCAL_PREFIX_TO_REMOTE_BASE.entrySet()) {
+            for (Map.Entry<String, CitationRoute> prefixEntry : LOCAL_PREFIX_TO_CITATION_ROUTE.entrySet()) {
                 String localPrefix = prefixEntry.getKey();
                 if (normalizedPath.contains(localPrefix)) {
                     String relativePath =
                             normalizedPath.substring(normalizedPath.indexOf(localPrefix) + localPrefix.length());
                     String adjustedPath = normalizeRelativePath(localPrefix, relativePath);
-                    mappedUrl = joinBaseAndRel(prefixEntry.getValue(), adjustedPath);
+                    mappedUrl = prefixEntry.getValue().resolveCitationUrl(adjustedPath);
                     break;
                 }
             }

@@ -335,6 +335,8 @@ fetch_discovered_documentation_seed() {
     local seed_discovery_url="$9"
     local seed_source_prefix="${10}"
     local seed_reject_regex="${11:-}"
+    shift 11
+    local -a supplemental_seed_urls=("$@")
     if [ -z "$seed_reject_regex" ]; then
         seed_reject_regex="$reject_regex"
     fi
@@ -386,6 +388,22 @@ fetch_discovered_documentation_seed() {
         cd - > /dev/null
         log "${RED}✗ Structured discovery failed for $name${NC}"
         return 1
+    fi
+    if [ "${#supplemental_seed_urls[@]}" -gt 0 ]; then
+        if ! printf '%s\n' "${supplemental_seed_urls[@]}" >> "$generated_seed_file" \
+            || ! sort -u -o "$generated_seed_file" "$generated_seed_file"; then
+            rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file"
+            cd - > /dev/null
+            log "${RED}✗ Supplemental documentation seeds could not be recorded for $name${NC}"
+            return 1
+        fi
+        if ! write_documentation_seed_mirror_paths \
+            "$canonical_prefix" "$generated_seed_file" "$cut_directories" "$mirror_paths_file" "$name"; then
+            rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file"
+            cd - > /dev/null
+            log "${RED}✗ Supplemental documentation seeds are invalid for $name${NC}"
+            return 1
+        fi
     fi
     if [ ! -s "$generated_seed_file" ] || [ ! -s "$mirror_paths_file" ]; then
         rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file"

@@ -335,6 +335,96 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     --seed-source-prefix \
     "https://quarkus.io/guides/"
 
+assert_current_documentation_source_dispatch() {
+    local documentation_source_identifier="$1"
+    local expected_citation_base="$2"
+    local expected_mirror_path="$3"
+    local expected_discovery_url="$4"
+    if ! (
+        set --
+        # shellcheck source=fetch_all_docs.sh
+        source "$FETCH_SCRIPT"
+        log() {
+            :
+        }
+        record_documentation_fetch() {
+            printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+        }
+        fetch_named_official_source "$documentation_source_identifier"
+    ); then
+        fail_documentation_fetch_test "current documentation source dispatch failed: $documentation_source_identifier"
+    fi
+    if ! grep -Fxq -- "$expected_citation_base" "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+        || ! grep -Fxq -- "$expected_mirror_path" "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+        || ! grep -Fxq -- "$expected_discovery_url" "$ENVIRONMENT_OVERRIDE_CAPTURE"; then
+        fail_documentation_fetch_test "current documentation source dispatch lost its canonical boundary: $documentation_source_identifier"
+    fi
+}
+
+assert_current_documentation_source_dispatch \
+    anthropic-api \
+    "https://platform.claude.com/docs/en/" \
+    "anthropic/api" \
+    "https://platform.claude.com/sitemap.xml"
+if ! grep -Fxq -- '^https://platform\.claude\.com/docs/en/home$' "$ENVIRONMENT_OVERRIDE_CAPTURE"; then
+    fail_documentation_fetch_test "Anthropic API dispatch retained its non-content landing shell"
+fi
+assert_current_documentation_source_dispatch \
+    claude-code \
+    "https://code.claude.com/docs/en/" \
+    "anthropic/claude-code" \
+    "https://code.claude.com/sitemap.xml"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source amp-code
+); then
+    fail_documentation_fetch_test "canonical Amp Code documentation dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://ampcode.com/" \
+    --mirror-path \
+    amp-code \
+    --name \
+    "Amp Code CLI Manual" \
+    --source-version \
+    current \
+    --identity-regex \
+    Amp \
+    --cut-directories \
+    0 \
+    --minimum-html-files \
+    8 \
+    --seed-document-type \
+    html-links \
+    --seed-discovery-url \
+    "https://ampcode.com/manual" \
+    --seed-source-prefix \
+    "https://ampcode.com/" \
+    --seed-reject-regex \
+    '^https://ampcode\.com/(?:manual/appendix/legacy-permissions-rules\.txt$|(?!manual(?:/|$)).*)' \
+    --seed-url \
+    "https://ampcode.com/manual/orbs/oidc" \
+    --seed-url \
+    "https://ampcode.com/manual/sdk/python" \
+    --seed-url \
+    "https://ampcode.com/manual/sdk/typescript"
+assert_current_documentation_source_dispatch \
+    tinker \
+    "https://tinker-docs.thinkingmachines.ai/" \
+    tinker \
+    "https://tinker-docs.thinkingmachines.ai/sitemap.xml"
+
 if ! (
     set --
     # shellcheck source=fetch_all_docs.sh
@@ -1055,7 +1145,7 @@ if ! (
         printf '%s\n' "$@" > "$JAVA_POST_FETCH_WGET2_ARGUMENTS"
         printf '<html>Record</html>\n' > "$JAVA_POST_FETCH_TARGET_DIRECTORY/Record.html"
     }
-    write_javadoc_seed_mirror_paths() {
+    write_documentation_seed_mirror_paths() {
         printf '%s\n%s\n' Record.html String.html > "$4"
     }
     if (
@@ -1094,7 +1184,7 @@ if ! (
     log() {
         :
     }
-    write_javadoc_seed_mirror_paths() {
+    write_documentation_seed_mirror_paths() {
         printf '%s\n' "java.base/java/lang/Record.html" > "$4"
     }
     reconcile_javadoc_seed_mirror \
