@@ -361,6 +361,7 @@ fetch_source() {
     local seed_discovery_url=""
     local seed_source_prefix=""
     local seed_reject_regex=""
+    local -a supplemental_seed_urls=()
     local single_page_only="false"
     local java25_specification_pdfs="false"
     local javadoc_seed="false"
@@ -388,6 +389,7 @@ fetch_source() {
             --seed-discovery-url) seed_discovery_url="$2"; shift 2 ;;
             --seed-source-prefix) seed_source_prefix="$2"; shift 2 ;;
             --seed-reject-regex) seed_reject_regex="$2"; shift 2 ;;
+            --seed-url) supplemental_seed_urls+=("$2"); shift 2 ;;
             --single-page) single_page_only="true"; shift ;;
             --java25-specification-pdfs) java25_specification_pdfs="true"; shift ;;
             --javadoc-seed) javadoc_seed="true"; shift ;;
@@ -418,6 +420,10 @@ fetch_source() {
     fi
     if [ -n "$seed_reject_regex" ] && [ -z "$seed_discovery_url" ]; then
         echo "A discovery-only rejection requires structured discovery: $name" >&2
+        return 1
+    fi
+    if [ "${#supplemental_seed_urls[@]}" -gt 0 ] && [ -z "$seed_discovery_url" ]; then
+        echo "Supplemental documentation seeds require structured discovery: $name" >&2
         return 1
     fi
     if [ "$java25_specification_pdfs" = "true" ] \
@@ -535,7 +541,9 @@ fetch_source() {
             "$seed_document_type" \
             "$seed_discovery_url" \
             "$seed_source_prefix" \
-            "$seed_reject_regex" || documentation_fetch_status=$?
+            "$seed_reject_regex" \
+            "${supplemental_seed_urls[@]+"${supplemental_seed_urls[@]}"}" \
+            || documentation_fetch_status=$?
     else
         fetch_docs_mirror \
             "$url" \
@@ -626,6 +634,10 @@ fetch_named_official_source() {
         jackson-3.2.2-api) "$source_dispatch" fetch_source --url "https://repo.maven.apache.org/maven2/tools/jackson/core/jackson-databind/3.2.2/jackson-databind-3.2.2-javadoc.jar" --mirror-path "jackson/3.2.2/api" --name "Jackson Databind 3.2.2 API" --source-version "3.2.2" --identity-regex "jackson-databind 3\.2\.2 API" --required-identity-page "index.html" --required-identity-text "jackson-databind 3.2.2 API" --cut-directories 0 --minimum-html-files 1480 --archive-format zip ;;
         jackson-spring-3.1.2-api) "$source_dispatch" fetch_source --url "https://repo.maven.apache.org/maven2/tools/jackson/core/jackson-databind/3.1.2/jackson-databind-3.1.2-javadoc.jar" --mirror-path "jackson/3.1.2/api" --name "Jackson Databind 3.1.2 API (Spring Boot 4.0.6)" --source-version "3.1.2" --identity-regex "jackson-databind 3\.1\.2 API" --required-identity-page "index.html" --required-identity-text "jackson-databind 3.1.2 API" --cut-directories 0 --minimum-html-files 1470 --archive-format zip ;;
         lombok-1.18.46-api) "$source_dispatch" fetch_source --url "https://repo.maven.apache.org/maven2/org/projectlombok/lombok/1.18.46/lombok-1.18.46-javadoc.jar" --mirror-path "lombok/1.18.46/api" --name "Lombok 1.18.46 API (Spring Boot 4.0.6)" --source-version "1.18.46" --identity-regex "Overview \(Lombok\)" --required-identity-page "index.html" --required-identity-text "Overview (Lombok)" --cut-directories 0 --minimum-html-files 90 --archive-format zip ;;
+        anthropic-api) "$source_dispatch" fetch_source --url "https://platform.claude.com/docs/en/" --mirror-path "anthropic/api" --name "Anthropic API Documentation" --source-version "current" --identity-regex "Anthropic|Claude" --cut-directories 2 --minimum-html-files 580 --seed-document-type xml-sitemap --seed-discovery-url "https://platform.claude.com/sitemap.xml" --seed-source-prefix "https://platform.claude.com/docs/en/" --seed-reject-regex '^https://platform\.claude\.com/docs/en/home$' ;;
+        claude-code) "$source_dispatch" fetch_source --url "https://code.claude.com/docs/en/" --mirror-path "anthropic/claude-code" --name "Claude Code Documentation" --source-version "current" --identity-regex "Claude Code" --cut-directories 2 --minimum-html-files 185 --seed-document-type xml-sitemap --seed-discovery-url "https://code.claude.com/sitemap.xml" --seed-source-prefix "https://code.claude.com/docs/en/" ;;
+        amp-code) "$source_dispatch" fetch_source --url "https://ampcode.com/" --mirror-path "amp-code" --name "Amp Code CLI Manual" --source-version "current" --identity-regex "Amp" --cut-directories 0 --minimum-html-files 8 --seed-document-type html-links --seed-discovery-url "https://ampcode.com/manual" --seed-source-prefix "https://ampcode.com/" --seed-reject-regex '^https://ampcode\.com/(?:manual/appendix/legacy-permissions-rules\.txt$|(?!manual(?:/|$)).*)' --seed-url "https://ampcode.com/manual/orbs/oidc" --seed-url "https://ampcode.com/manual/sdk/python" --seed-url "https://ampcode.com/manual/sdk/typescript" ;;
+        tinker) "$source_dispatch" fetch_source --url "https://tinker-docs.thinkingmachines.ai/" --mirror-path "tinker" --name "Tinker Documentation" --source-version "current" --identity-regex "Tinker" --cut-directories 0 --minimum-html-files 320 --seed-document-type xml-sitemap --seed-discovery-url "https://tinker-docs.thinkingmachines.ai/sitemap.xml" --seed-source-prefix "https://tinker-docs.thinkingmachines.ai/" ;;
         spring-boot) "$source_dispatch" fetch_source --url "https://docs.spring.io/spring-boot/reference/" --mirror-path "spring-boot" --name "Spring Boot Reference" --source-version "stable-current" --identity-regex "Spring Boot" --cut-directories 2 --minimum-html-files 89 --seed-document-type html-links --seed-discovery-url "https://docs.spring.io/spring-boot/reference/index.html" --seed-source-prefix "https://docs.spring.io/spring-boot/reference/" ;;
         quarkus) "$source_dispatch" fetch_source --url "https://quarkus.io/guides/" --mirror-path "quarkus" --name "Quarkus Guides" --source-version "stable-current" --identity-regex "Quarkus" --cut-directories 1 --minimum-html-files 200 --reject-regex "%7[BbDd]" --seed-document-type html-links --seed-discovery-url "https://quarkus.io/guides/" --seed-source-prefix "https://quarkus.io/guides/" ;;
         java/java21-complete) "$source_dispatch" fetch_source --java-release 21 --url "https://docs.oracle.com/en/java/javase/21/docs/api/" --mirror-path "java/java21-complete" --name "Java 21 Complete API" --source-version "21-ga" --identity-regex "Overview \\(Java SE 21 &amp; JDK 21\\)" --required-identity-page "api/index.html" --required-identity-text "Overview (Java SE 21 & JDK 21)" --cut-directories 5 --minimum-html-files 5000 ;;
@@ -688,7 +700,7 @@ fetch_all_official_sources() {
         hikaricp-7.1.0-api hikaricp-spring-7.0.2-api \
         jackson-2.22.2-api jackson-spring-2.21.2-api \
         jackson-3.2.2-api jackson-spring-3.1.2-api \
-        lombok-1.18.46-api spring-boot quarkus \
+        lombok-1.18.46-api anthropic-api claude-code amp-code tinker spring-boot quarkus \
         java/java21-complete java/java24-complete java/java25-complete \
         spring-ai-reference spring-ai-api-stable spring-framework-reference spring-framework-api \
         spring-framework-7.0.7-api \

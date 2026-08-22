@@ -177,12 +177,13 @@ publish_staged_documentation_mirror() {
     fi
 }
 
-# Writes the local paths represented by the current Javadoc seed.
-write_javadoc_seed_mirror_paths() {
+# Writes the local paths represented by a current documentation seed.
+write_documentation_seed_mirror_paths() {
     local remote_base_url="$1"
     local seed_file="$2"
     local cut_directories="$3"
     local mirror_paths_file="$4"
+    local documentation_source_name="$5"
 
     if ! python3 "$SCRIPT_DIR/documentation_seed.py" \
         --project-mirror-paths-file \
@@ -190,12 +191,12 @@ write_javadoc_seed_mirror_paths() {
         --output "$mirror_paths_file" \
         --required-prefix "$remote_base_url" \
         --cut-directories "$cut_directories"; then
-        log "${RED}✗ Javadoc seed mirror-path projection failed${NC}"
+        log "${RED}✗ $documentation_source_name seed mirror-path projection failed${NC}"
         return 1
     fi
 
     if [ ! -s "$mirror_paths_file" ]; then
-        log "${RED}✗ Javadoc seed produced no mirror paths${NC}"
+        log "${RED}✗ $documentation_source_name seed produced no mirror paths${NC}"
         return 1
     fi
 }
@@ -285,7 +286,8 @@ reconcile_javadoc_seed_mirror() {
 
     local mirror_paths_file
     mirror_paths_file="$(mktemp "$target_dir/.javadoc-seed-paths.XXXXXX")"
-    if ! write_javadoc_seed_mirror_paths "$remote_base_url" "$seed_file" "$cut_directories" "$mirror_paths_file" \
+    if ! write_documentation_seed_mirror_paths \
+        "$remote_base_url" "$seed_file" "$cut_directories" "$mirror_paths_file" "$documentation_source_name" \
         || ! reconcile_seeded_html_mirror \
             "$target_dir" "$documentation_source_name" "$mirror_paths_file" "unseeded-java-api"; then
         rm -f "$mirror_paths_file"
@@ -312,7 +314,8 @@ verify_javadoc_seed_mirror() {
         log "${RED}✗ Could not create Javadoc mirror paths for $documentation_source_name${NC}"
         return 1
     fi
-    if ! write_javadoc_seed_mirror_paths "$remote_base_url" "$seed_file" "$cut_directories" "$mirror_paths_file" \
+    if ! write_documentation_seed_mirror_paths \
+        "$remote_base_url" "$seed_file" "$cut_directories" "$mirror_paths_file" "$documentation_source_name" \
         || ! verify_seeded_html_mirror "$target_dir" "$documentation_source_name" "$mirror_paths_file"; then
         rm -f "$mirror_paths_file"
         return 1
