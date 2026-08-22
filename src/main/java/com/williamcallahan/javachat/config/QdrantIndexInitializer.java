@@ -117,6 +117,18 @@ public final class QdrantIndexInitializer {
         attemptInitialization(true);
     }
 
+    /**
+     * Requires collection initialization to reach readiness before a fail-closed batch ingestion starts.
+     *
+     * @throws IllegalStateException when Qdrant remains unavailable or initialization has failed
+     */
+    public void requireCollectionsAndIndexesReady() {
+        ensureCollectionsAndIndexes();
+        if (initializationState != QdrantInitializationState.READY) {
+            throw new IllegalStateException("Qdrant collection initialization is not ready: " + initializationState);
+        }
+    }
+
     /** Retries initialization after transient Qdrant transport failures without restarting the JVM. */
     @Scheduled(initialDelay = INITIALIZATION_RETRY_MILLIS, fixedDelay = INITIALIZATION_RETRY_MILLIS)
     void retryPendingInitialization() {
