@@ -75,10 +75,13 @@
     </div>
   {/if}
 
-  <div class="bubble">
-    {#if message.role === 'user'}
+  {#if message.role === 'user'}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex (WCAG 2.1.1 requires the scrollable message region to be keyboard focusable.) -->
+    <div class="bubble" role="region" aria-label="Your message" tabindex="0">
       <p class="user-text">{message.messageText}</p>
-    {:else}
+    </div>
+  {:else}
+    <div class="bubble">
       <AssistantMarkdownBody markdown={message.messageText} {isStreaming} />
       {#if message.streamErrorMessage}
         <p class="stream-error" role="alert">{message.streamErrorMessage}</p>
@@ -96,8 +99,8 @@
           Retry
         </button>
       {/if}
-    {/if}
-  </div>
+    </div>
+  {/if}
 
   {#if message.role === 'assistant' && !message.isError}
     <div class="bubble-actions" aria-hidden={isStreaming}>

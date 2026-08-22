@@ -172,9 +172,24 @@ class DocsSourceRegistryTest {
     }
 
     @Test
+    void resolvesLegacySpringBootReferenceMirrorToCanonicalSqlDocumentation(@TempDir Path temporaryDirectory) {
+        Path springBootReferenceRoot = temporaryDirectory.resolve("spring-boot");
+
+        assertEquals(
+                "https://docs.spring.io/spring-boot/reference/data/sql.html",
+                DocsSourceRegistry.resolveMirroredPath(
+                                springBootReferenceRoot, springBootReferenceRoot.resolve("reference/data/sql.html"))
+                        .orElseThrow());
+        assertEquals(
+                "https://docs.spring.io/spring-boot/reference/data/sql.html",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "https://docs.spring.io/spring-boot/reference/reference/data/sql.html"));
+    }
+
+    @Test
     void normalizesEmbeddedSpringFrameworkCurrentReferenceLayout() {
         assertEquals(
-                SPRING_DOCS_URL_PREFIX + "spring-framework/reference/current/web/webflux.html",
+                SPRING_DOCS_URL_PREFIX + "spring-framework/reference/web/webflux.html",
                 DocsSourceRegistry.normalizeDocUrl(EMBEDDED_SPRING_DOCS_LOCAL_URL_PREFIX
                         + "spring-framework/docs/current/reference/6.2.5/web/webflux.html"));
     }
@@ -182,7 +197,7 @@ class DocsSourceRegistryTest {
     @Test
     void normalizesEmbeddedSpringFrameworkReferenceRootLayout() {
         assertEquals(
-                SPRING_DOCS_URL_PREFIX + "spring-framework/reference/current/core/beans.html",
+                SPRING_DOCS_URL_PREFIX + "spring-framework/reference/core/beans.html",
                 DocsSourceRegistry.normalizeDocUrl(
                         EMBEDDED_SPRING_DOCS_LOCAL_URL_PREFIX + "spring-framework/reference/6.2.5/core/beans.html"));
     }
@@ -210,7 +225,7 @@ class DocsSourceRegistryTest {
     @Test
     void normalizesEmbeddedSpringBootCurrentReferenceLayout() {
         assertEquals(
-                SPRING_DOCS_URL_PREFIX + "spring-boot/reference/current/web/servlet.html",
+                SPRING_DOCS_URL_PREFIX + "spring-boot/reference/web/servlet.html",
                 DocsSourceRegistry.normalizeDocUrl(EMBEDDED_SPRING_DOCS_LOCAL_URL_PREFIX
                         + "spring-boot/docs/current/reference/3.5.0/web/servlet.html"));
     }
@@ -218,7 +233,7 @@ class DocsSourceRegistryTest {
     @Test
     void normalizesEmbeddedSpringBootReferenceRootLayout() {
         assertEquals(
-                SPRING_DOCS_URL_PREFIX + "spring-boot/reference/current/using/structuring-your-code.html",
+                SPRING_DOCS_URL_PREFIX + "spring-boot/reference/using/structuring-your-code.html",
                 DocsSourceRegistry.normalizeDocUrl(EMBEDDED_SPRING_DOCS_LOCAL_URL_PREFIX
                         + "spring-boot/reference/3.5.0/using/structuring-your-code.html"));
     }
