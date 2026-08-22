@@ -51,7 +51,7 @@ for repository_path in "${repository_paths[@]}"; do
     fi
 done
 
-echo "LOCAL_STAGING_RESUME $(date -Ins) BATCH_SIZE=32 CONCURRENCY=8 DOCS=24 REPOS=$EXPECTED_REPOSITORY_COUNT"
+echo "LOCAL_STAGING_RESUME $(date -Ins) BATCH_SIZE=8 CONCURRENCY=8 DOCS=24 REPOS=$EXPECTED_REPOSITORY_COUNT"
 ./scripts/process_all_to_qdrant.sh --doc-sets="$DOCUMENTATION_SETS"
 
 for repository_path in "${repository_paths[@]}"; do
