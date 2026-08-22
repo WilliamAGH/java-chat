@@ -235,7 +235,7 @@ packaged owner.
 Successful startup records only `expected` and `resolved` runtime names. `/actuator/info` exposes
 the running value as `application.name`, and CI checks that value with the build and deployment
 commit identities. The conflicting-name container test proves a rollout candidate exits before
-readiness when `SPRING_APPLICATION_NAME` attempts to override the packaged name. Coolify
+readiness when `SPRING_APPLICATION_NAME` attempts to override the packaged name. Dokploy
 development rollout evidence must record those same non-secret fields and verify
 `application.name` agrees with the packaged owner on the running workload.
 

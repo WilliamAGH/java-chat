@@ -114,7 +114,7 @@ USER appuser
 
 EXPOSE 8085
 
-# Gate Coolify's rolling cutover on the JVM accepting traffic with a valid Qdrant generation.
+# Gate Dokploy's Swarm update on the JVM accepting traffic with a valid Qdrant generation.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
     CMD curl --fail --silent --show-error http://localhost:${PORT:-8085}/actuator/health/readiness || exit 1
 
