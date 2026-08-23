@@ -164,6 +164,28 @@ class HtmlContentExtractorTest {
     }
 
     @Test
+    void explicitlyExcludesJavadocFramesetNavigationPages() {
+        Document document = Jsoup.parse("""
+            <html><head><title>Library API</title></head>
+              <frameset cols="20%,80%">
+                <frame src="overview-frame.html">
+                <frame src="overview-summary.html">
+                <noframes><p>Link to <a href="overview-summary.html">Non-frame version</a>.</p></noframes>
+              </frameset>
+            </html>
+            """);
+        HtmlContentExtractor extractor = new HtmlContentExtractor();
+
+        JavaApiPageExtraction extraction = extractor.extractJavaApiPage(document);
+
+        assertEquals(JavaApiPageDisposition.EXCLUDED_NAVIGATION_PAGE, extraction.disposition());
+        assertTrue(extraction.excluded());
+        assertTrue(extraction.overviewText().isEmpty());
+        assertTrue(extraction.anchoredSections().isEmpty());
+        assertTrue(document.selectFirst("frameset") != null, "Extraction must not mutate frameset DOM");
+    }
+
+    @Test
     void retainsPackagePagesAsUnanchoredJavaApiOverviews() {
         Document document = Jsoup.parse("""
             <html><body class="package-declaration-page">
