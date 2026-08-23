@@ -20,7 +20,7 @@ export QDRANT_HOST=127.0.0.1
 export QDRANT_PORT=8086
 export QDRANT_REST_PORT=8087
 export QDRANT_SSL=false
-unset QDRANT_API_KEY
+export QDRANT_API_KEY=
 export QDRANT_COLLECTION_BOOKS=java-chat-qwen3-embedding-4b-2560-books
 export QDRANT_COLLECTION_DOCS=java-chat-qwen3-embedding-4b-2560-docs
 export QDRANT_COLLECTION_ARTICLES=java-chat-qwen3-embedding-4b-2560-articles

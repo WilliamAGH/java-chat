@@ -30,6 +30,7 @@ test-shell: ## Run deterministic ingestion and fetch shell contract tests
 	bash scripts/test_embedding_preflight.sh
 	bash scripts/test_github_sync_failure_contract.sh
 	bash scripts/test_ingestion_pid_safety.sh
+	bash scripts/test_local_embedding_staging_contract.sh
 	bash scripts/test_make_local_qdrant_bootstrap.sh
 	bash scripts/test_make_port_safety.sh
 	bash scripts/test_process_all_to_qdrant_environment.sh
