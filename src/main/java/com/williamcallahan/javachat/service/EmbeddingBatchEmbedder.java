@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -16,6 +17,8 @@ final class EmbeddingBatchEmbedder {
 
     static final int EMBEDDING_REQUEST_BATCH_SIZE = 8;
     static final int MAX_CONCURRENT_EMBEDDING_REQUESTS = 8;
+    static final int MAX_EMBEDDING_ATTEMPTS = 3;
+    private static final Duration EMBEDDING_RETRY_BASE_DELAY = Duration.ofSeconds(5);
 
     private EmbeddingBatchEmbedder() {}
 
@@ -82,7 +85,7 @@ final class EmbeddingBatchEmbedder {
 
         List<float[]> batchEmbeddings;
         try {
-            batchEmbeddings = embeddingClient.embed(textBatch, LlmGatewayTier.BATCH);
+            batchEmbeddings = embedWithRetry(embeddingClient, textBatch);
         } catch (EmbeddingServiceUnavailableException embeddingFailure) {
             String firstBatchUrl = extractDocumentUrl(documentBatch.getFirst(), batchStartIndex);
             String lastBatchUrl = extractDocumentUrl(documentBatch.getLast(), batchEndIndex - 1);
@@ -116,6 +119,34 @@ final class EmbeddingBatchEmbedder {
         }
         validateEmbeddingDimensions(batchEmbeddings, batchStartIndex, batchEndIndex, expectedEmbeddingDimensions);
         return batchEmbeddings;
+    }
+
+    private static List<float[]> embedWithRetry(EmbeddingClient embeddingClient, List<String> textBatch) {
+        for (int embeddingAttempt = 1; embeddingAttempt <= MAX_EMBEDDING_ATTEMPTS; embeddingAttempt++) {
+            try {
+                return embeddingClient.embed(textBatch, LlmGatewayTier.BATCH);
+            } catch (EmbeddingServiceTemporarilyUnavailableException temporaryFailure) {
+                if (embeddingAttempt == MAX_EMBEDDING_ATTEMPTS) {
+                    throw temporaryFailure;
+                }
+                awaitRetryDelay(embeddingAttempt, temporaryFailure);
+            }
+        }
+        throw new IllegalStateException("Embedding retry loop exhausted without a terminal outcome");
+    }
+
+    private static void awaitRetryDelay(
+            int completedAttemptCount, EmbeddingServiceTemporarilyUnavailableException temporaryFailure) {
+        try {
+            Thread.sleep(EMBEDDING_RETRY_BASE_DELAY.multipliedBy(completedAttemptCount));
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            EmbeddingServiceTemporarilyUnavailableException interruptionFailure =
+                    new EmbeddingServiceTemporarilyUnavailableException(
+                            "Interrupted while waiting to retry embedding batch", interruptedException);
+            interruptionFailure.addSuppressed(temporaryFailure);
+            throw interruptionFailure;
+        }
     }
 
     private static void validateEmbeddingDimensions(

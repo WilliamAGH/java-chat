@@ -170,6 +170,78 @@ class EmbeddingBatchEmbedderTest {
                 <= EmbeddingBatchEmbedder.MAX_CONCURRENT_EMBEDDING_REQUESTS);
     }
 
+    @Test
+    void retriesTemporaryProviderFailuresBeforeMutationBoundary() {
+        AtomicInteger providerAttempts = new AtomicInteger();
+        RecordingEmbeddingClient embeddingClient =
+                new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
+                    if (providerAttempts.incrementAndGet() < EmbeddingBatchEmbedder.MAX_EMBEDDING_ATTEMPTS) {
+                        throw new EmbeddingServiceTemporarilyUnavailableException("temporary gateway failure");
+                    }
+                    return repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR);
+                });
+
+        List<float[]> embeddingVectors = EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1));
+
+        assertEquals(1, embeddingVectors.size());
+        assertEquals(EmbeddingBatchEmbedder.MAX_EMBEDDING_ATTEMPTS, providerAttempts.get());
+    }
+
+    @Test
+    void doesNotRetryNonTransientProviderFailures() {
+        AtomicInteger providerAttempts = new AtomicInteger();
+        RecordingEmbeddingClient embeddingClient =
+                new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
+                    providerAttempts.incrementAndGet();
+                    throw new EmbeddingServiceUnavailableException("invalid provider response");
+                });
+
+        assertThrows(
+                EmbeddingServiceUnavailableException.class,
+                () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1)));
+
+        assertEquals(1, providerAttempts.get());
+    }
+
+    @Test
+    void exhaustsBoundedRetriesForTemporaryProviderFailures() {
+        AtomicInteger providerAttempts = new AtomicInteger();
+        RecordingEmbeddingClient embeddingClient =
+                new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
+                    providerAttempts.incrementAndGet();
+                    throw new EmbeddingServiceTemporarilyUnavailableException("temporary gateway failure");
+                });
+
+        assertThrows(
+                EmbeddingServiceUnavailableException.class,
+                () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1)));
+
+        assertEquals(EmbeddingBatchEmbedder.MAX_EMBEDDING_ATTEMPTS, providerAttempts.get());
+    }
+
+    @Test
+    void preservesCallerInterruptionInFailureCauseChain() {
+        EmbeddingServiceTemporarilyUnavailableException providerFailure =
+                new EmbeddingServiceTemporarilyUnavailableException("temporary gateway failure");
+        RecordingEmbeddingClient embeddingClient =
+                new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
+                    throw providerFailure;
+                });
+
+        Thread.currentThread().interrupt();
+        try {
+            EmbeddingServiceUnavailableException batchFailure = assertThrows(
+                    EmbeddingServiceUnavailableException.class,
+                    () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1)));
+
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertTrue(batchFailure.getCause().getCause() instanceof InterruptedException);
+            assertSame(providerFailure, batchFailure.getCause().getSuppressed()[0]);
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
     private static List<Document> sequentialDocuments(int documentCount) {
         return IntStream.range(0, documentCount)
                 .mapToObj(EmbeddingBatchEmbedderTest::javaDocument)
