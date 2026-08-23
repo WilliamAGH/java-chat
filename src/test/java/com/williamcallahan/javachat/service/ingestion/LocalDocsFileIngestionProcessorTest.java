@@ -761,6 +761,41 @@ class LocalDocsFileIngestionProcessorTest {
     }
 
     @Test
+    void shouldMarkGenericFramesetNavigationPageAsExcluded(@TempDir Path temporaryDirectory) throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        Path selectedDocumentationRoot =
+                temporaryDirectory.resolve("corpus").resolve(documentationSource.relativeMirrorPath());
+        Files.createDirectories(selectedDocumentationRoot);
+        Path navigationFile = selectedDocumentationRoot.resolve("index.html");
+        Files.writeString(navigationFile, """
+                <html><head><title>Library API</title></head>
+                  <frameset cols="20%,80%">
+                    <frame src="overview-frame.html">
+                    <frame src="overview-summary.html">
+                    <noframes>Link to the non-frame overview.</noframes>
+                  </frameset>
+                </html>
+                """, StandardCharsets.UTF_8);
+        String expectedUrl = DocsSourceRegistry.normalizeDocUrl(
+                "file:///data/docs/" + documentationSource.relativeMirrorPath() + "/index.html");
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+
+        LocalDocsFileOutcome outcome =
+                ingestionFixture.ingestionProcessor().process(selectedDocumentationRoot, navigationFile);
+
+        assertFalse(outcome.processed());
+        assertTrue(outcome.failure().isEmpty());
+        ArgumentCaptor<FileIngestionRecord> markerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
+        verify(ingestionFixture.fileIngestionMarkerStore).markFileIngested(eq(expectedUrl), markerCaptor.capture());
+        assertTrue(markerCaptor.getValue().chunkHashes().isEmpty());
+        verify(ingestionFixture.chunkProcessingService, never())
+                .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
+        verify(ingestionFixture.quarantineService, never()).quarantine(any());
+    }
+
+    @Test
     void shouldReturnMarkerTransitionFailureWhenExcludedClassUseMarkerWriteFails(@TempDir Path temporaryDirectory)
             throws IOException {
         JavaApiDocumentationSource javaApiDocumentationSource =
