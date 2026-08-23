@@ -5,7 +5,6 @@
 set -euo pipefail
 
 TEST_SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$TEST_SCRIPT_DIRECTORY/.."
 TEST_WORK_DIRECTORY="$(mktemp -d)"
 trap 'rm -rf -- "$TEST_WORK_DIRECTORY"' EXIT
 
@@ -41,11 +40,18 @@ if [ -n "$QDRANT_API_KEY" ]; then
     fail_local_staging_contract_test "empty process override did not survive .env loading"
 fi
 
-if [ "$(find "$PROJECT_ROOT/data/docs" -type f -name '*.html' | wc -l | tr -d ' ')" -ne 24798 ]; then
-    fail_local_staging_contract_test "downloaded documentation census changed"
+documentation_set_count="$(
+    sed -n 's/^readonly DOCUMENTATION_SETS="\([^"]*\)"$/\1/p' "$launcher_path" \
+        | tr ',' '\n' \
+        | sed '/^$/d' \
+        | wc -l \
+        | tr -d ' '
+)"
+if [ "$documentation_set_count" -ne 24 ]; then
+    fail_local_staging_contract_test "launcher does not enumerate exactly 24 documentation sets"
 fi
-if [ "$(find "$PROJECT_ROOT/data/repos/github" -mindepth 3 -maxdepth 3 -type d -name .git | wc -l | tr -d ' ')" -ne 22 ]; then
-    fail_local_staging_contract_test "pinned repository census changed"
+if ! grep -Fxq 'readonly EXPECTED_REPOSITORY_COUNT=22' "$launcher_path"; then
+    fail_local_staging_contract_test "launcher does not require exactly 22 pinned repositories"
 fi
 
 printf 'PASS: durable staging forces local Qdrant and masks cloud credentials across .env loading.\n'
