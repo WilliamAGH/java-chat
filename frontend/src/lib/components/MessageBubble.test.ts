@@ -13,7 +13,7 @@ describe("MessageBubble", () => {
     });
 
     expect(container.querySelector(".bubble-actions")).toBeNull();
-    const userBubble = getByRole("region", { name: "Your message" });
+    const userBubble = getByRole("region", { name: "Your message 1" });
     expect(userBubble).toHaveAttribute("tabindex", "0");
     userBubble.focus();
     expect(userBubble).toHaveFocus();

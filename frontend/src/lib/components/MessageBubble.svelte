@@ -77,7 +77,7 @@
 
   {#if message.role === 'user'}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex (WCAG 2.1.1 requires the scrollable message region to be keyboard focusable.) -->
-    <div class="bubble" role="region" aria-label="Your message" tabindex="0">
+    <div class="bubble" role="region" aria-label={`Your message ${index + 1}`} tabindex="0">
       <p class="user-text">{message.messageText}</p>
     </div>
   {:else}

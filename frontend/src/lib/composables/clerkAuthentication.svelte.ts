@@ -11,6 +11,8 @@
 import type { Clerk } from "@clerk/clerk-js";
 import type { Appearance } from "@clerk/ui";
 import { pushToast } from "../stores/toastStore";
+import { CliApiKeyCreationSchema } from "../validation/schemas";
+import { isRecord, logZodFailure } from "../validation/validate";
 
 /** Signed-in Clerk user, derived from the SDK's own typing ([TY1]: no transitive `@clerk/shared` import). */
 export type ClerkSignedInUser = NonNullable<Clerk["user"]>;
@@ -155,10 +157,20 @@ export async function createCliApiKey(clientLabel: string): Promise<string> {
     description: "JavaChat command-line client",
     secondsUntilExpiration: 60 * 60 * 24 * 30,
   });
-  if (!createdApiKey.secret) {
+  const apiKeyCreationValidation = CliApiKeyCreationSchema.safeParse(createdApiKey);
+  if (!apiKeyCreationValidation.success) {
+    const untrustedSecret = isRecord(createdApiKey) ? createdApiKey.secret : undefined;
+    const redactedFailure = CliApiKeyCreationSchema.safeParse({ secret: null });
+    if (!redactedFailure.success) {
+      logZodFailure(`Clerk API key creation for ${signedInUser.id}`, redactedFailure.error, {
+        responseType: Array.isArray(createdApiKey) ? "array" : typeof createdApiKey,
+        secretType: typeof untrustedSecret,
+        secretLength: typeof untrustedSecret === "string" ? untrustedSecret.length : 0,
+      });
+    }
     throw new Error("Clerk created an API key without returning its one-time secret.");
   }
-  return createdApiKey.secret;
+  return apiKeyCreationValidation.data.secret;
 }
 
 /**

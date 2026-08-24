@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.client.ExpectedCount.once;
+import static org.springframework.test.web.client.ExpectedCount.twice;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -29,6 +30,10 @@ class ClerkApiKeyVerifierTest {
     private static final String CLERK_API_VERSION = "2026-05-12";
     private static final String CLERK_SECRET_KEY = "sk_test_server_key";
     private static final String PRESENTED_API_KEY = "ak_secret_0123456789abcdef0123456789abcdef";
+    private static final String FEATURE_DISABLED_RESPONSE = """
+            {"errors":[{"message":"Feature not enabled",\
+            "long_message":"The feature you are trying to access is not enabled for this instance.",\
+            "code":"feature_not_enabled"}]}""";
 
     @Test
     void returnsVerifiedIdentityForActiveKey() {
@@ -37,7 +42,7 @@ class ClerkApiKeyVerifierTest {
                 MockRestServiceServer.bindTo(restClientBuilder).build();
         ClerkApiKeyVerifier verifier = new ClerkApiKeyVerifier(restClientBuilder.build(), CLERK_SECRET_KEY);
         clerkServer
-                .expect(once(), requestTo(CLERK_VERIFY_ENDPOINT))
+                .expect(twice(), requestTo(CLERK_VERIFY_ENDPOINT))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(header("Authorization", "Bearer " + CLERK_SECRET_KEY))
                 .andExpect(header(CLERK_API_VERSION_HEADER, CLERK_API_VERSION))
@@ -153,17 +158,20 @@ class ClerkApiKeyVerifierTest {
         MockRestServiceServer clerkServer =
                 MockRestServiceServer.bindTo(restClientBuilder).build();
         ClerkApiKeyVerifier verifier = new ClerkApiKeyVerifier(restClientBuilder.build(), CLERK_SECRET_KEY);
-        assertTrue(verifier.isAvailable(), "a configured credential alone should still read as available");
-
+        clerkServer
+                .expect(once(), requestTo(CLERK_VERIFY_ENDPOINT))
+                .andExpect(content().json("{\"secret\":\"ak_secret_javachatavailabilityprobe0000000000000000\"}"))
+                .andRespond(withRawStatus(404)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"errors\":[{\"code\":\"api_key_not_found\"}]}"));
         // Verbatim body returned by Clerk when an instance has API keys switched off.
         clerkServer
                 .expect(once(), requestTo(CLERK_VERIFY_ENDPOINT))
                 .andRespond(withRawStatus(403)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .body("""
-                                {"errors":[{"message":"Feature not enabled",\
-                                "long_message":"The feature you are trying to access is not enabled for this instance.",\
-                                "code":"feature_not_enabled"}]}"""));
+                        .body(FEATURE_DISABLED_RESPONSE));
+
+        assertTrue(verifier.isAvailable(), "Clerk must reject the probe through the enabled API-key feature");
 
         ApiKeyOperationUnavailableException featureDisabled =
                 assertThrows(ApiKeyOperationUnavailableException.class, () -> verifier.verify(PRESENTED_API_KEY));
@@ -176,6 +184,57 @@ class ClerkApiKeyVerifierTest {
         assertFalse(
                 verifier.isAvailable(),
                 "availability must stop promising a login Clerk has already refused for this instance");
+        clerkServer.verify();
+    }
+
+    @Test
+    void rejectsColdAvailabilityProbeWhenClerkDisablesApiKeys() {
+        RestClient.Builder restClientBuilder = RestClient.builder();
+        MockRestServiceServer clerkServer =
+                MockRestServiceServer.bindTo(restClientBuilder).build();
+        ClerkApiKeyVerifier verifier = new ClerkApiKeyVerifier(restClientBuilder.build(), CLERK_SECRET_KEY);
+        clerkServer
+                .expect(once(), requestTo(CLERK_VERIFY_ENDPOINT))
+                .andRespond(withRawStatus(403)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(FEATURE_DISABLED_RESPONSE));
+
+        assertFalse(verifier.isAvailable());
+        assertFalse(verifier.isAvailable(), "the disabled feature must remain latched without another request");
+        clerkServer.verify();
+    }
+
+    @Test
+    void acceptsProviderValidNotFoundAvailabilityResponse() {
+        RestClient.Builder restClientBuilder = RestClient.builder();
+        MockRestServiceServer clerkServer =
+                MockRestServiceServer.bindTo(restClientBuilder).build();
+        ClerkApiKeyVerifier verifier = new ClerkApiKeyVerifier(restClientBuilder.build(), CLERK_SECRET_KEY);
+        clerkServer
+                .expect(once(), requestTo(CLERK_VERIFY_ENDPOINT))
+                .andRespond(withRawStatus(404)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{}"));
+
+        assertTrue(verifier.isAvailable());
+        assertTrue(verifier.isAvailable(), "the authoritative readiness result must not probe twice");
+        clerkServer.verify();
+    }
+
+    @Test
+    void throttlesAvailabilityProbeAfterTransientProviderFailure() {
+        RestClient.Builder restClientBuilder = RestClient.builder();
+        MockRestServiceServer clerkServer =
+                MockRestServiceServer.bindTo(restClientBuilder).build();
+        ClerkApiKeyVerifier verifier = new ClerkApiKeyVerifier(restClientBuilder.build(), CLERK_SECRET_KEY);
+        clerkServer
+                .expect(once(), requestTo(CLERK_VERIFY_ENDPOINT))
+                .andRespond(withRawStatus(500)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{}"));
+
+        assertFalse(verifier.isAvailable());
+        assertFalse(verifier.isAvailable(), "transient failure must not fan out another provider request");
         clerkServer.verify();
     }
 }
