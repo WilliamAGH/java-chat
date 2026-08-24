@@ -796,6 +796,60 @@ class LocalDocsFileIngestionProcessorTest {
     }
 
     @Test
+    void shouldMarkInteractiveApiReferenceShellAsExcludedAndContinueBatch(@TempDir Path temporaryDirectory)
+            throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        Path selectedDocumentationRoot =
+                temporaryDirectory.resolve("corpus").resolve(documentationSource.relativeMirrorPath());
+        Files.createDirectories(selectedDocumentationRoot);
+        Path interactiveReferenceFile = selectedDocumentationRoot.resolve("interactive-reference.html");
+        Path laterDocumentationFile = selectedDocumentationRoot.resolve("later.html");
+        Files.writeString(interactiveReferenceFile, """
+                <html>
+                  <head>
+                    <title>Publisher API reference</title>
+                    <link rel="alternate" type="text/markdown" href="reference.md">
+                    <link rel="alternate" type="application/yaml" href="reference.yaml">
+                  </head>
+                  <body>
+                    <main><article class="redoc-container"><redoc spec-url="reference.yaml"></redoc></article></main>
+                    <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
+                  </body>
+                </html>
+                """, StandardCharsets.UTF_8);
+        Files.writeString(laterDocumentationFile, javaApiHtml(), StandardCharsets.UTF_8);
+        String expectedUrl = DocsSourceRegistry.normalizeDocUrl(
+                "file:///data/docs/" + documentationSource.relativeMirrorPath() + "/interactive-reference.html");
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        when(ingestionFixture.chunkProcessingService.processAndStoreChunks(
+                        anyString(), anyString(), anyString(), anyString()))
+                .thenAnswer(invocation -> {
+                    String sourceUrl = invocation.getArgument(1, String.class);
+                    Document indexedDocument = new Document(sourceUrl, "Documentation body", new HashMap<>());
+                    return new ChunkProcessingService.ChunkProcessingOutcome(
+                            List.of(indexedDocument), List.of(sourceUrl + "-hash"), 1, 0);
+                });
+
+        List<LocalDocsFileOutcome> outcomes = ingestionFixture
+                .ingestionProcessor()
+                .processBatch(selectedDocumentationRoot, List.of(interactiveReferenceFile, laterDocumentationFile));
+
+        assertEquals(2, outcomes.size());
+        assertFalse(outcomes.getFirst().processed());
+        assertTrue(outcomes.getFirst().failure().isEmpty());
+        assertTrue(outcomes.getLast().processed());
+        assertTrue(outcomes.getLast().failure().isEmpty());
+        ArgumentCaptor<FileIngestionRecord> markerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
+        verify(ingestionFixture.fileIngestionMarkerStore).markFileIngested(eq(expectedUrl), markerCaptor.capture());
+        assertTrue(markerCaptor.getValue().chunkHashes().isEmpty());
+        verify(ingestionFixture.chunkProcessingService, times(1))
+                .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
+        verify(ingestionFixture.quarantineService, never()).quarantine(any());
+    }
+
+    @Test
     void shouldReturnMarkerTransitionFailureWhenExcludedClassUseMarkerWriteFails(@TempDir Path temporaryDirectory)
             throws IOException {
         JavaApiDocumentationSource javaApiDocumentationSource =
