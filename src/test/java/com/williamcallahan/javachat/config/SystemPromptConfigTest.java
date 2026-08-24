@@ -89,7 +89,8 @@ class SystemPromptConfigTest {
         String corePrompt = systemPromptConfig.getCoreSystemPrompt();
 
         assertAll(
-                () -> assertTrue(corePrompt.contains("covers the claimed library or source family at the requested major version")),
+                () -> assertTrue(corePrompt.contains(
+                        "covers the claimed library or source family at the requested major version")),
                 () -> assertFalse(corePrompt.contains("the exact requested version")),
                 () -> assertFalse(corePrompt.contains("Never substitute a nearby patch version")));
     }
@@ -104,9 +105,10 @@ class SystemPromptConfigTest {
 
         assertAll(
                 () -> assertTrue(corePrompt.contains("Name that record's exact version inline with the claim")),
-                () -> assertTrue(corePrompt.contains("when it differs from the version the reader asked about, name both")),
-                () -> assertTrue(corePrompt.contains(
-                        "never merge SOURCE RECORDS from different major versions into one claim")),
+                () -> assertTrue(
+                        corePrompt.contains("when it differs from the version the reader asked about, name both")),
+                () -> assertTrue(
+                        corePrompt.contains("never merge SOURCE RECORDS from different major versions into one claim")),
                 () -> assertTrue(corePrompt.contains("attribute each major separately and state how they differ")),
                 () -> assertTrue(corePrompt.contains("state that change and the release that introduced it")));
     }
