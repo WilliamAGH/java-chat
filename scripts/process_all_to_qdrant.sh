@@ -11,6 +11,7 @@ DOCS_ROOT=""
 LOG_FILE="$PROJECT_ROOT/process_qdrant.log"
 PID_FILE="$PROJECT_ROOT/process_qdrant.pid"
 DOCS_SETS_FILTER=""
+PROCESSING_LOG_ARCHIVE_SEQUENCE=0
 
 # shellcheck source=lib/common_qdrant.sh
 source "$SCRIPT_DIR/lib/common_qdrant.sh"
@@ -30,6 +31,26 @@ corpus_indexed_summary() {
     fi
 
     echo "${indexed_count} indexed / ${parsed_count} parsed"
+}
+
+archive_prior_processing_log() {
+    if [ ! -s "$LOG_FILE" ]; then
+        return 0
+    fi
+
+    PROCESSING_LOG_ARCHIVE_SEQUENCE=$((PROCESSING_LOG_ARCHIVE_SEQUENCE + 1))
+    local archive_timestamp
+    archive_timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    local prior_attempt_log="${LOG_FILE%.log}_attempt_${archive_timestamp}_$$_${PROCESSING_LOG_ARCHIVE_SEQUENCE}.log"
+    if [ -e "$prior_attempt_log" ] || [ -L "$prior_attempt_log" ]; then
+        echo "Refusing to overwrite prior document-processing log archive: $prior_attempt_log" >&2
+        return 1
+    fi
+    if ! mv "$LOG_FILE" "$prior_attempt_log"; then
+        echo "Failed to archive prior document-processing log: $LOG_FILE" >&2
+        return 1
+    fi
+    echo "Archived prior document-processing log: $prior_attempt_log"
 }
 
 verify_doc_set_postconditions() {
@@ -171,8 +192,16 @@ for writable_state_directory in "$DOCS_SNAPSHOT_DIR" "$DOCS_PARSED_DIR" "$DOCS_I
 done
 
 setup_pid_and_cleanup "$PID_FILE"
+if ! archive_prior_processing_log; then
+    rm -f "$PID_FILE"
+    return 1
+fi
 
-echo "[$(date)] Starting document processing" > "$LOG_FILE"
+if ! printf '[%s] Starting document processing\n' "$(date)" > "$LOG_FILE"; then
+    echo "Failed to initialize document-processing log: $LOG_FILE" >&2
+    rm -f "$PID_FILE"
+    return 1
+fi
 echo "=============================================="
 echo "Document Processor"
 echo "=============================================="

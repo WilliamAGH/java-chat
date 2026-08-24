@@ -95,7 +95,67 @@ export DOCS_PARSED_DIR="$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/local
 export DOCS_INDEX_DIR="$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/local/index"
 export TMPDIR="$JAR_STAGING_ROOT"
 
+prior_failure_evidence='FAILED file=data/docs/docker/reference/cli/docker.md phase=qdrant-replacement'
+checkpoint_sentinel="$DOCS_INDEX_DIR/checkpoint-sentinel"
+printf '%s\n' "$prior_failure_evidence" > "$LOG_FILE"
+printf 'checkpoint-preserved\n' > "$checkpoint_sentinel"
+
 run_documentation_ingestion --doc-sets=kotlin >/dev/null
+
+archived_processing_log=""
+archived_processing_log_count=0
+for processing_log_candidate in "$TEST_WORK_DIRECTORY"/process_qdrant_attempt_*.log; do
+    [ -f "$processing_log_candidate" ] || continue
+    archived_processing_log="$processing_log_candidate"
+    archived_processing_log_count=$((archived_processing_log_count + 1))
+done
+if [ "$archived_processing_log_count" -ne 1 ]; then
+    fail_process_environment_test "prior processing log was not archived exactly once"
+fi
+if ! grep -Fxq "$prior_failure_evidence" "$archived_processing_log"; then
+    fail_process_environment_test "archived processing log lost the prior file and phase evidence"
+fi
+if grep -Fq "$prior_failure_evidence" "$LOG_FILE" \
+    || ! grep -Fq 'Starting document processing' "$LOG_FILE"; then
+    fail_process_environment_test "fresh processing log retained stale failure evidence or lost its start marker"
+fi
+if [ "$(< "$checkpoint_sentinel")" != "checkpoint-preserved" ]; then
+    fail_process_environment_test "processing log archival changed durable checkpoint state"
+fi
+
+collision_log="$TEST_WORK_DIRECTORY/collision.log"
+collision_archive="${collision_log%.log}_attempt_20260824T000000Z_$$_1.log"
+printf 'new failure evidence\n' > "$collision_log"
+printf 'existing failure evidence\n' > "$collision_archive"
+if (
+    LOG_FILE="$collision_log"
+    PROCESSING_LOG_ARCHIVE_SEQUENCE=0
+    date() {
+        printf '20260824T000000Z\n'
+    }
+    archive_prior_processing_log >/dev/null 2>&1
+); then
+    fail_process_environment_test "processing log archive collision was overwritten"
+fi
+if [ "$(< "$collision_log")" != "new failure evidence" ] \
+    || [ "$(< "$collision_archive")" != "existing failure evidence" ]; then
+    fail_process_environment_test "processing log archive collision changed forensic evidence"
+fi
+
+fresh_log_failure_pid="$TEST_WORK_DIRECTORY/fresh-log-failure.pid"
+if (
+    export LOG_FILE="$TEST_WORK_DIRECTORY/missing-log-parent/process.log"
+    export PID_FILE="$fresh_log_failure_pid"
+    setup_pid_and_cleanup() {
+        : > "$1"
+    }
+    run_documentation_ingestion --doc-sets=kotlin >/dev/null 2>&1
+); then
+    fail_process_environment_test "fresh processing log initialization failure was accepted"
+fi
+if [ -e "$fresh_log_failure_pid" ]; then
+    fail_process_environment_test "fresh processing log initialization failure left the ingestion PID claim"
+fi
 
 if [ "$(< "$CAPTURED_CHILD_ENVIRONMENT")" != "$DOCS_DIR|local" ]; then
     fail_process_environment_test "DOCS_DIR and SPRING_PROFILE did not reach the child environment"
