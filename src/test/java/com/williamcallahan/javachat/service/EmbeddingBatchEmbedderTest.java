@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.stream.IntStream;
@@ -22,6 +24,7 @@ class EmbeddingBatchEmbedderTest {
     private static final int THREE_BATCH_DOCUMENT_COUNT = EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE * 2 + 1;
     private static final int REPRESENTATIVE_JAVA_CORPUS_CHUNK_COUNT = 177_000;
     private static final int MAX_REPRESENTATIVE_JAVA_CORPUS_REQUEST_COUNT = 45_000;
+    private static final int MINIMUM_PARALLEL_REQUEST_COUNT = 2;
     private static final float[] EMBEDDING_VECTOR = new float[] {0.25f, 0.75f};
 
     @Test
@@ -154,6 +157,29 @@ class EmbeddingBatchEmbedderTest {
                 + 1;
         assertTrue(embeddingClient.requestedTextBatches.stream()
                 .anyMatch(requestedTextBatch -> requestedTextBatch.size() == expectedFinalBatchSize));
+    }
+
+    @Test
+    void executesProviderRequestsConcurrently() {
+        int documentCount = EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE * MINIMUM_PARALLEL_REQUEST_COUNT;
+        CountDownLatch concurrentRequestBarrier = new CountDownLatch(MINIMUM_PARALLEL_REQUEST_COUNT);
+        RecordingEmbeddingClient embeddingClient =
+                new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
+                    concurrentRequestBarrier.countDown();
+                    try {
+                        assertTrue(
+                                concurrentRequestBarrier.await(5, TimeUnit.SECONDS),
+                                "all requests in the bounded wave must execute concurrently");
+                    } catch (InterruptedException interruptedBarrier) {
+                        Thread.currentThread().interrupt();
+                        throw new AssertionError("concurrency barrier was interrupted", interruptedBarrier);
+                    }
+                    return repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR);
+                });
+
+        EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(documentCount));
+
+        assertEquals(MINIMUM_PARALLEL_REQUEST_COUNT, embeddingClient.maximumConcurrentRequests.get());
     }
 
     @Test
