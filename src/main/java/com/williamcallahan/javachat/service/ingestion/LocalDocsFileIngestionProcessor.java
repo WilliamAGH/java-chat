@@ -707,7 +707,7 @@ public class LocalDocsFileIngestionProcessor {
             return LocalDocsFileOutcome.failedFile(
                     failureFactory.failure(markerContext.file(), "marker-transition", markerTransitionException));
         }
-        INDEXING_LOG.info("[INDEXING] Excluded navigation-only documentation page");
+        INDEXING_LOG.info("[INDEXING] Excluded documentation page from indexing");
         return LocalDocsFileOutcome.skippedFile();
     }
 

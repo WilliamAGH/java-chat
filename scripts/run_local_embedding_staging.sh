@@ -29,16 +29,19 @@ export DOCS_DIR="$PROJECT_ROOT/data/docs"
 export DOCS_SNAPSHOT_DIR="$PROJECT_ROOT/data/qwen3-embedding-4b-2560/local/snapshots"
 export DOCS_PARSED_DIR="$PROJECT_ROOT/data/qwen3-embedding-4b-2560/local/parsed"
 export DOCS_INDEX_DIR="$PROJECT_ROOT/data/qwen3-embedding-4b-2560/local/index"
-export GRADLE_USER_HOME=/home/williamcallahan/.gradle
 
 if [ -e process_qdrant.pid ]; then
     echo "Documentation ingestion already owns process_qdrant.pid" >&2
     exit 1
 fi
 
-mapfile -d '' -t repository_paths < <(
-    find data/repos/github -mindepth 3 -maxdepth 3 -type d -name .git -printf '%h\0' | sort -z
-)
+shopt -s nullglob
+repository_git_directories=(data/repos/github/*/*/.git)
+shopt -u nullglob
+repository_paths=()
+for repository_git_directory in "${repository_git_directories[@]}"; do
+    repository_paths+=("${repository_git_directory%/.git}")
+done
 if [ "${#repository_paths[@]}" -ne "$EXPECTED_REPOSITORY_COUNT" ]; then
     echo "Expected $EXPECTED_REPOSITORY_COUNT pinned repositories, found ${#repository_paths[@]}" >&2
     exit 1
@@ -51,13 +54,17 @@ for repository_path in "${repository_paths[@]}"; do
     fi
 done
 
-echo "LOCAL_STAGING_RESUME $(date -Ins) BATCH_SIZE=8 CONCURRENCY=8 DOCS=24 REPOS=$EXPECTED_REPOSITORY_COUNT"
+staging_timestamp() {
+    date -u '+%Y-%m-%dT%H:%M:%SZ'
+}
+
+echo "LOCAL_STAGING_RESUME $(staging_timestamp) BATCH_SIZE=8 CONCURRENCY=8 DOCS=24 REPOS=$EXPECTED_REPOSITORY_COUNT"
 ./scripts/process_all_to_qdrant.sh --doc-sets="$DOCUMENTATION_SETS"
 
 for repository_path in "${repository_paths[@]}"; do
-    echo "REPOSITORY_START $(date -Ins) $repository_path"
+    echo "REPOSITORY_START $(staging_timestamp) $repository_path"
     ./scripts/process_github_repo.sh --repo-path="$repository_path"
-    echo "REPOSITORY_COMPLETE $(date -Ins) $repository_path"
+    echo "REPOSITORY_COMPLETE $(staging_timestamp) $repository_path"
 done
 
-echo "LOCAL_STAGING_COMPLETE $(date -Ins)"
+echo "LOCAL_STAGING_COMPLETE $(staging_timestamp)"

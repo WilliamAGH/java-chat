@@ -9,7 +9,6 @@ DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS=(
     --waitretry=1
     --retry-connrefused
     --max-threads=1
-    --retry-on-http-error=429,500,502,503,504
 )
 if [[ "${DOCUMENTATION_SINGLE_PAGE_BROWSER_USER_AGENT:-}" != "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" ]]; then
     DOCUMENTATION_SINGLE_PAGE_BROWSER_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -474,7 +473,7 @@ fetch_discovered_documentation_seed() {
             || ! python3 "$SCRIPT_DIR/documentation_seed.py" \
                 --document-type "$seed_document_type" \
                 --input "$additional_discovery_file" \
-                --discovery-url "$seed_discovery_url" \
+                --discovery-url "$seed_additional_discovery_url" \
                 --source-prefix "$seed_source_prefix" \
                 --canonical-prefix "$canonical_prefix" \
                 --reject-regex "$seed_reject_regex" \

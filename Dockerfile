@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.npm \
 
 # Copy source files, validate, test, and build
 COPY frontend/ .
-COPY .gitignore /app/.ignore
+COPY .gitignore /app/.gitignore
 COPY Dockerfile /app/Dockerfile
 COPY docs/getting-started.md /app/docs/getting-started.md
 
@@ -97,7 +97,7 @@ RUN mkdir -p /app/corpus /app/data/qwen3-embedding-4b-2560/prod/snapshots \
 
 USER 1001:1001
 HEALTHCHECK NONE
-ENTRYPOINT ["/app/scripts/process_all_to_qdrant.sh"]
+ENTRYPOINT ["/app/scripts/process_all_to_qdrant.sh", "--app-jar=/app/build/app.jar"]
 
 # ================================
 # RUNTIME STAGE

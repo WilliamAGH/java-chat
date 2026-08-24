@@ -7,6 +7,7 @@ set -euo pipefail
 TEST_SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$TEST_SCRIPT_DIRECTORY/.." && pwd)"
 FETCH_SCRIPT="$PROJECT_ROOT/scripts/fetch_all_docs.sh"
+FETCH_SOURCE_LIBRARY="$PROJECT_ROOT/scripts/lib/documentation_fetch_sources.sh"
 TEST_WORK_DIRECTORY="$(mktemp -d)"
 TEST_DOCS_ROOT="$TEST_WORK_DIRECTORY/docs"
 DISCOVERED_FETCH_CAPTURE="$TEST_WORK_DIRECTORY/discovered-fetch"
@@ -103,6 +104,13 @@ log() {
 }
 
 assert_documentation_mirror_path_policy
+
+if grep -Fq -- '--retry-on-http-error' "$FETCH_SOURCE_LIBRARY"; then
+    fail_documentation_fetch_test "documented Ubuntu Wget2 does not support --retry-on-http-error"
+fi
+if ! grep -Fq -- '--discovery-url "$seed_additional_discovery_url"' "$FETCH_SOURCE_LIBRARY"; then
+    fail_documentation_fetch_test "additional discovery links do not resolve against their own document URL"
+fi
 
 fetch_discovered_documentation_seed() {
     printf '%s\n' "$@" > "$DISCOVERED_FETCH_CAPTURE"
@@ -529,6 +537,37 @@ assert_rejected_selector "kotlin,unknown-source"
 assert_rejected_selector "kotlin,kotlin"
 assert_rejected_selector "kotlin,,java/java25-complete"
 assert_rejected_selector "all,kotlin"
+
+assert_current_documentation_source_dispatch \
+    lombok-1.18.46-reference \
+    "https://projectlombok.org/features/" \
+    "lombok/1.18.46/reference" \
+    "https://projectlombok.org/features/"
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://projectlombok.org/features/" \
+    --mirror-path \
+    "lombok/1.18.46/reference" \
+    --name \
+    "Lombok 1.18.46 Feature Reference" \
+    --source-version \
+    "1.18.46" \
+    --identity-regex \
+    "Project Lombok" \
+    --cut-directories \
+    1 \
+    --minimum-html-files \
+    30 \
+    --seed-document-type \
+    html-links \
+    --seed-discovery-url \
+    "https://projectlombok.org/features/" \
+    --seed-additional-discovery-url \
+    "https://projectlombok.org/features/experimental/" \
+    --seed-source-prefix \
+    "https://projectlombok.org/features/"
 
 if ! (
     set --

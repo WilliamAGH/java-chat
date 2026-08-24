@@ -25,6 +25,7 @@ public final class DocsSourceRegistry {
     private static final String PDF_EXTENSION = ".pdf";
     private static final String HTML_EXTENSION = ".html";
     private static final String HTM_EXTENSION = ".htm";
+    private static final String JAVA_EXTENSION = ".java";
     private static final String HTML_INDEX_FILE_NAME = "index.html";
     private static final String HTM_INDEX_FILE_NAME = "index.htm";
     private static final String HTTPS_PREFIX = "https://";
@@ -33,6 +34,8 @@ public final class DocsSourceRegistry {
     private static final String SPRING_DOCS_HTTPS_PREFIX = HTTPS_PREFIX + SPRING_DOCS_HOST_MARKER;
     private static final String EMPTY_TEXT = "";
     private static final String PATH_SEPARATOR_TEXT = "/";
+    private static final String GITHUB_BLOB_PATH = "/blob/";
+    private static final String GITHUB_TREE_PATH = "/tree/";
     private static final String SPRING_FRAMEWORK_MARKER = "spring-framework";
     private static final String SPRING_FRAMEWORK_LEGACY_DUPLICATE_JAVADOC_PREFIX =
             "docs/current/api/current/javadoc-api/";
@@ -175,7 +178,8 @@ public final class DocsSourceRegistry {
                     "jooq/3.21/manual",
                     "official",
                     "framework-reference",
-                    "3.21.7"),
+                    "3.21.7",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
             new DocumentationSource(
                     "https://www.jooq.org/javadoc/3.21.7/",
                     "jooq/3.21/api",
@@ -225,14 +229,14 @@ public final class DocsSourceRegistry {
                     "api-docs",
                     "7.0.2"),
             new DocumentationSource(
-                    "https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-databind/2.22.2/jackson-databind-2.22.2-javadoc.jar",
+                    "https://github.com/FasterXML/jackson-databind/blob/jackson-databind-2.22.2/src/main/java/",
                     "jackson/2.22.2/api",
                     "Jackson Databind 2.22.2 API",
                     "jackson/2.22.2/api",
                     "official",
                     "api-docs",
                     "2.22.2",
-                    DocumentationCitationPathStyle.FIXED_URL),
+                    DocumentationCitationPathStyle.JAVA_SOURCE),
             new DocumentationSource(
                     "https://javadoc.io/doc/com.fasterxml.jackson.core/jackson-databind/2.21.2/",
                     "jackson/2.21.2/api",
@@ -242,14 +246,14 @@ public final class DocsSourceRegistry {
                     "api-docs",
                     "2.21.2"),
             new DocumentationSource(
-                    "https://repo.maven.apache.org/maven2/tools/jackson/core/jackson-databind/3.2.2/jackson-databind-3.2.2-javadoc.jar",
+                    "https://github.com/FasterXML/jackson-databind/blob/jackson-databind-3.2.2/src/main/java/",
                     "jackson/3.2.2/api",
                     "Jackson Databind 3.2.2 API",
                     "jackson/3.2.2/api",
                     "official",
                     "api-docs",
                     "3.2.2",
-                    DocumentationCitationPathStyle.FIXED_URL),
+                    DocumentationCitationPathStyle.JAVA_SOURCE),
             new DocumentationSource(
                     "https://javadoc.io/doc/tools.jackson.core/jackson-databind/3.1.2/",
                     "jackson/3.1.2/api",
@@ -259,14 +263,13 @@ public final class DocsSourceRegistry {
                     "api-docs",
                     "3.1.2"),
             new DocumentationSource(
-                    "https://repo.maven.apache.org/maven2/org/projectlombok/lombok/1.18.46/lombok-1.18.46-javadoc.jar",
+                    "https://javadoc.io/doc/org.projectlombok/lombok/1.18.46/",
                     "lombok/1.18.46/api",
                     "Lombok 1.18.46 API (Spring Boot 4.0.6)",
                     "lombok/1.18.46/api",
                     "official",
                     "api-docs",
-                    "1.18.46",
-                    DocumentationCitationPathStyle.FIXED_URL),
+                    "1.18.46"),
             new DocumentationSource(
                     "https://projectlombok.org/features/",
                     "lombok/1.18.46/reference",
@@ -525,8 +528,8 @@ public final class DocsSourceRegistry {
     public enum DocumentationCitationPathStyle {
         /** Keeps the mirrored relative path unchanged. */
         LITERAL,
-        /** Uses the configured artifact URL for every mirrored archive page. */
-        FIXED_URL,
+        /** Maps an extracted Javadoc page to the matching source file in the official repository. */
+        JAVA_SOURCE,
         /** Removes the HTML filename synthesized for an extensionless canonical route. */
         EXTENSIONLESS_HTML;
 
@@ -633,11 +636,29 @@ public final class DocsSourceRegistry {
         }
 
         Optional<String> resolveCitationUrl(String mirroredRelativePath) {
-            if (citationPathStyle == DocumentationCitationPathStyle.FIXED_URL) {
-                return Optional.of(citationBaseUrl);
+            if (citationPathStyle == DocumentationCitationPathStyle.JAVA_SOURCE) {
+                return resolveJavaSourceCitation(citationBaseUrl, mirroredRelativePath);
             }
             return joinBaseAndRel(citationBaseUrl, citationPathStyle.citationRelativePath(mirroredRelativePath));
         }
+    }
+
+    private static Optional<String> resolveJavaSourceCitation(String sourceBaseUrl, String mirroredRelativePath) {
+        if (mirroredRelativePath == null || mirroredRelativePath.isBlank()) {
+            return Optional.empty();
+        }
+        int fileNameStartIndex = mirroredRelativePath.lastIndexOf(UNIX_PATH_SEPARATOR) + 1;
+        String fileName = mirroredRelativePath.substring(fileNameStartIndex);
+        String sourceDirectory = mirroredRelativePath.substring(0, fileNameStartIndex);
+        if (fileName.endsWith(HTML_EXTENSION) && Character.isUpperCase(fileName.charAt(0))) {
+            String typeName = fileName.substring(0, fileName.length() - HTML_EXTENSION.length());
+            int nestedTypeSeparatorIndex = typeName.indexOf(VERSION_SEPARATOR);
+            String sourceTypeName =
+                    nestedTypeSeparatorIndex < 0 ? typeName : typeName.substring(0, nestedTypeSeparatorIndex);
+            return joinBaseAndRel(sourceBaseUrl, sourceDirectory + sourceTypeName + JAVA_EXTENSION);
+        }
+        String sourceTreeBaseUrl = sourceBaseUrl.replace(GITHUB_BLOB_PATH, GITHUB_TREE_PATH);
+        return joinBaseAndRel(sourceTreeBaseUrl, sourceDirectory);
     }
 
     /** Resolves a file beneath a selected mirror root without assuming a literal host path. */

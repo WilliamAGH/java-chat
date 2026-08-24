@@ -104,11 +104,18 @@ class DocsSourceRegistryTest {
         documentationSources.forEach(documentationSource -> {
             String localDocumentationFileUrl =
                     "file:///data/docs/" + documentationSource.relativeMirrorPath() + "/index.html";
-            String expectedOfficialDocumentationUrl =
-                    documentationSource.citationBaseUrl().endsWith("/")
-                            ? documentationSource.citationBaseUrl()
-                                    + documentationSource.citationPathStyle().citationRelativePath("index.html")
-                            : documentationSource.citationBaseUrl();
+            String expectedOfficialDocumentationUrl;
+            if (documentationSource.citationPathStyle() == DocumentationCitationPathStyle.JAVA_SOURCE) {
+                expectedOfficialDocumentationUrl =
+                        documentationSource.citationBaseUrl().replace("/blob/", "/tree/");
+            } else {
+                expectedOfficialDocumentationUrl = documentationSource
+                                .citationBaseUrl()
+                                .endsWith("/")
+                        ? documentationSource.citationBaseUrl()
+                                + documentationSource.citationPathStyle().citationRelativePath("index.html")
+                        : documentationSource.citationBaseUrl();
+            }
             assertEquals(
                     expectedOfficialDocumentationUrl, DocsSourceRegistry.normalizeDocUrl(localDocumentationFileUrl));
             assertEquals(
@@ -159,11 +166,34 @@ class DocsSourceRegistryTest {
     }
 
     @Test
-    void keepsArchiveCitationsOnTheVerifiedArtifactUrl() {
+    void mapsArchiveBackedJavadocsToReadableHostedPages() {
         assertEquals(
-                "https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-databind/2.22.2/jackson-databind-2.22.2-javadoc.jar",
+                "https://github.com/FasterXML/jackson-databind/blob/jackson-databind-2.22.2/src/main/java/com/fasterxml/jackson/databind/ObjectMapper.java",
                 DocsSourceRegistry.normalizeDocUrl(
                         "file:///data/docs/jackson/2.22.2/api/com/fasterxml/jackson/databind/ObjectMapper.html"));
+        assertEquals(
+                "https://github.com/FasterXML/jackson-databind/blob/jackson-databind-2.22.2/src/main/java/com/fasterxml/jackson/databind/ObjectMapper.java",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/jackson/2.22.2/api/com/fasterxml/jackson/databind/ObjectMapper.DefaultTyping.html"));
+        assertEquals(
+                "https://github.com/FasterXML/jackson-databind/tree/jackson-databind-2.22.2/src/main/java/com/fasterxml/jackson/databind/",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/jackson/2.22.2/api/com/fasterxml/jackson/databind/package-summary.html"));
+        assertEquals(
+                "https://github.com/FasterXML/jackson-databind/blob/jackson-databind-3.2.2/src/main/java/tools/jackson/databind/ObjectMapper.java",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/jackson/3.2.2/api/tools/jackson/databind/ObjectMapper.html"));
+        assertEquals(
+                "https://javadoc.io/doc/org.projectlombok/lombok/1.18.46/lombok/Builder.html",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/lombok/1.18.46/api/lombok/Builder.html"));
+    }
+
+    @Test
+    void restoresCanonicalDirectoryRoutesForTheJooqManual() {
+        assertEquals(
+                "https://www.jooq.org/doc/3.21.7/manual/sql-building/sql-statements/select-statement/",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/jooq/3.21/manual/sql-building/sql-statements/select-statement/index.html"));
     }
 
     @Test
