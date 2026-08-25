@@ -201,6 +201,36 @@ class DocumentationSeedSecurityTest(unittest.TestCase):
                     ]
                 )
 
+    def test_matches_pcre_style_cloudflare_alias_regex(self) -> None:
+        cloudflare_alias_regex = (
+            r"^https://developers\.cloudflare\.com/"
+            r"(?:ai/models/(?:@|%40)(?:cf|hf)/.*|ai-gateway/models/)$"
+        )
+        expected_status_by_candidate = {
+            "https://developers.cloudflare.com/ai/models/@cf/meta/llama/": 0,
+            "https://developers.cloudflare.com/ai/models/%40hf/example/": 0,
+            "https://developers.cloudflare.com/ai-gateway/models/": 0,
+            "https://developers.cloudflare.com/workers-ai/models/": 1,
+        }
+
+        for candidate_url, expected_status in expected_status_by_candidate.items():
+            with self.subTest(candidate_url=candidate_url):
+                self.assertEqual(
+                    expected_status,
+                    documentation_seed.matches_regex_command(
+                        ["--regex", cloudflare_alias_regex, "--candidate", candidate_url]
+                    ),
+                )
+
+    def test_rejects_invalid_portable_documentation_regex(self) -> None:
+        with mock.patch("sys.stderr"):
+            self.assertEqual(
+                2,
+                documentation_seed.matches_regex_command(
+                    ["--regex", "(?invalid", "--candidate", "https://example.invalid/"]
+                ),
+            )
+
     def test_accepts_expected_single_shard_sitemap_index(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory_name:
             sitemap_index_path = pathlib.Path(temporary_directory_name) / "sitemap-index.xml"

@@ -569,9 +569,21 @@ validate_cloudflare_seed_aliases() {
     local alias_validation_status=0
     local alias_url
     while IFS= read -r alias_url || [ -n "$alias_url" ]; do
-        if ! grep -Pq -- "$seed_reject_regex" <<< "$alias_url"; then
-            continue
-        fi
+        local alias_regex_match_status=0
+        python3 "$SCRIPT_DIR/documentation_seed.py" \
+            --matches-regex \
+            --regex "$seed_reject_regex" \
+            --candidate "$alias_url" \
+            || alias_regex_match_status=$?
+        case "$alias_regex_match_status" in
+            0) ;;
+            1) continue ;;
+            *)
+                log "${RED}✗ Cloudflare seed alias regex validation failed${NC}"
+                rm -f "$alias_seed_file"
+                return "$alias_regex_match_status"
+                ;;
+        esac
         local alias_page_file
         alias_page_file="$(mktemp "$target_directory/.cloudflare-alias-page.XXXXXX")"
         local alias_response_metadata

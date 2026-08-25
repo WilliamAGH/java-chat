@@ -456,6 +456,23 @@ def wrap_plain_text_html_command(command_arguments: list[str]) -> int:
     return 0
 
 
+def matches_regex_command(command_arguments: list[str]) -> int:
+    """Reports whether one candidate string matches a Python regular expression."""
+    matching_parser = argparse.ArgumentParser()
+    matching_parser.add_argument("--regex", required=True)
+    matching_parser.add_argument("--candidate", required=True)
+    matching_arguments = matching_parser.parse_args(command_arguments)
+    try:
+        compiled_documentation_regex = re.compile(matching_arguments.regex)
+    except re.error as invalid_documentation_regex:
+        print(
+            f"Documentation regex is invalid: {invalid_documentation_regex}",
+            file=sys.stderr,
+        )
+        return 2
+    return 0 if compiled_documentation_regex.search(matching_arguments.candidate) is not None else 1
+
+
 def validate_sitemap_index_command(command_arguments: list[str]) -> int:
     """Requires a sitemap index to declare exactly the shard this fetcher currently supports."""
     sitemap_index_parser = argparse.ArgumentParser()
@@ -501,6 +518,8 @@ def main() -> int:
         return validate_published_identity_command(sys.argv[2:])
     if sys.argv[1:2] == ["--wrap-plain-text-html"]:
         return wrap_plain_text_html_command(sys.argv[2:])
+    if sys.argv[1:2] == ["--matches-regex"]:
+        return matches_regex_command(sys.argv[2:])
     if sys.argv[1:2] == ["--validate-sitemap-index"]:
         return validate_sitemap_index_command(sys.argv[2:])
     if sys.argv[1:2] == ["--extract-article-text"]:

@@ -168,6 +168,12 @@ fi
 if grep -Fq -- '--retry-on-http-error' "$FETCH_SOURCE_LIBRARY"; then
     fail_documentation_fetch_test "documented Ubuntu Wget2 does not support --retry-on-http-error"
 fi
+if grep -Fq -- 'grep -P' "$FETCH_SOURCE_LIBRARY"; then
+    fail_documentation_fetch_test "documentation fetch still requires GNU grep PCRE support"
+fi
+if ! grep -Fq -- '--matches-regex' "$FETCH_SOURCE_LIBRARY"; then
+    fail_documentation_fetch_test "Cloudflare alias validation bypasses the portable Python regex boundary"
+fi
 if ! grep -Fq -- '--discovery-url "$seed_additional_discovery_url"' "$FETCH_SOURCE_LIBRARY"; then
     fail_documentation_fetch_test "additional discovery links do not resolve against their own document URL"
 fi
