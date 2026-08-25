@@ -478,14 +478,6 @@ public class DocumentProcessor {
             return envSetting == null || envSetting.isBlank() ? fallbackText : envSetting;
         }
 
-        private static String optionalEnv(final String key) {
-            final String envSetting = System.getenv(key);
-            if (envSetting != null && envSetting.isBlank()) {
-                throw new DocumentProcessingException("DOCS_SETS contains a blank selector");
-            }
-            return envSetting;
-        }
-
         private static boolean envBooleanOrDefault(final String key, final boolean fallbackValue) {
             final String envSetting = System.getenv(key);
             if (envSetting == null || envSetting.isBlank()) {
