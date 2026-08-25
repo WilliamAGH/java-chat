@@ -244,7 +244,8 @@ class SourceCodeFileIngestionProcessorTest {
     }
 
     @Test
-    void unchangedFileWithMissingPointCoverageForcesReindex(@TempDir Path temporaryDirectory) throws IOException {
+    void unchangedFingerprintWithStaleMetadataAndDisjointPointIdsForcesReplacement(@TempDir Path temporaryDirectory)
+            throws IOException {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
@@ -283,17 +284,19 @@ class SourceCodeFileIngestionProcessorTest {
         long fileSizeBytes = Files.size(sourceFilePath);
         long lastModifiedMillis = Files.getLastModifiedTime(sourceFilePath).toMillis();
         FileIngestionRecord previousFileRecord = new FileIngestionRecord(
-                fileSizeBytes,
-                lastModifiedMillis,
+                fileSizeBytes + 1,
+                lastModifiedMillis + 1,
                 "same-fingerprint",
                 "",
                 TARGET_COLLECTION_NAME,
                 List.of("existing-hash"));
 
         when(contentHasher.sha256(sourceFilePath)).thenReturn("same-fingerprint");
+        when(contentHasher.uuidFromHash("existing-hash")).thenReturn("expected-point-uuid");
         when(fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(previousFileRecord));
-        when(hybridVectorService.countPointsForUrl(TARGET_COLLECTION_NAME, sourceUrl))
-                .thenReturn(0L);
+        when(hybridVectorService.hasExactPointIdsForUrl(
+                        TARGET_COLLECTION_NAME, sourceUrl, List.of("expected-point-uuid")))
+                .thenReturn(false);
         when(progressTracker.formatPercent()).thenReturn("100%");
 
         Document indexedDocument = new Document("point-1", "package demo; class Main {}", new HashMap<>());
@@ -430,7 +433,8 @@ class SourceCodeFileIngestionProcessorTest {
     }
 
     @Test
-    void unchangedFileWithSufficientPointCoverageSkipsProcessing(@TempDir Path temporaryDirectory) throws IOException {
+    void unchangedFingerprintWithStaleMetadataAndExactPointCoverageSkipsProcessing(@TempDir Path temporaryDirectory)
+            throws IOException {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
@@ -470,12 +474,20 @@ class SourceCodeFileIngestionProcessorTest {
         long lastModifiedMillis = Files.getLastModifiedTime(sourceFilePath).toMillis();
 
         FileIngestionRecord previousFileRecord = new FileIngestionRecord(
-                fileSizeBytes, lastModifiedMillis, "same-fingerprint", "", TARGET_COLLECTION_NAME, List.of("h1", "h2"));
+                fileSizeBytes + 1,
+                lastModifiedMillis + 1,
+                "same-fingerprint",
+                "",
+                TARGET_COLLECTION_NAME,
+                List.of("h1", "h2"));
 
         when(contentHasher.sha256(sourceFilePath)).thenReturn("same-fingerprint");
+        when(contentHasher.uuidFromHash("h1")).thenReturn("first-point-uuid");
+        when(contentHasher.uuidFromHash("h2")).thenReturn("second-point-uuid");
         when(fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(previousFileRecord));
-        when(hybridVectorService.countPointsForUrl(TARGET_COLLECTION_NAME, sourceUrl))
-                .thenReturn(2L);
+        when(hybridVectorService.hasExactPointIdsForUrl(
+                        TARGET_COLLECTION_NAME, sourceUrl, List.of("first-point-uuid", "second-point-uuid")))
+                .thenReturn(true);
 
         SourceFileProcessingResult sourceFileProcessing =
                 ingestionProcessor.process(repositoryContext(repositoryRoot, repositoryMetadata), sourceFilePath);
@@ -483,17 +495,23 @@ class SourceCodeFileIngestionProcessorTest {
         assertFalse(sourceFileProcessing.outcome().processed());
         assertTrue(sourceFileProcessing.outcome().failure().isEmpty());
         assertEquals(sourceUrl, sourceFileProcessing.fileUrl());
+        verify(hybridVectorService)
+                .hasExactPointIdsForUrl(
+                        TARGET_COLLECTION_NAME, sourceUrl, List.of("first-point-uuid", "second-point-uuid"));
+        verify(hybridVectorService, never()).upsertToCollection(eq(TARGET_COLLECTION_NAME), Mockito.anyList());
+        verify(hybridVectorService, never())
+                .replaceUrlDocuments(eq(TARGET_COLLECTION_NAME), eq(sourceUrl), Mockito.anyList());
         verify(ingestedFilePruneService, never())
                 .pruneCollectionFileStrict(anyString(), anyString(), eq(previousFileRecord));
         verify(chunkProcessingService, never())
                 .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
         verify(chunkProcessingService, never())
                 .processAndStoreChunksForce(anyString(), anyString(), anyString(), anyString());
+        verify(fileIngestionMarkerStore, never()).markFileIngested(anyString(), Mockito.any());
     }
 
     @Test
-    void unchangedFileWithNullChunkHashesStillSkipsWhenPointsExist(@TempDir Path temporaryDirectory)
-            throws IOException {
+    void unchangedFileWithNullChunkHashesForcesReplacement(@TempDir Path temporaryDirectory) throws IOException {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
@@ -537,18 +555,26 @@ class SourceCodeFileIngestionProcessorTest {
 
         when(contentHasher.sha256(sourceFilePath)).thenReturn("same-fingerprint");
         when(fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(previousFileRecord));
-        when(hybridVectorService.countPointsForUrl(TARGET_COLLECTION_NAME, sourceUrl))
-                .thenReturn(1L);
+        when(progressTracker.formatPercent()).thenReturn("100%");
+        Document replacementDocument =
+                new Document("replacement-point", "package demo; class Main {}", new HashMap<>());
+        replacementDocument.getMetadata().put(QdrantPayloadFieldSchema.HASH_FIELD, "replacement-hash");
+        when(chunkProcessingService.processAndStoreChunksForce(
+                        anyString(), eq(sourceUrl), eq("Main.java"), anyString()))
+                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(
+                        List.of(replacementDocument), List.of("replacement-hash"), 1, 0));
 
         SourceFileProcessingResult sourceFileProcessing =
                 ingestionProcessor.process(repositoryContext(repositoryRoot, repositoryMetadata), sourceFilePath);
 
-        assertFalse(sourceFileProcessing.outcome().processed());
-        assertTrue(sourceFileProcessing.outcome().failure().isEmpty());
+        assertTrue(sourceFileProcessing.outcome().processed());
+        verify(hybridVectorService, never()).hasExactPointIdsForUrl(anyString(), anyString(), Mockito.anyList());
+        verify(hybridVectorService)
+                .replaceUrlDocuments(TARGET_COLLECTION_NAME, sourceUrl, List.of(replacementDocument));
         verify(chunkProcessingService, never())
                 .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
-        verify(chunkProcessingService, never())
-                .processAndStoreChunksForce(anyString(), anyString(), anyString(), anyString());
+        verify(chunkProcessingService)
+                .processAndStoreChunksForce(anyString(), eq(sourceUrl), eq("Main.java"), anyString());
     }
 
     @Test

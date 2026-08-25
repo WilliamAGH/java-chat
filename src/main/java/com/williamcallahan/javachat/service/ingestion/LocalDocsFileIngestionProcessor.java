@@ -403,11 +403,11 @@ public class LocalDocsFileIngestionProcessor {
     private ReindexDecision inspectExistingMarker(MarkerContext markerContext) {
         Optional<FileIngestionRecord> priorIngestionRecord = markerContext.priorIngestionRecord();
         boolean unchangedByFingerprint = priorIngestionRecord
-                .map(ingestionRecord -> ingestionRecord.fileSizeBytes() == markerContext.fileSizeBytes()
-                        && ingestionRecord.lastModifiedMillis() == markerContext.lastModifiedMillis()
-                        && markerContext.ingestionFingerprint().equals(ingestionRecord.ingestionFingerprint())
-                        && LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION.equals(ingestionRecord.extractionSemanticsVersion())
-                        && markerContext.collectionName().equals(ingestionRecord.collectionName()))
+                .map(ingestionRecord ->
+                        markerContext.ingestionFingerprint().equals(ingestionRecord.ingestionFingerprint())
+                                && LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION.equals(
+                                        ingestionRecord.extractionSemanticsVersion())
+                                && markerContext.collectionName().equals(ingestionRecord.collectionName()))
                 .orElse(false);
         if (!unchangedByFingerprint) {
             return ReindexDecision.continueWith(priorIngestionRecord.isPresent());
