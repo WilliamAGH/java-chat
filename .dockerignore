@@ -1,4 +1,8 @@
-.git
+.git/*
+!.git/HEAD
+!.git/packed-refs
+!.git/refs/
+!.git/refs/**
 .gradle
 build
 frontend/.svelte-kit
