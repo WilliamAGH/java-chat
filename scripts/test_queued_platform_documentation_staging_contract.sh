@@ -18,8 +18,11 @@ grep -Fq 'ConditionPathExists=!%h/.local/state/java-chat/local-embedding-staging
     || fail_queued_platform_test "completed local backlog can restart on a later login"
 grep -Fq 'ExecStartPre=/usr/bin/mkdir -p %h/.local/state/java-chat' "$local_unit" \
     || fail_queued_platform_test "local backlog does not create its completion-marker parent"
-grep -Fq 'ExecStartPost=/usr/bin/touch %h/.local/state/java-chat/local-embedding-staging.complete' "$local_unit" \
+grep -Fq '&& /usr/bin/touch %h/.local/state/java-chat/local-embedding-staging.complete' "$local_unit" \
     || fail_queued_platform_test "successful local backlog does not record terminal completion"
+if grep -Fq 'ExecStartPost=' "$local_unit"; then
+    fail_queued_platform_test "local backlog can be marked complete immediately after launch"
+fi
 if grep -Fq 'date -Ins' "$queued_launcher" \
     || ! grep -Fq "date -u '+%Y-%m-%dT%H:%M:%SZ'" "$queued_launcher"; then
     fail_queued_platform_test "queued job does not use portable UTC timestamps"
