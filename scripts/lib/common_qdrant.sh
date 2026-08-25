@@ -511,7 +511,11 @@ acquire_qdrant_writer_lease_at() {
     local writer_lease_previous_umask
     writer_lease_previous_umask="$(umask)"
     umask 077
-    exec 9>> "$writer_lease_path"
+    if ! exec 9>> "$writer_lease_path"; then
+        umask "$writer_lease_previous_umask"
+        echo "Could not open the Qdrant writer lease file" >&2
+        return 1
+    fi
     umask "$writer_lease_previous_umask"
     if ! python3 "$COMMON_QDRANT_LIB_DIR/../qdrant_writer_lease.py" \
         --lock-path "$writer_lease_path" \

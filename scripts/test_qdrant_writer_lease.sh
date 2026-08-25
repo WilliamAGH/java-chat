@@ -240,6 +240,20 @@ if [ -s "$symlink_file_target" ]; then
     fail_writer_lease_test "symbolic-link lease file changed its target"
 fi
 
+invalid_lease_file_root="$TEST_WORK_DIRECTORY/invalid-lease-file"
+invalid_lease_failure_log="$invalid_lease_file_root/acquisition-error"
+mkdir "$invalid_lease_file_root" "$invalid_lease_file_root/qdrant-writer.lock"
+if acquire_writer_lease_in_clean_shell "$invalid_lease_file_root" \
+    >"$invalid_lease_failure_log" 2>&1; then
+    fail_writer_lease_test "directory lease file was accepted"
+fi
+if ! grep -Fxq 'Could not open the Qdrant writer lease file' "$invalid_lease_failure_log"; then
+    fail_writer_lease_test "unopenable lease file did not report its open failure"
+fi
+if grep -Fq 'Another Qdrant ingestion writer owns the shared lease' "$invalid_lease_failure_log"; then
+    fail_writer_lease_test "unopenable lease file was reported as lease contention"
+fi
+
 poisoned_binary_directory="$TEST_WORK_DIRECTORY/poisoned-bin"
 poisoned_lease_root="$TEST_WORK_DIRECTORY/poisoned-flock"
 mkdir "$poisoned_binary_directory" "$poisoned_lease_root"
