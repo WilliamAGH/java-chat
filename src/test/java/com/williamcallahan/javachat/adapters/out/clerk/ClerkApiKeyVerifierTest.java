@@ -222,6 +222,23 @@ class ClerkApiKeyVerifierTest {
     }
 
     @Test
+    void acceptsProviderValidBadRequestAvailabilityResponse() {
+        RestClient.Builder restClientBuilder = RestClient.builder();
+        MockRestServiceServer clerkServer =
+                MockRestServiceServer.bindTo(restClientBuilder).build();
+        ClerkApiKeyVerifier verifier = new ClerkApiKeyVerifier(restClientBuilder.build(), CLERK_SECRET_KEY);
+        clerkServer
+                .expect(once(), requestTo(CLERK_VERIFY_ENDPOINT))
+                .andRespond(withRawStatus(400)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{}"));
+
+        assertTrue(verifier.isAvailable());
+        assertTrue(verifier.isAvailable(), "the authoritative readiness result must not probe twice");
+        clerkServer.verify();
+    }
+
+    @Test
     void throttlesAvailabilityProbeAfterTransientProviderFailure() {
         RestClient.Builder restClientBuilder = RestClient.builder();
         MockRestServiceServer clerkServer =
@@ -235,6 +252,34 @@ class ClerkApiKeyVerifierTest {
 
         assertFalse(verifier.isAvailable());
         assertFalse(verifier.isAvailable(), "transient failure must not fan out another provider request");
+        clerkServer.verify();
+    }
+
+    @Test
+    void successfulVerificationRecoversTransientAvailabilityFailure() {
+        RestClient.Builder restClientBuilder = RestClient.builder();
+        MockRestServiceServer clerkServer =
+                MockRestServiceServer.bindTo(restClientBuilder).build();
+        ClerkApiKeyVerifier verifier = new ClerkApiKeyVerifier(restClientBuilder.build(), CLERK_SECRET_KEY);
+        clerkServer
+                .expect(once(), requestTo(CLERK_VERIFY_ENDPOINT))
+                .andRespond(withRawStatus(500)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{}"));
+        clerkServer
+                .expect(once(), requestTo(CLERK_VERIFY_ENDPOINT))
+                .andRespond(withSuccess("""
+                        {
+                          "id": "ak_0123456789abcdef0123456789abcdef",
+                          "subject": "user_0123456789abcdefghijklmnopq",
+                          "revoked": false,
+                          "expired": false
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        assertFalse(verifier.isAvailable());
+        assertTrue(verifier.verify(PRESENTED_API_KEY).isPresent());
+        assertTrue(verifier.isAvailable(), "successful verification must restore readiness immediately");
         clerkServer.verify();
     }
 }

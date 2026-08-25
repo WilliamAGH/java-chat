@@ -170,7 +170,7 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
         } catch (HttpStatusCodeException clerkRejection) {
             if (isRejectedCredential(clerkRejection.getStatusCode())) {
                 if (isAvailabilityProbeRejection(presentedSecret, clerkRejection)) {
-                    apiKeyFeatureState = ApiKeyFeatureState.ENABLED;
+                    markApiKeyFeatureEnabled();
                 }
                 return Optional.empty();
             }
@@ -195,7 +195,7 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
         if (verification.revoked() || verification.expired()) {
             return Optional.empty();
         }
-        apiKeyFeatureState = ApiKeyFeatureState.ENABLED;
+        markApiKeyFeatureEnabled();
         VerifiedApiKey verifiedApiKey = new VerifiedApiKey(verification.id(), verification.subject());
         return Optional.of(verifiedApiKey);
     }
@@ -255,10 +255,16 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
     private static boolean isAvailabilityProbeRejection(
             String presentedSecret, HttpStatusCodeException clerkRejection) {
         return CLERK_AVAILABILITY_PROBE_SECRET.equals(presentedSecret)
-                && clerkRejection.getStatusCode().isSameCodeAs(HttpStatus.NOT_FOUND);
+                && (clerkRejection.getStatusCode().isSameCodeAs(HttpStatus.BAD_REQUEST)
+                        || clerkRejection.getStatusCode().isSameCodeAs(HttpStatus.NOT_FOUND));
     }
 
-    private ApiKeyOperationUnavailableException disabledFeatureException(HttpStatusCodeException clerkRejection) {
+    private synchronized void markApiKeyFeatureEnabled() {
+        apiKeyFeatureState = ApiKeyFeatureState.ENABLED;
+    }
+
+    private synchronized ApiKeyOperationUnavailableException disabledFeatureException(
+            HttpStatusCodeException clerkRejection) {
         apiKeyFeatureState = ApiKeyFeatureState.DISABLED;
         return new ApiKeyOperationUnavailableException(FEATURE_DISABLED_MESSAGE, clerkRejection);
     }
