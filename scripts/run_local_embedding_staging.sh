@@ -12,6 +12,10 @@ readonly DOCUMENTATION_SETS="jooq/3.21/manual,jooq/3.21/api,python/3.14,postgres
 
 cd "$PROJECT_ROOT"
 
+# shellcheck source=lib/common_qdrant.sh
+source "$SCRIPT_DIRECTORY/lib/common_qdrant.sh"
+acquire_qdrant_writer_lease
+
 export SPRING_PROFILE=local
 export APP_LOCAL_EMBEDDING_ENABLED=false
 export APP_EMBEDDINGS_BATCH_MAX_CONCURRENT_REQUESTS=8

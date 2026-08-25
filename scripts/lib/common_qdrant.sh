@@ -461,3 +461,37 @@ create_collection_from_reference() {
     fi
     echo -e "${GREEN}Collection '$collection_name' created${NC}"
 }
+
+# Acquires the user-wide writer lease shared by documentation and repository ingestion.
+acquire_qdrant_writer_lease() {
+    if [ "${QDRANT_WRITER_LEASE_HELD:-false}" = "true" ]; then
+        if [[ "${QDRANT_WRITER_LEASE_DESCRIPTOR:-}" =~ ^[0-9]+$ ]] \
+            && flock --nonblock "$QDRANT_WRITER_LEASE_DESCRIPTOR"; then
+            return 0
+        fi
+        echo "Inherited Qdrant writer lease is invalid" >&2
+        return 1
+    fi
+    acquire_qdrant_writer_lease_at "$HOME/.local/state/java-chat"
+}
+
+# Acquires the writer lease at an explicit directory for deterministic contract tests.
+acquire_qdrant_writer_lease_at() {
+    local writer_state_directory="$1"
+    if [ -z "$writer_state_directory" ] || [[ "$writer_state_directory" != /* ]]; then
+        echo "Qdrant writer lease directory must be an absolute path" >&2
+        return 1
+    fi
+    if ! mkdir -p "$writer_state_directory"; then
+        echo "Could not create the Qdrant writer lease directory" >&2
+        return 1
+    fi
+    local writer_lease_path="$writer_state_directory/qdrant-writer.lock"
+    exec {QDRANT_WRITER_LEASE_DESCRIPTOR}> "$writer_lease_path"
+    if ! flock --nonblock "$QDRANT_WRITER_LEASE_DESCRIPTOR"; then
+        echo "Another Qdrant ingestion writer owns the shared lease" >&2
+        return 1
+    fi
+    export QDRANT_WRITER_LEASE_DESCRIPTOR
+    export QDRANT_WRITER_LEASE_HELD=true
+}

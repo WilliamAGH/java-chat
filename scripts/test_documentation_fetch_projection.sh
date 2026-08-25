@@ -104,6 +104,66 @@ log() {
 
 assert_documentation_mirror_path_policy
 
+TEXT_RESOURCE_TEST_PATH="$TEST_WORK_DIRECTORY/documentation-text-resource.txt"
+printf '%s\n' "Cloudflare DNS" "R2 Object Storage" "Model Context Protocol (MCP)" \
+    > "$TEXT_RESOURCE_TEST_PATH"
+validate_documentation_text_resource \
+    "$TEXT_RESOURCE_TEST_PATH" "Documentation Text Resource" 40 \
+    "Cloudflare DNS" "R2 Object Storage" "Model Context Protocol (MCP)"
+if validate_documentation_text_resource \
+    "$TEXT_RESOURCE_TEST_PATH" "Documentation Text Resource" 1000 \
+    "Cloudflare DNS" > /dev/null 2>&1; then
+    fail_documentation_fetch_test "truncated completeness resource was accepted"
+fi
+if validate_documentation_text_resource \
+    "$TEXT_RESOURCE_TEST_PATH" "Documentation Text Resource" 40 \
+    "Workers AI" > /dev/null 2>&1; then
+    fail_documentation_fetch_test "text resource missing required coverage was accepted"
+fi
+
+if ! (
+    STABLE_SEED_TEST_ROOT="$TEST_WORK_DIRECTORY/stable-seed"
+    mkdir -p "$STABLE_SEED_TEST_ROOT"
+    printf '%s\n' 'https://docs.example.invalid/reference/' \
+        > "$STABLE_SEED_TEST_ROOT/current-seed.txt"
+    wget2() {
+        local discovery_output_path=""
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --output-document=*) discovery_output_path="${1#*=}" ;;
+            esac
+            shift
+        done
+        printf '%s\n' \
+            '<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://docs.example.invalid/reference/</loc></url></urlset>' \
+            > "$discovery_output_path"
+    }
+    validate_stable_documentation_seed \
+        --current-seed-file "$STABLE_SEED_TEST_ROOT/current-seed.txt" \
+        --target-directory "$STABLE_SEED_TEST_ROOT" \
+        --seed-document-type xml-sitemap \
+        --seed-discovery-url 'https://docs.example.invalid/sitemap.xml' \
+        --seed-source-prefix 'https://docs.example.invalid/' \
+        --canonical-prefix 'https://docs.example.invalid/' \
+        --seed-reject-regex '' \
+        --cut-directories 0
+    printf '%s\n' 'https://docs.example.invalid/stale/' \
+        > "$STABLE_SEED_TEST_ROOT/current-seed.txt"
+    if validate_stable_documentation_seed \
+        --current-seed-file "$STABLE_SEED_TEST_ROOT/current-seed.txt" \
+        --target-directory "$STABLE_SEED_TEST_ROOT" \
+        --seed-document-type xml-sitemap \
+        --seed-discovery-url 'https://docs.example.invalid/sitemap.xml' \
+        --seed-source-prefix 'https://docs.example.invalid/' \
+        --canonical-prefix 'https://docs.example.invalid/' \
+        --seed-reject-regex '' \
+        --cut-directories 0 > /dev/null 2>&1; then
+        exit 1
+    fi
+); then
+    fail_documentation_fetch_test "stable seed validation did not reject discovery drift"
+fi
+
 fetch_discovered_documentation_seed() {
     printf '%s\n' "$@" > "$DISCOVERED_FETCH_CAPTURE"
     local captured_target_directory="$4"
@@ -527,6 +587,89 @@ assert_current_documentation_source_dispatch \
     "https://tinker-docs.thinkingmachines.ai/" \
     tinker \
     "https://tinker-docs.thinkingmachines.ai/sitemap.xml"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source porkbun
+); then
+    fail_documentation_fetch_test "canonical Porkbun documentation dispatch did not complete"
+fi
+for required_porkbun_argument in \
+    "https://porkbun.com/api/json/v3/documentation" \
+    "https://porkbun.com/llms-full.txt" \
+    "https://porkbun.com/llms.txt" \
+    "npx -y @porkbunllc/mcp-server" \
+    "https://porkbun.com/llms/agent-setup"; do
+    if ! grep -Fxq -- "$required_porkbun_argument" "$ENVIRONMENT_OVERRIDE_CAPTURE"; then
+        fail_documentation_fetch_test "Porkbun dispatch lost required API/MCP coverage: $required_porkbun_argument"
+    fi
+done
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source porkbun-mcp
+); then
+    fail_documentation_fetch_test "canonical Porkbun MCP documentation dispatch did not complete"
+fi
+for required_porkbun_mcp_argument in \
+    "https://github.com/oborseth/Porkbun-MCP/blob/64e8b4f4caad75e99333733bca5f2987afee3c75/README.md" \
+    "https://raw.githubusercontent.com/oborseth/Porkbun-MCP/64e8b4f4caad75e99333733bca5f2987afee3c75/README.md" \
+    "0.17.1-64e8b4f4caad" \
+    "npx -y @porkbunllc/mcp-server"; do
+    if ! grep -Fxq -- "$required_porkbun_mcp_argument" "$ENVIRONMENT_OVERRIDE_CAPTURE"; then
+        fail_documentation_fetch_test "Porkbun MCP dispatch lost pinned official coverage: $required_porkbun_mcp_argument"
+    fi
+done
+assert_current_documentation_source_dispatch \
+    cloudflare \
+    "https://developers.cloudflare.com/" \
+    cloudflare \
+    "https://developers.cloudflare.com/sitemap-0.xml"
+for required_cloudflare_argument in \
+    "https://developers.cloudflare.com/sitemap-index.xml" \
+    "https://developers.cloudflare.com/llms-full.txt" \
+    "8199" \
+    "--validate-cloudflare-seed-aliases" \
+    "# Cloudflare DNS" \
+    "# R2 Object Storage" \
+    "## Wrangler usage" \
+    "# AI Gateway" \
+    "## Workers AI" \
+    "Model Context Protocol (MCP)"; do
+    if ! grep -Fxq -- "$required_cloudflare_argument" "$ENVIRONMENT_OVERRIDE_CAPTURE"; then
+        fail_documentation_fetch_test "Cloudflare dispatch lost required platform coverage: $required_cloudflare_argument"
+    fi
+done
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    DEFAULT_SOURCE_CAPTURE="$TEST_WORK_DIRECTORY/default-source-capture"
+    fetch_named_official_source() {
+        printf '%s\n' "$1" >> "$DEFAULT_SOURCE_CAPTURE"
+    }
+    fetch_all_official_sources
+    grep -Fxq porkbun "$DEFAULT_SOURCE_CAPTURE" \
+        && grep -Fxq porkbun-mcp "$DEFAULT_SOURCE_CAPTURE" \
+        && grep -Fxq cloudflare "$DEFAULT_SOURCE_CAPTURE"
+); then
+    fail_documentation_fetch_test "default documentation inventory omitted a platform source"
+fi
 
 if ! (
     set --
@@ -1061,6 +1204,46 @@ if [ "$(grep -Fxc -- "/dev/null" "$JAVA25_PDF_FAILURE_PARSER_CAPTURE")" -ne 1 ] 
     || ! grep -Fq -- "jls25.pdf" "$JAVA25_PDF_FAILURE_PARSER_CAPTURE" \
     || grep -Fq -- "jvms25.pdf" "$JAVA25_PDF_FAILURE_PARSER_CAPTURE"; then
     fail_documentation_fetch_test "Java 25 specification pair continued after the JLS full-parse failure"
+fi
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    DOCS_ROOT="$TEST_WORK_DIRECTORY/resumed-publication/data/docs"
+    LOG_FILE="$TEST_WORK_DIRECTORY/resumed-publication.log"
+    RESUMED_STAGING_DIRECTORY="$TEST_WORK_DIRECTORY/resumed-publication/staging"
+    RESUMED_PUBLICATION_CAPTURE="$TEST_WORK_DIRECTORY/resumed-publication/published"
+    PROJECT_ROOT="$TEST_WORK_DIRECTORY/resumed-publication/project"
+    mkdir -p "$PROJECT_ROOT"
+    log() {
+        :
+    }
+    create_documentation_fetch_staging_directory() {
+        mkdir -p "$RESUMED_STAGING_DIRECTORY"
+        printf '<html>Resumed Reference stable</html>\n' > "$RESUMED_STAGING_DIRECTORY/index.html"
+        printf '%s\n' "$RESUMED_STAGING_DIRECTORY"
+    }
+    fetch_discovered_documentation_seed() {
+        DOCUMENTATION_SOURCE_ALREADY_COMPLETE="true"
+    }
+    publish_staged_documentation_mirror() {
+        printf '%s\n' "$@" > "$RESUMED_PUBLICATION_CAPTURE"
+    }
+    fetch_source \
+        --url "https://docs.example.invalid/reference/" \
+        --mirror-path "resumed-reference" \
+        --name "Resumed Reference" \
+        --source-version "stable" \
+        --identity-regex "Resumed Reference stable" \
+        --cut-directories 0 \
+        --minimum-html-files 1 \
+        --seed-document-type xml-sitemap \
+        --seed-discovery-url "https://docs.example.invalid/sitemap.xml" \
+        --seed-source-prefix "https://docs.example.invalid/reference/" > /dev/null
+    [ -s "$RESUMED_PUBLICATION_CAPTURE" ]
+); then
+    fail_documentation_fetch_test "complete resumed staging was discarded instead of published"
 fi
 
 if ! (

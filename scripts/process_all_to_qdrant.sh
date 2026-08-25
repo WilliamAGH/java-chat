@@ -143,6 +143,7 @@ validate_generation_and_state_contract() {
 }
 
 run_documentation_ingestion() {
+acquire_qdrant_writer_lease
 DOCS_SETS_FILTER=""
 for ingestion_argument in "$@"; do
     case $ingestion_argument in
