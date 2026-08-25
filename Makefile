@@ -28,6 +28,7 @@ test-shell: ## Run deterministic ingestion and fetch shell contract tests
 	bash scripts/test_documentation_fetch_projection.sh
 	bash scripts/test_documentation_fetch_publication.sh
 	bash scripts/test_embedding_preflight.sh
+	bash scripts/test_github_repository_metadata_contract.sh
 	bash scripts/test_github_sync_failure_contract.sh
 	bash scripts/test_ingestion_pid_safety.sh
 	bash scripts/test_qdrant_writer_lease.sh
