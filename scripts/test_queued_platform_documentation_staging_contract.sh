@@ -52,9 +52,8 @@ grep -Fq 'invocation_id=$(systemctl --user show java-chat-local-embedding-stagin
     || fail_queued_platform_test "documentation queue does not select its live or completed predecessor invocation"
 grep -Fq 'ExecStartPost=/usr/bin/touch %h/.local/state/java-chat/queued-platform-documentation-staging.complete' "$queued_unit" \
     || fail_queued_platform_test "successful documentation queue does not record terminal completion"
-if grep -Fq '[Install]' "$queued_unit" || grep -Fq 'WantedBy=' "$queued_unit"; then
-    fail_queued_platform_test "documentation queue can start independently of its predecessor"
-fi
+grep -Fxq 'WantedBy=default.target' "$queued_unit" \
+    || fail_queued_platform_test "documentation queue cannot resume after a user-manager restart"
 if grep -Fq 'date -Ins' "$queued_launcher" \
     || ! grep -Fq "date -u '+%Y-%m-%dT%H:%M:%SZ'" "$queued_launcher"; then
     fail_queued_platform_test "queued job does not use portable UTC timestamps"

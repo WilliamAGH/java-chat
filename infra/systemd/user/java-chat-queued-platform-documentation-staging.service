@@ -13,3 +13,6 @@ ExecStartPost=/usr/bin/touch %h/.local/state/java-chat/queued-platform-documenta
 Restart=on-failure
 RestartSec=15s
 TimeoutStopSec=20s
+
+[Install]
+WantedBy=default.target
