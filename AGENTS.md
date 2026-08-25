@@ -71,7 +71,7 @@ alwaysApply: true
 - [DP1b] **Branch Routing**: Configure Dokploy push auto-deploy so `dev` owns `dev.javachat.ai` and `main` owns `javachat.ai` plus `www.javachat.ai`. Never route production deployment from `prod` or another branch.
 - [DP1c] **No Push-To-Coolify Path**: Never add or retain a GitHub Actions workflow, repository webhook, Git hook, script, secret, variable, or external integration that sends a repository push to Coolify.
 - [DP1d] **Retire Stale Owners**: Treat any Java Chat Coolify resource as an incident-grade stale deployment owner. Stop and delete its exact application and containers after proving the matching Dokploy application is healthy and receiving the intended domain.
-- [DP1e] **Release Verification**: Before completing a release, prove the GitHub repository has zero Coolify-targeting webhooks, Coolify has zero Java Chat applications or containers, both Dokploy applications use push auto-deploy on their required branches, and all three public health endpoints return `UP`.
+- [DP1e] **Release Verification**: Before completing a release, prove tracked GitHub Actions, Git hooks, and scripts contain zero Coolify deployment paths; the GitHub repository has zero Coolify-targeting webhooks and zero Coolify-named Actions secrets, variables, or integrations; Coolify has zero Java Chat applications or containers; both Dokploy applications use push auto-deploy on their required branches and their latest deployment receipts name the released commits; and `https://dev.javachat.ai/actuator/health`, `https://javachat.ai/actuator/health`, and `https://www.javachat.ai/actuator/health` each return JSON field `status` equal to `UP` through the matching Dokploy application.
 
 ## [CC1] Clean Code & DDD (Mandatory)
 
