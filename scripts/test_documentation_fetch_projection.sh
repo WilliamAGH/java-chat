@@ -1598,4 +1598,39 @@ if ! (
     fail_documentation_fetch_test "staged publication failure was not propagated"
 fi
 
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    DOCS_ROOT="$TEST_WORK_DIRECTORY/sentinel-resume/data/docs"
+    LOG_FILE="$TEST_WORK_DIRECTORY/sentinel-resume.log"
+    SENTINEL_RESUME_DIRECTORY="$TEST_WORK_DIRECTORY/sentinel-resume/staging"
+    mkdir -p "$SENTINEL_RESUME_DIRECTORY"
+    printf '<html>resume progress</html>\n' > "$SENTINEL_RESUME_DIRECTORY/progress.html"
+    log() {
+        :
+    }
+    create_documentation_fetch_staging_directory() {
+        printf '%s\n' "$SENTINEL_RESUME_DIRECTORY"
+    }
+    validate_documentation_llm_sentinel() {
+        return 1
+    }
+    if fetch_source \
+        --url "https://docs.example.invalid/reference/" \
+        --mirror-path "sentinel-resume" \
+        --name "Sentinel Resume" \
+        --source-version "stable" \
+        --identity-regex "Sentinel Resume" \
+        --cut-directories 0 \
+        --minimum-html-files 1 \
+        --llm-sentinel-url "https://docs.example.invalid/llms.txt" \
+        --minimum-llm-sentinel-bytes 1 > /dev/null 2>&1; then
+        exit 1
+    fi
+    [ -s "$SENTINEL_RESUME_DIRECTORY/progress.html" ]
+); then
+    fail_documentation_fetch_test "sentinel failure deleted resumable staging progress"
+fi
+
 printf 'PASS: explicit fetch options, pinned source selection, version rejection, and Java seed safety are wired.\n'

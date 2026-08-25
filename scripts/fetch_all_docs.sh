@@ -562,7 +562,11 @@ fetch_source() {
             "$name" \
             "$minimum_llm_sentinel_bytes" \
             "${llm_sentinel_required_fragments[@]}"; then
-        discard_documentation_fetch_staging_directory "$staging_directory"
+        if [ "$staging_seeded_from_published_mirror" = "true" ]; then
+            discard_documentation_fetch_staging_directory "$staging_directory"
+        else
+            log "${YELLOW}⚠ Preserving source-matched staging after LLM-sentinel failure: $staging_directory${NC}"
+        fi
         log "${RED}✗ $name failed independent LLM-sentinel validation${NC}"
         return 1
     fi
@@ -573,7 +577,11 @@ fetch_source() {
             "$seed_discovery_url" \
             "$staging_directory" \
             "$name"; then
-        discard_documentation_fetch_staging_directory "$staging_directory"
+        if [ "$staging_seeded_from_published_mirror" = "true" ]; then
+            discard_documentation_fetch_staging_directory "$staging_directory"
+        else
+            log "${YELLOW}⚠ Preserving source-matched staging after sitemap-index failure: $staging_directory${NC}"
+        fi
         log "${RED}✗ $name failed sitemap-index topology validation${NC}"
         return 1
     fi
