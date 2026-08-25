@@ -157,12 +157,10 @@ jobs:
       - name: Build image from pinned Liberica stages
         run: |
           docker buildx build --load \
-            --build-arg SOURCE_COMMIT="${{ github.sha }}" \
             --tag java-chat:ci \
             .
 
           docker buildx build --load \
-            --build-arg SOURCE_COMMIT="${{ github.sha }}" \
             --target ingestion \
             --tag java-chat-ingestion:ci \
             .
