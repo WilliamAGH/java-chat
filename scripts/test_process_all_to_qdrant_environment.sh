@@ -8,6 +8,7 @@ TEST_SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_WORK_DIRECTORY="$(mktemp -d)"
 CAPTURED_CHILD_ENVIRONMENT="$TEST_WORK_DIRECTORY/child-environment"
 CAPTURED_CHILD_ARGUMENTS="$TEST_WORK_DIRECTORY/child-arguments"
+WRITER_LEASE_CAPTURE="$TEST_WORK_DIRECTORY/writer-lease-acquisitions"
 JAR_STAGING_ROOT="$TEST_WORK_DIRECTORY/jar-staging"
 trap 'rm -rf -- "$TEST_WORK_DIRECTORY"' EXIT
 
@@ -27,6 +28,10 @@ load_env_file() {
     :
 }
 
+acquire_qdrant_writer_lease() {
+    printf 'acquired\n' >> "$WRITER_LEASE_CAPTURE"
+}
+
 check_qdrant_connection() {
     return 0
 }
@@ -36,7 +41,9 @@ check_embedding_server() {
 }
 
 setup_pid_and_cleanup() {
-    :
+    if [ ! -s "$WRITER_LEASE_CAPTURE" ]; then
+        fail_process_environment_test "ingestion claimed its PID before the writer lease"
+    fi
 }
 
 build_application() {
@@ -100,7 +107,23 @@ checkpoint_sentinel="$DOCS_INDEX_DIR/checkpoint-sentinel"
 printf '%s\n' "$prior_failure_evidence" > "$LOG_FILE"
 printf 'checkpoint-preserved\n' > "$checkpoint_sentinel"
 
+if ! (run_documentation_ingestion --help >/dev/null); then
+    fail_process_environment_test "help did not exit successfully"
+fi
+if [ -e "$WRITER_LEASE_CAPTURE" ]; then
+    fail_process_environment_test "help acquired the writer lease"
+fi
+if (run_documentation_ingestion --unsupported-option >/dev/null 2>&1); then
+    fail_process_environment_test "unknown CLI option was accepted"
+fi
+if [ -e "$WRITER_LEASE_CAPTURE" ]; then
+    fail_process_environment_test "unknown CLI option acquired the writer lease"
+fi
+
 run_documentation_ingestion --doc-sets=kotlin >/dev/null
+if [ "$(wc -l < "$WRITER_LEASE_CAPTURE" | tr -d ' ')" -ne 1 ]; then
+    fail_process_environment_test "validated ingestion did not acquire exactly one writer lease"
+fi
 
 archived_processing_log=""
 archived_processing_log_count=0
@@ -193,19 +216,27 @@ if find "$JAR_STAGING_ROOT" -mindepth 1 -print -quit | grep -q .; then
     fail_process_environment_test "successful ingestion left a staged application jar directory"
 fi
 
+rm -f "$WRITER_LEASE_CAPTURE"
 if (
     export SPRING_PROFILE=staging
     run_documentation_ingestion --doc-sets=kotlin >/dev/null 2>&1
 ); then
     fail_process_environment_test "invalid SPRING_PROFILE was accepted"
 fi
+if [ -e "$WRITER_LEASE_CAPTURE" ]; then
+    fail_process_environment_test "invalid SPRING_PROFILE acquired the writer lease"
+fi
 
+rm -f "$WRITER_LEASE_CAPTURE"
 if (
     export SPRING_PROFILE=local
     export DOCS_DIR="$TEST_WORK_DIRECTORY/missing-corpus"
     run_documentation_ingestion --doc-sets=kotlin >/dev/null 2>&1
 ); then
     fail_process_environment_test "missing DOCS_DIR was accepted"
+fi
+if [ -e "$WRITER_LEASE_CAPTURE" ]; then
+    fail_process_environment_test "missing DOCS_DIR acquired the writer lease"
 fi
 
 if (
