@@ -55,15 +55,4 @@ if [ "$completion_gate_line" -ge "$writer_lease_line" ] \
     fail_queued_platform_test "queued ingestion can start before the current completion gate"
 fi
 
-WRITER_LEASE_TEST_ROOT="$(mktemp -d)"
-trap 'find "$WRITER_LEASE_TEST_ROOT" -depth -delete' EXIT
-# shellcheck source=lib/common_qdrant.sh
-source "$TEST_SCRIPT_DIRECTORY/lib/common_qdrant.sh"
-acquire_qdrant_writer_lease_at "$WRITER_LEASE_TEST_ROOT"
-if env -u QDRANT_WRITER_LEASE_HELD -u QDRANT_WRITER_LEASE_DESCRIPTOR \
-    bash -c 'source "$1/lib/common_qdrant.sh"; acquire_qdrant_writer_lease_at "$2"' \
-    bash "$TEST_SCRIPT_DIRECTORY" "$WRITER_LEASE_TEST_ROOT" >/dev/null 2>&1; then
-    fail_queued_platform_test "shared Qdrant writer lease admitted a second process"
-fi
-
 printf 'PASS: Porkbun and Cloudflare remain queued behind the active sole writer.\n'

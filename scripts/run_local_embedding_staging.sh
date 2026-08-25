@@ -14,7 +14,6 @@ cd "$PROJECT_ROOT"
 
 # shellcheck source=lib/common_qdrant.sh
 source "$SCRIPT_DIRECTORY/lib/common_qdrant.sh"
-acquire_qdrant_writer_lease
 
 export SPRING_PROFILE=local
 export APP_LOCAL_EMBEDDING_ENABLED=false
@@ -57,6 +56,8 @@ for repository_path in "${repository_paths[@]}"; do
         exit 1
     fi
 done
+
+acquire_qdrant_writer_lease
 
 staging_timestamp() {
     date -u '+%Y-%m-%dT%H:%M:%SZ'

@@ -239,6 +239,21 @@ if [ -e "$WRITER_LEASE_CAPTURE" ]; then
     fail_process_environment_test "missing DOCS_DIR acquired the writer lease"
 fi
 
+rm -f "$WRITER_LEASE_CAPTURE"
+invalid_state_parent="$TEST_WORK_DIRECTORY/state-file"
+: > "$invalid_state_parent"
+if (
+    export SPRING_PROFILE=local
+    export DOCS_DIR="$TEST_WORK_DIRECTORY/arbitrary-corpus"
+    export DOCS_SNAPSHOT_DIR="$invalid_state_parent/qwen3-embedding-4b-2560/local/snapshots"
+    run_documentation_ingestion --doc-sets=kotlin >/dev/null 2>&1
+); then
+    fail_process_environment_test "invalid ingestion state directory was accepted"
+fi
+if [ -e "$WRITER_LEASE_CAPTURE" ]; then
+    fail_process_environment_test "invalid ingestion state directory acquired the writer lease"
+fi
+
 if (
     export SPRING_PROFILE=dev
     export DOCS_DIR="$TEST_WORK_DIRECTORY/arbitrary-corpus"

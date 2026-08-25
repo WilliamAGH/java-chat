@@ -8,6 +8,7 @@ TEST_SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_WORK_DIRECTORY="$(mktemp -d)"
 FAKE_BINARY_DIRECTORY="$TEST_WORK_DIRECTORY/bin"
 NETWORK_CAPTURE="$TEST_WORK_DIRECTORY/network-capture"
+WRITER_LEASE_CAPTURE="$TEST_WORK_DIRECTORY/writer-lease-capture"
 mkdir -p "$FAKE_BINARY_DIRECTORY"
 trap 'rm -rf -- "$TEST_WORK_DIRECTORY"' EXIT
 
@@ -22,10 +23,17 @@ printf '%s\n' \
     'exit 99' \
     > "$FAKE_BINARY_DIRECTORY/curl"
 chmod +x "$FAKE_BINARY_DIRECTORY/curl"
+printf '%s\n' \
+    '#!/bin/bash' \
+    'printf "python3 invoked\n" >> "$GITHUB_WRITER_LEASE_CAPTURE"' \
+    'exit 99' \
+    > "$FAKE_BINARY_DIRECTORY/python3"
+chmod +x "$FAKE_BINARY_DIRECTORY/python3"
 
 if (
     export PATH="$FAKE_BINARY_DIRECTORY:$PATH"
     export GITHUB_NETWORK_CAPTURE="$NETWORK_CAPTURE"
+    export GITHUB_WRITER_LEASE_CAPTURE="$WRITER_LEASE_CAPTURE"
     export QDRANT_HOST=invalid.example
     export QDRANT_PORT=6334
     export SPRING_PROFILE=staging
@@ -39,6 +47,9 @@ if (
 fi
 if [ -s "$NETWORK_CAPTURE" ]; then
     fail_github_sync_test "invalid SPRING_PROFILE reached a network preflight"
+fi
+if [ -s "$WRITER_LEASE_CAPTURE" ]; then
+    fail_github_sync_test "invalid SPRING_PROFILE acquired the Qdrant writer lease"
 fi
 
 set --
@@ -136,6 +147,20 @@ git() {
 }
 if remote_head_commit "https://github.com/example/repository" >/dev/null 2>&1; then
     fail_github_sync_test "GitHub remote HEAD failure was accepted as an empty commit"
+fi
+
+repository_url_validation_line="$(grep -n '^    extract_repository_identity "\$REPO_URL"$' \
+    "$TEST_SCRIPT_DIRECTORY/process_github_repo.sh" | cut -d: -f1)"
+repository_cache_lease_line="$(grep -n '^    acquire_qdrant_writer_lease$' \
+    "$TEST_SCRIPT_DIRECTORY/process_github_repo.sh" | tail -1 | cut -d: -f1)"
+repository_cache_refresh_line="$(grep -n 'ensure_repository_cache_clone "\$REPO_URL"' \
+    "$TEST_SCRIPT_DIRECTORY/process_github_repo.sh" | cut -d: -f1)"
+if [ -z "$repository_url_validation_line" ] \
+    || [ -z "$repository_cache_lease_line" ] \
+    || [ -z "$repository_cache_refresh_line" ] \
+    || [ "$repository_url_validation_line" -ge "$repository_cache_lease_line" ] \
+    || [ "$repository_cache_lease_line" -ge "$repository_cache_refresh_line" ]; then
+    fail_github_sync_test "repository cache refresh is not protected by the Qdrant writer lease"
 fi
 
 printf 'PASS: GitHub sync validates the exact Qdrant generation schema before network access and propagates dependency failures.\n'

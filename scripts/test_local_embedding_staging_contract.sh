@@ -60,5 +60,10 @@ if ! grep -Fq 'repository_git_directories=(data/repos/github/*/*/.git)' "$launch
     || ! grep -Fq "date -u '+%Y-%m-%dT%H:%M:%SZ'" "$launcher_path"; then
     fail_local_staging_contract_test "launcher does not use portable repository discovery and timestamps"
 fi
+repository_validation_line="$(grep -n 'Pinned repository is dirty:' "$launcher_path" | cut -d: -f1)"
+writer_lease_line="$(grep -n '^acquire_qdrant_writer_lease$' "$launcher_path" | cut -d: -f1)"
+if [ "$writer_lease_line" -le "$repository_validation_line" ]; then
+    fail_local_staging_contract_test "launcher contends on the writer lease before repository validation"
+fi
 
 printf 'PASS: durable staging forces local Qdrant and masks cloud credentials across .env loading.\n'
