@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationCitationPathStyle;
@@ -8,6 +9,7 @@ import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSourc
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -135,6 +137,40 @@ class DocsSourceRegistryTest {
                         .map(DocumentationSource::relativeMirrorPath)
                         .distinct()
                         .count());
+    }
+
+    @Test
+    void assignsDistinctStorageUrlsToJavaPagesThatShareOneCanonicalSourceFile(@TempDir Path temporaryDirectory) {
+        Path mirrorRoot = temporaryDirectory.resolve("jackson/2.22.2/api");
+        Path outerTypePage = mirrorRoot.resolve("com/fasterxml/jackson/databind/ObjectMapper.html");
+        Path nestedTypePage = mirrorRoot.resolve("com/fasterxml/jackson/databind/ObjectMapper.DefaultTyping.html");
+        Path singletonTypePage = mirrorRoot.resolve("com/fasterxml/jackson/databind/JsonNode.html");
+
+        Map<Path, DocsSourceRegistry.MirroredIngestionIdentity> ingestionIdentities =
+                DocsSourceRegistry.resolveMirroredIngestionIdentities(
+                        mirrorRoot, List.of(outerTypePage, nestedTypePage, singletonTypePage));
+        String outerStorageUrl = ingestionIdentities
+                .get(outerTypePage.toAbsolutePath().normalize())
+                .storageUrl();
+        String nestedStorageUrl = ingestionIdentities
+                .get(nestedTypePage.toAbsolutePath().normalize())
+                .storageUrl();
+        String singletonStorageUrl = ingestionIdentities
+                .get(singletonTypePage.toAbsolutePath().normalize())
+                .storageUrl();
+
+        assertNotEquals(outerStorageUrl, nestedStorageUrl);
+        assertEquals(
+                DocsSourceRegistry.normalizeDocUrl(outerStorageUrl),
+                DocsSourceRegistry.normalizeDocUrl(nestedStorageUrl));
+        assertEquals(
+                DocsSourceRegistry.resolveMirroredPath(mirrorRoot, outerTypePage)
+                        .orElseThrow(),
+                DocsSourceRegistry.normalizeDocUrl(outerStorageUrl));
+        assertEquals(
+                DocsSourceRegistry.resolveMirroredPath(mirrorRoot, singletonTypePage)
+                        .orElseThrow(),
+                singletonStorageUrl);
     }
 
     @Test

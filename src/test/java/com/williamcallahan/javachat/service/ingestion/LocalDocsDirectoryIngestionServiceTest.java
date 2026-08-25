@@ -33,7 +33,9 @@ class LocalDocsDirectoryIngestionServiceTest {
         LocalDocsFileIngestionProcessor fileProcessor = mock(LocalDocsFileIngestionProcessor.class);
         LocalIngestionRunStore ingestionRunStore = availableRunStore(configuredDocumentationRoot, selectedSourceRoot);
         when(fileProcessor.processBatch(
-                        selectedSourceRoot.toRealPath(), java.util.List.of(documentationFile.toRealPath())))
+                        org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
+                        org.mockito.ArgumentMatchers.eq(java.util.List.of(documentationFile.toRealPath())),
+                        org.mockito.ArgumentMatchers.anyMap()))
                 .thenReturn(java.util.List.of(LocalDocsFileOutcome.processedFile()));
         LocalDocsDirectoryIngestionService directoryIngestionService = new LocalDocsDirectoryIngestionService(
                 fileProcessor, ingestionRunStore, configuredDocumentationRoot.toString());
@@ -47,7 +49,10 @@ class LocalDocsDirectoryIngestionServiceTest {
                 ingestionOutcome.backlog().lifecycle());
         assertEquals("kotlin", ingestionOutcome.backlog().directory());
         verify(fileProcessor)
-                .processBatch(selectedSourceRoot.toRealPath(), java.util.List.of(documentationFile.toRealPath()));
+                .processBatch(
+                        org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
+                        org.mockito.ArgumentMatchers.eq(java.util.List.of(documentationFile.toRealPath())),
+                        org.mockito.ArgumentMatchers.anyMap());
     }
 
     @Test
@@ -81,7 +86,8 @@ class LocalDocsDirectoryIngestionServiceTest {
         LocalIngestionRunStore ingestionRunStore = availableRunStore(configuredDocumentationRoot, selectedSourceRoot);
         when(fileProcessor.processBatch(
                         org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
-                        org.mockito.ArgumentMatchers.anyList()))
+                        org.mockito.ArgumentMatchers.anyList(),
+                        org.mockito.ArgumentMatchers.anyMap()))
                 .thenReturn(java.util.List.of(LocalDocsFileOutcome.skippedFile()));
         LocalDocsDirectoryIngestionService directoryIngestionService = new LocalDocsDirectoryIngestionService(
                 fileProcessor, ingestionRunStore, configuredDocumentationRoot.toString());
@@ -99,7 +105,8 @@ class LocalDocsDirectoryIngestionServiceTest {
         verify(fileProcessor)
                 .processBatch(
                         org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
-                        inspectedFilesCaptor.capture());
+                        inspectedFilesCaptor.capture(),
+                        org.mockito.ArgumentMatchers.anyMap());
         assertEquals(1, inspectedFilesCaptor.getValue().size());
     }
 
@@ -114,7 +121,8 @@ class LocalDocsDirectoryIngestionServiceTest {
         LocalIngestionRunStore ingestionRunStore = availableRunStore(configuredDocumentationRoot, selectedSourceRoot);
         when(fileProcessor.processBatch(
                         org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
-                        org.mockito.ArgumentMatchers.anyList()))
+                        org.mockito.ArgumentMatchers.anyList(),
+                        org.mockito.ArgumentMatchers.anyMap()))
                 .thenReturn(List.of(LocalDocsFileOutcome.failedFile(
                         new com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure(
                                 "first.html", "html-read", "malformed input"))));
@@ -160,7 +168,8 @@ class LocalDocsDirectoryIngestionServiceTest {
                         org.mockito.ArgumentMatchers.anyString());
         when(fileProcessor.processBatch(
                         org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
-                        org.mockito.ArgumentMatchers.anyList()))
+                        org.mockito.ArgumentMatchers.anyList(),
+                        org.mockito.ArgumentMatchers.anyMap()))
                 .thenReturn(
                         List.of(LocalDocsFileOutcome.failedFile(
                                 new com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure(
@@ -178,7 +187,8 @@ class LocalDocsDirectoryIngestionServiceTest {
         verify(fileProcessor, org.mockito.Mockito.times(2))
                 .processBatch(
                         org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
-                        inspectedFilesCaptor.capture());
+                        inspectedFilesCaptor.capture(),
+                        org.mockito.ArgumentMatchers.anyMap());
         List<Path> expectedFileOrder =
                 List.of(firstDocumentationFile.toRealPath(), secondDocumentationFile.toRealPath());
         assertEquals(expectedFileOrder, inspectedFilesCaptor.getAllValues().get(0));
@@ -205,7 +215,8 @@ class LocalDocsDirectoryIngestionServiceTest {
         LocalIngestionRunStore ingestionRunStore = availableRunStore(configuredDocumentationRoot, selectedSourceRoot);
         when(fileProcessor.processBatch(
                         org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
-                        org.mockito.ArgumentMatchers.anyList()))
+                        org.mockito.ArgumentMatchers.anyList(),
+                        org.mockito.ArgumentMatchers.anyMap()))
                 .thenReturn(List.of(LocalDocsFileOutcome.failedFile(
                         new com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure(
                                 "first.html", "embedding-unavailable", "unavailable"))));
@@ -235,7 +246,8 @@ class LocalDocsDirectoryIngestionServiceTest {
         LocalIngestionRunStore ingestionRunStore = availableRunStore(configuredDocumentationRoot, selectedSourceRoot);
         when(fileProcessor.processBatch(
                         org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
-                        org.mockito.ArgumentMatchers.anyList()))
+                        org.mockito.ArgumentMatchers.anyList(),
+                        org.mockito.ArgumentMatchers.anyMap()))
                 .thenReturn(List.of(LocalDocsFileOutcome.skippedFile()));
         when(ingestionRunStore.read(
                         org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
@@ -255,7 +267,8 @@ class LocalDocsDirectoryIngestionServiceTest {
         verify(fileProcessor, org.mockito.Mockito.times(2))
                 .processBatch(
                         org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
-                        inspectedFilesCaptor.capture());
+                        inspectedFilesCaptor.capture(),
+                        org.mockito.ArgumentMatchers.anyMap());
         assertEquals(
                 List.of(firstDocumentationFile.toRealPath()),
                 inspectedFilesCaptor.getAllValues().get(0));

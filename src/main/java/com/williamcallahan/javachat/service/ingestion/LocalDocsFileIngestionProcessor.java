@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service.ingestion;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import com.williamcallahan.javachat.config.DocsSourceRegistry.MirroredIngestionIdentity;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.service.ChunkProcessingService;
 import com.williamcallahan.javachat.service.DocumentFactory;
@@ -18,10 +19,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 import org.jsoup.Jsoup;
 import org.slf4j.Logger;
@@ -89,7 +93,9 @@ public class LocalDocsFileIngestionProcessor {
      * @return processing outcome indicating processed/failed/skipped
      */
     public LocalDocsFileOutcome process(Path root, Path file) {
-        return completePreparation(prepare(root, file));
+        Map<Path, MirroredIngestionIdentity> ingestionIdentities =
+                DocsSourceRegistry.resolveMirroredIngestionIdentities(root, List.of(file));
+        return completePreparation(prepare(root, file, ingestionIdentities));
     }
 
     /**
@@ -104,14 +110,21 @@ public class LocalDocsFileIngestionProcessor {
      * @return ordered outcomes through the first failure
      */
     public List<LocalDocsFileOutcome> processBatch(Path root, List<Path> files) {
+        return processBatch(root, files, DocsSourceRegistry.resolveMirroredIngestionIdentities(root, files));
+    }
+
+    List<LocalDocsFileOutcome> processBatch(
+            Path root, List<Path> files, Map<Path, MirroredIngestionIdentity> ingestionIdentities) {
         Objects.requireNonNull(root, "root");
         List<Path> requiredFiles = List.copyOf(Objects.requireNonNull(files, "files"));
+        Map<Path, MirroredIngestionIdentity> requiredIngestionIdentities =
+                Map.copyOf(Objects.requireNonNull(ingestionIdentities, "ingestionIdentities"));
         List<LocalDocsFileOutcome> outcomes = new ArrayList<>(requiredFiles.size());
         List<DocumentProcessingRequest> pendingNewFiles = new ArrayList<>();
         int pendingDocumentCount = 0;
 
         for (Path file : requiredFiles) {
-            FilePreparation preparation = prepare(root, file);
+            FilePreparation preparation = prepare(root, file, requiredIngestionIdentities);
             if (preparation instanceof DeferredFilePreparation deferredPreparation) {
                 if (!flushNewFileBatch(pendingNewFiles, outcomes)) {
                     return List.copyOf(outcomes);
@@ -166,7 +179,7 @@ public class LocalDocsFileIngestionProcessor {
         return List.copyOf(outcomes);
     }
 
-    private FilePreparation prepare(Path root, Path file) {
+    private FilePreparation prepare(Path root, Path file, Map<Path, MirroredIngestionIdentity> ingestionIdentities) {
         long fileStartMillis = System.currentTimeMillis();
         Path fileNamePath = file.getFileName();
         if (fileNamePath == null) {
@@ -175,7 +188,10 @@ public class LocalDocsFileIngestionProcessor {
         }
 
         String fileName = fileNamePath.toString().toLowerCase(Locale.ROOT);
-        String url = mapLocalPathToUrl(root, file);
+        MirroredIngestionIdentity ingestionIdentity = Optional.ofNullable(
+                        ingestionIdentities.get(file.toAbsolutePath().normalize()))
+                .orElseGet(() -> fallbackIngestionIdentity(root, file));
+        String url = ingestionIdentity.storageUrl();
 
         final long fileSizeBytes;
         final long lastModifiedMillis;
@@ -203,8 +219,13 @@ public class LocalDocsFileIngestionProcessor {
                 provenance.docType());
 
         final Optional<FileIngestionRecord> priorIngestionRecord;
+        final Optional<LegacyCitationIdentity> legacyCitationIdentity;
         try {
             priorIngestionRecord = storage.fileMarkers().readFileIngestionRecord(url);
+            legacyCitationIdentity = ingestionIdentity
+                    .legacyCitationUrl()
+                    .map(legacyCitationUrl -> new LegacyCitationIdentity(
+                            legacyCitationUrl, storage.fileMarkers().readFileIngestionRecord(legacyCitationUrl)));
         } catch (RuntimeException markerReadException) {
             return terminal(LocalDocsFileOutcome.failedFile(
                     failureFactory.failure(file, "file-marker-read", markerReadException)));
@@ -213,6 +234,7 @@ public class LocalDocsFileIngestionProcessor {
         MarkerContext markerContext = new MarkerContext(
                 file,
                 url,
+                legacyCitationIdentity,
                 fileSizeBytes,
                 lastModifiedMillis,
                 provenanceAwareIngestionFingerprint,
@@ -460,12 +482,24 @@ public class LocalDocsFileIngestionProcessor {
     private record MarkerContext(
             Path file,
             String url,
+            Optional<LegacyCitationIdentity> legacyCitationIdentity,
             long fileSizeBytes,
             long lastModifiedMillis,
             String ingestionFingerprint,
             QdrantCollectionKind collectionKind,
             String collectionName,
-            Optional<FileIngestionRecord> priorIngestionRecord) {}
+            Optional<FileIngestionRecord> priorIngestionRecord) {
+        private MarkerContext {
+            legacyCitationIdentity = Objects.requireNonNull(legacyCitationIdentity, "legacyCitationIdentity");
+        }
+    }
+
+    private record LegacyCitationIdentity(String url, Optional<FileIngestionRecord> ingestionRecord) {
+        private LegacyCitationIdentity {
+            url = Objects.requireNonNull(url, "url");
+            ingestionRecord = Objects.requireNonNull(ingestionRecord, "ingestionRecord");
+        }
+    }
 
     private record ReindexDecision(boolean requiresFullReindex, Optional<LocalDocsFileOutcome> terminalOutcome) {
 
@@ -579,8 +613,9 @@ public class LocalDocsFileIngestionProcessor {
             return false;
         }
 
+        Set<String> prunedLegacyCitationUrls = new HashSet<>();
         for (DocumentProcessingRequest processingRequest : preparedFiles) {
-            LocalDocsFileOutcome outcome = completeDocumentsAfterStorage(processingRequest);
+            LocalDocsFileOutcome outcome = completeDocumentsAfterStorage(processingRequest, prunedLegacyCitationUrls);
             outcomes.add(outcome);
             if (outcome.failure().isPresent()) {
                 return false;
@@ -613,8 +648,22 @@ public class LocalDocsFileIngestionProcessor {
     }
 
     private LocalDocsFileOutcome completeDocumentsAfterStorage(DocumentProcessingRequest processingRequest) {
+        return completeDocumentsAfterStorage(processingRequest, new HashSet<>());
+    }
+
+    private LocalDocsFileOutcome completeDocumentsAfterStorage(
+            DocumentProcessingRequest processingRequest, Set<String> prunedLegacyCitationUrls) {
         MarkerContext markerContext = processingRequest.markerContext();
         List<Document> documents = processingRequest.documents();
+        try {
+            pruneLegacyCitationIdentity(markerContext, prunedLegacyCitationUrls);
+        } catch (IOException legacyCleanupException) {
+            return LocalDocsFileOutcome.failedFile(
+                    failureFactory.failure(markerContext.file(), "prune-legacy-local", legacyCleanupException));
+        } catch (RuntimeException legacyCleanupException) {
+            return LocalDocsFileOutcome.failedFile(
+                    failureFactory.failure(markerContext.file(), "prune-legacy-runtime", legacyCleanupException));
+        }
         if (processingRequest.requiresFullReindex()) {
             try {
                 ingestedFilePruneService.pruneObsoleteLocalStateAfterReplacement(
@@ -679,6 +728,7 @@ public class LocalDocsFileIngestionProcessor {
 
     private LocalDocsFileOutcome processExcludedPage(MarkerContext markerContext, boolean requiresFullReindex) {
         try {
+            pruneLegacyCitationIdentity(markerContext);
             if (requiresFullReindex) {
                 storage.hybridVector().deleteByUrl(markerContext.collectionKind(), markerContext.url());
                 ingestedFilePruneService.pruneObsoleteLocalStateAfterReplacement(
@@ -740,6 +790,7 @@ public class LocalDocsFileIngestionProcessor {
     private LocalDocsFileOutcome markPreviouslyIngestedFile(
             MarkerContext markerContext, List<String> existingChunkHashes) {
         try {
+            pruneLegacyCitationIdentity(markerContext);
             markFileIngested(
                     markerContext.url(),
                     new FileIngestionRecord(
@@ -749,6 +800,9 @@ public class LocalDocsFileIngestionProcessor {
                             LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
                             markerContext.collectionName(),
                             existingChunkHashes));
+        } catch (IOException markerTransitionException) {
+            return LocalDocsFileOutcome.failedFile(
+                    failureFactory.failure(markerContext.file(), "prune-legacy-local", markerTransitionException));
         } catch (RuntimeException markerTransitionException) {
             return LocalDocsFileOutcome.failedFile(
                     failureFactory.failure(markerContext.file(), "marker-transition", markerTransitionException));
@@ -836,11 +890,32 @@ public class LocalDocsFileIngestionProcessor {
         }
     }
 
-    private String mapLocalPathToUrl(final Path root, final Path file) {
+    private MirroredIngestionIdentity fallbackIngestionIdentity(final Path root, final Path file) {
         final String absolutePath = file.toAbsolutePath().toString().replace('\\', '/');
-        return DocsSourceRegistry.resolveMirroredPath(root, file)
+        String storageUrl = DocsSourceRegistry.resolveMirroredPath(root, file)
                 .or(() -> DocsSourceRegistry.resolveLocalPath(absolutePath))
                 .orElse(FILE_URL_PREFIX + absolutePath);
+        return new MirroredIngestionIdentity(storageUrl, Optional.empty());
+    }
+
+    private void pruneLegacyCitationIdentity(MarkerContext markerContext) throws IOException {
+        pruneLegacyCitationIdentity(markerContext, new HashSet<>());
+    }
+
+    private void pruneLegacyCitationIdentity(MarkerContext markerContext, Set<String> prunedLegacyCitationUrls)
+            throws IOException {
+        if (markerContext.legacyCitationIdentity().isEmpty()) {
+            return;
+        }
+        LegacyCitationIdentity legacyIdentity =
+                markerContext.legacyCitationIdentity().orElseThrow();
+        if (!prunedLegacyCitationUrls.add(legacyIdentity.url())) {
+            return;
+        }
+        ingestedFilePruneService.pruneCollectionFileStrict(
+                markerContext.collectionName(),
+                legacyIdentity.url(),
+                legacyIdentity.ingestionRecord().orElse(null));
     }
 
     private String provenanceAwareIngestionFingerprint(String fileContentFingerprint, IngestionProvenance provenance) {

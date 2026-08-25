@@ -1,7 +1,9 @@
 package com.williamcallahan.javachat.config;
 
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,6 +38,7 @@ public final class DocsSourceRegistry {
     private static final String PATH_SEPARATOR_TEXT = "/";
     private static final String GITHUB_BLOB_PATH = "/blob/";
     private static final String GITHUB_TREE_PATH = "/tree/";
+    private static final String INGESTION_IDENTITY_QUERY_PREFIX = "?java-chat-mirror=";
     private static final String SPRING_FRAMEWORK_MARKER = "spring-framework";
     private static final String SPRING_FRAMEWORK_LEGACY_DUPLICATE_JAVADOC_PREFIX =
             "docs/current/api/current/javadoc-api/";
@@ -685,6 +688,13 @@ public final class DocsSourceRegistry {
         }
     }
 
+    private static String ingestionIdentityQuery(String mirroredRelativePath) {
+        String encodedMirrorPath = Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(mirroredRelativePath.getBytes(StandardCharsets.UTF_8));
+        return INGESTION_IDENTITY_QUERY_PREFIX + encodedMirrorPath;
+    }
+
     private static Optional<String> resolveJavaSourceCitation(String sourceBaseUrl, String mirroredRelativePath) {
         if (mirroredRelativePath == null || mirroredRelativePath.isBlank()) {
             return Optional.empty();
@@ -742,6 +752,55 @@ public final class DocsSourceRegistry {
                 .flatMap(source -> new CitationRoute(source.citationBaseUrl(), source.citationPathStyle())
                         .resolveCitationUrl(relativeDocumentPath))
                 .map(DocsSourceRegistry::canonicalizeHttpDocUrl);
+    }
+
+    /**
+     * Resolves per-file storage identities, disambiguating only canonical URLs shared by multiple mirror files.
+     */
+    public static Map<Path, MirroredIngestionIdentity> resolveMirroredIngestionIdentities(
+            Path mirrorRoot, List<Path> documentFiles) {
+        Objects.requireNonNull(mirrorRoot, "mirrorRoot");
+        List<Path> requiredDocumentFiles = List.copyOf(Objects.requireNonNull(documentFiles, "documentFiles"));
+        Path absoluteMirrorRoot = mirrorRoot.toAbsolutePath().normalize();
+        Map<Path, String> canonicalUrlsByFile = new LinkedHashMap<>();
+        Map<String, Integer> canonicalUrlCounts = new LinkedHashMap<>();
+        for (Path documentFile : requiredDocumentFiles) {
+            Path absoluteDocumentFile = documentFile.toAbsolutePath().normalize();
+            resolveMirroredPath(absoluteMirrorRoot, absoluteDocumentFile).ifPresent(canonicalUrl -> {
+                canonicalUrlsByFile.put(absoluteDocumentFile, canonicalUrl);
+                canonicalUrlCounts.merge(canonicalUrl, 1, Integer::sum);
+            });
+        }
+
+        Map<String, Path> legacyIdentityOwners = new LinkedHashMap<>();
+        Map<Path, MirroredIngestionIdentity> ingestionIdentities = new LinkedHashMap<>();
+        canonicalUrlsByFile.forEach((documentFile, canonicalUrl) -> {
+            boolean citationCollision = canonicalUrlCounts.getOrDefault(canonicalUrl, 0) > 1;
+            if (!citationCollision) {
+                ingestionIdentities.put(documentFile, new MirroredIngestionIdentity(canonicalUrl, Optional.empty()));
+                return;
+            }
+            String mirroredRelativePath = absoluteMirrorRoot
+                    .relativize(documentFile)
+                    .toString()
+                    .replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR);
+            Path legacyIdentityOwner = legacyIdentityOwners.computeIfAbsent(canonicalUrl, ignoredUrl -> documentFile);
+            Optional<String> legacyCitationUrl =
+                    legacyIdentityOwner.equals(documentFile) ? Optional.of(canonicalUrl) : Optional.empty();
+            ingestionIdentities.put(
+                    documentFile,
+                    new MirroredIngestionIdentity(
+                            canonicalUrl + ingestionIdentityQuery(mirroredRelativePath), legacyCitationUrl));
+        });
+        return Map.copyOf(ingestionIdentities);
+    }
+
+    /** Separates collision-free vector identity from the canonical URL exposed as a citation. */
+    public record MirroredIngestionIdentity(String storageUrl, Optional<String> legacyCitationUrl) {
+        public MirroredIngestionIdentity {
+            Objects.requireNonNull(storageUrl, "storageUrl");
+            legacyCitationUrl = Objects.requireNonNull(legacyCitationUrl, "legacyCitationUrl");
+        }
     }
 
     private static boolean pathEndsWith(String normalizedRoot, String relativeMirrorPath) {
@@ -1056,7 +1115,7 @@ public final class DocsSourceRegistry {
         if (rawUrl == null || rawUrl.isBlank()) {
             return rawUrl;
         }
-        String trimmedUrl = rawUrl.trim();
+        String trimmedUrl = stripIngestionIdentity(rawUrl.trim());
         if (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) {
             return canonicalizeHttpDocUrl(trimmedUrl);
         }
@@ -1076,5 +1135,10 @@ public final class DocsSourceRegistry {
         return mapLocalPrefixToRemote(localPath)
                 .map(DocsSourceRegistry::canonicalizeHttpDocUrl)
                 .orElse(REDACTED_LOCAL_URL);
+    }
+
+    private static String stripIngestionIdentity(String url) {
+        int identityStart = url.indexOf(INGESTION_IDENTITY_QUERY_PREFIX);
+        return identityStart < 0 ? url : url.substring(0, identityStart);
     }
 }

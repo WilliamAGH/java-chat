@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -43,6 +44,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -112,6 +114,94 @@ class LocalDocsFileIngestionProcessorTest {
                 .replaceUrlDocuments(any(QdrantCollectionKind.class), anyString(), any());
         verify(ingestionFixture.fileIngestionMarkerStore, times(DOCUMENT_COUNT_SPANNING_TWO_EMBEDDING_BATCHES))
                 .markFileIngested(anyString(), any(FileIngestionRecord.class));
+    }
+
+    @Test
+    void shouldKeepDistinctIngestionStateForJavaPagesThatShareOneCitation(@TempDir Path temporaryDirectory)
+            throws IOException {
+        DocumentationSource javaSourceDocumentation = DocsSourceRegistry.documentationSources().stream()
+                .filter(documentationSource -> documentationSource.citationPathStyle()
+                        == DocsSourceRegistry.DocumentationCitationPathStyle.JAVA_SOURCE)
+                .findFirst()
+                .orElseThrow();
+        Path localDocsRoot = temporaryDirectory.resolve("data/docs");
+        Path sourceMirrorRoot = localDocsRoot.resolve(javaSourceDocumentation.relativeMirrorPath());
+        Path outerTypePage = sourceMirrorRoot.resolve("com/fasterxml/jackson/databind/ObjectMapper.html");
+        Path nestedTypePage =
+                sourceMirrorRoot.resolve("com/fasterxml/jackson/databind/ObjectMapper.DefaultTyping.html");
+        Files.createDirectories(Objects.requireNonNull(outerTypePage.getParent(), "outerTypePage parent"));
+        Files.writeString(outerTypePage, javaApiHtml(), StandardCharsets.UTF_8);
+        Files.writeString(nestedTypePage, javaApiHtml(), StandardCharsets.UTF_8);
+
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        Map<String, FileIngestionRecord> ingestionRecords = new HashMap<>();
+        String legacyCitationUrl = DocsSourceRegistry.resolveMirroredPath(sourceMirrorRoot, outerTypePage)
+                .orElseThrow();
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(anyString()))
+                .thenAnswer(invocation -> Optional.ofNullable(ingestionRecords.get(invocation.getArgument(0))));
+        doAnswer(invocation -> {
+                    ingestionRecords.put(invocation.getArgument(0), invocation.getArgument(1));
+                    return null;
+                })
+                .when(ingestionFixture.fileIngestionMarkerStore)
+                .markFileIngested(anyString(), any(FileIngestionRecord.class));
+        doAnswer(invocation -> {
+                    ingestionRecords.remove(invocation.getArgument(1, String.class));
+                    return null;
+                })
+                .when(ingestionFixture.ingestedFilePruneService)
+                .pruneCollectionFileStrict(anyString(), anyString(), any());
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        when(ingestionFixture.chunkProcessingService.processAndStoreChunks(
+                        anyString(), anyString(), anyString(), anyString()))
+                .thenAnswer(invocation -> {
+                    String sourceUrl = invocation.getArgument(1, String.class);
+                    Document indexedDocument = new Document(sourceUrl, "Documentation body", new HashMap<>());
+                    return new ChunkProcessingService.ChunkProcessingOutcome(
+                            List.of(indexedDocument), List.of(sourceUrl + "-hash"), 1, 0);
+                });
+
+        List<LocalDocsFileOutcome> outcomes = ingestionFixture
+                .ingestionProcessor()
+                .processBatch(sourceMirrorRoot, List.of(outerTypePage, nestedTypePage));
+
+        assertEquals(2, outcomes.size());
+        assertTrue(outcomes.stream().allMatch(LocalDocsFileOutcome::processed));
+        ArgumentCaptor<String> markerIdentityCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ingestionFixture.fileIngestionMarkerStore, times(2))
+                .markFileIngested(markerIdentityCaptor.capture(), any(FileIngestionRecord.class));
+        List<String> markerIdentities = markerIdentityCaptor.getAllValues();
+        assertNotEquals(markerIdentities.getFirst(), markerIdentities.getLast());
+        assertEquals(
+                DocsSourceRegistry.normalizeDocUrl(markerIdentities.getFirst()),
+                DocsSourceRegistry.normalizeDocUrl(markerIdentities.getLast()));
+        verify(ingestionFixture.ingestedFilePruneService)
+                .pruneCollectionFileStrict(eq("documentation"), eq(legacyCitationUrl), isNull());
+
+        clearInvocations(
+                ingestionFixture.chunkProcessingService,
+                ingestionFixture.hybridVectorService,
+                ingestionFixture.fileIngestionMarkerStore,
+                ingestionFixture.ingestedFilePruneService);
+        when(ingestionFixture.hybridVectorService.hasExactPointIdsForUrl(
+                        any(QdrantCollectionKind.class), anyString(), any()))
+                .thenReturn(true);
+
+        List<LocalDocsFileOutcome> repeatedOutcomes = ingestionFixture
+                .ingestionProcessor()
+                .processBatch(sourceMirrorRoot, List.of(outerTypePage, nestedTypePage));
+
+        assertEquals(2, repeatedOutcomes.size());
+        assertTrue(repeatedOutcomes.stream()
+                .allMatch(outcome -> !outcome.processed() && outcome.failure().isEmpty()));
+        verify(ingestionFixture.chunkProcessingService, never())
+                .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
+        verify(ingestionFixture.hybridVectorService, never()).upsert(any(QdrantCollectionKind.class), any());
+        verify(ingestionFixture.hybridVectorService, never())
+                .replaceUrlDocuments(any(QdrantCollectionKind.class), anyString(), any());
+        verify(ingestionFixture.ingestedFilePruneService, never())
+                .pruneCollectionFileStrict(anyString(), anyString(), any());
+        verify(ingestionFixture.fileIngestionMarkerStore, never()).markFileIngested(anyString(), any());
     }
 
     @Test

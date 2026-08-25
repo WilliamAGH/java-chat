@@ -145,13 +145,12 @@ public class IngestedFilePruneService {
 
     private List<String> resolveChunkHashesForPrune(String sourceUrl, FileIngestionRecord previousFileRecord)
             throws IOException {
+        Set<String> staleChunkHashes = new LinkedHashSet<>();
         if (previousFileRecord != null) {
-            List<String> previousHashes = previousFileRecord.chunkHashes();
-            if (previousHashes != null && !previousHashes.isEmpty()) {
-                return previousHashes;
-            }
+            staleChunkHashes.addAll(previousFileRecord.chunkHashes());
         }
-        return reconstructChunkHashesFromParsedChunks(sourceUrl);
+        staleChunkHashes.addAll(reconstructChunkHashesFromParsedChunks(sourceUrl));
+        return List.copyOf(staleChunkHashes);
     }
 
     private List<String> reconstructChunkHashesFromParsedChunks(String sourceUrl) throws IOException {
