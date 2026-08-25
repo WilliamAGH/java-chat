@@ -17,6 +17,7 @@ alwaysApply: true
 
 - [ZA1a-c] Zero Tolerance Policy (zero assumptions, validation workflow, forbidden practices)
 - [GT1a-p] Git, history safety, hooks/signing, dirty paths, worktrees, and clean commits
+- [DP1a-e] Deployment ownership (Dokploy only; dev/main push routing; no Coolify triggers)
 - [CC1a-d] Clean Code & DDD (Mandatory)
 - [SS1a-j] Direct Ownership & Boundary Locality
 - [ID1a-d] Idiomatic Patterns & Defaults
@@ -63,6 +64,14 @@ alwaysApply: true
 - [GT1n] **Dirty-Path Integrity**: Never rewrite, restore, replace, regenerate, or copy a dirty path from `HEAD`, the index, cached copies, an alternate worktree, or a temporary clone. Read the live path and apply the smallest in-place edit.
 - [GT1o] **Writable Agent Root**: Each worktree has exactly one writable agent root. All other agents remain read-only in that worktree or use a distinct worktree; never share write authority.
 - [GT1p] **Integration Branch**: `dev` is the integration branch; task work merges to and pushes on `dev`.
+
+## [DP1] Deployment Ownership
+
+- [DP1a] **Dokploy Is The Sole Deployment Owner**: Deploy Java Chat only through the existing Dokploy applications. Never create, retain, or invoke a Coolify application, service, container, webhook, deploy hook, or API call for this repository.
+- [DP1b] **Branch Routing**: Configure Dokploy push auto-deploy so `dev` owns `dev.javachat.ai` and `main` owns `javachat.ai` plus `www.javachat.ai`. Never route production deployment from `prod` or another branch.
+- [DP1c] **No Push-To-Coolify Path**: Never add or retain a GitHub Actions workflow, repository webhook, Git hook, script, secret, variable, or external integration that sends a repository push to Coolify.
+- [DP1d] **Retire Stale Owners**: Treat any Java Chat Coolify resource as an incident-grade stale deployment owner. Stop and delete its exact application and containers after proving the matching Dokploy application is healthy and receiving the intended domain.
+- [DP1e] **Release Verification**: Before completing a release, prove the GitHub repository has zero Coolify-targeting webhooks, Coolify has zero Java Chat applications or containers, both Dokploy applications use push auto-deploy on their required branches, and all three public health endpoints return `UP`.
 
 ## [CC1] Clean Code & DDD (Mandatory)
 
