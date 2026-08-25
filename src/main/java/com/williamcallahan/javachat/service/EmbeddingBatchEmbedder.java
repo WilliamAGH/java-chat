@@ -4,10 +4,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.IntStream;
 import org.springframework.ai.document.Document;
 
@@ -49,23 +49,22 @@ final class EmbeddingBatchEmbedder {
                 int currentWaveStartIndex = requestWaveStartIndex;
                 int requestWaveEndIndex =
                         Math.min(requestWaveStartIndex + MAX_CONCURRENT_EMBEDDING_REQUESTS, embeddingRequestCount);
-                List<CompletableFuture<List<float[]>>> embeddingWave = IntStream.range(
-                                currentWaveStartIndex, requestWaveEndIndex)
-                        .mapToObj(requestIndex -> CompletableFuture.supplyAsync(
-                                () -> embedRequest(
-                                        embeddingClient, documents, requestIndex, expectedEmbeddingDimensions),
-                                embeddingExecutor))
+                List<Future<List<float[]>>> embeddingWave = IntStream.range(currentWaveStartIndex, requestWaveEndIndex)
+                        .mapToObj(requestIndex -> embeddingExecutor.submit(() ->
+                                embedRequest(embeddingClient, documents, requestIndex, expectedEmbeddingDimensions)))
                         .toList();
-                for (CompletableFuture<List<float[]>> embeddingRequest : embeddingWave) {
+                for (Future<List<float[]>> embeddingRequest : embeddingWave) {
                     try {
                         allEmbeddings.addAll(embeddingRequest.get());
                     } catch (InterruptedException interruptedEmbeddingWave) {
                         embeddingWave.forEach(remainingRequest -> remainingRequest.cancel(true));
+                        embeddingExecutor.shutdownNow();
                         Thread.currentThread().interrupt();
                         throw new EmbeddingServiceUnavailableException(
                                 "Embedding request wave was interrupted", interruptedEmbeddingWave);
                     } catch (ExecutionException embeddingCompletionFailure) {
                         embeddingWave.forEach(remainingRequest -> remainingRequest.cancel(true));
+                        embeddingExecutor.shutdownNow();
                         if (embeddingCompletionFailure.getCause()
                                 instanceof EmbeddingServiceUnavailableException embeddingFailure) {
                             throw embeddingFailure;

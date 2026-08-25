@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.stream.IntStream;
@@ -193,6 +194,42 @@ class EmbeddingBatchEmbedderTest {
         EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1));
 
         assertEquals(1, embeddingClient.requestedTextBatches.size());
+    }
+
+    @Test
+    void interruptsBlockedSiblingWhenOneBatchFails() {
+        CountDownLatch blockedRequestStarted = new CountDownLatch(1);
+        AtomicBoolean blockedRequestInterrupted = new AtomicBoolean();
+        RecordingEmbeddingClient embeddingClient =
+                new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
+                    int firstDocumentIndex = documentIndexFromText(textBatch.getFirst());
+                    if (firstDocumentIndex == 0) {
+                        try {
+                            assertTrue(blockedRequestStarted.await(5, TimeUnit.SECONDS));
+                        } catch (InterruptedException interruptedWait) {
+                            Thread.currentThread().interrupt();
+                            throw new AssertionError(interruptedWait);
+                        }
+                        throw new EmbeddingServiceUnavailableException("first batch failed");
+                    }
+                    blockedRequestStarted.countDown();
+                    try {
+                        Thread.sleep(TimeUnit.MINUTES.toMillis(1));
+                        throw new AssertionError("blocked sibling was not interrupted");
+                    } catch (InterruptedException expectedInterruption) {
+                        blockedRequestInterrupted.set(true);
+                        Thread.currentThread().interrupt();
+                        throw new EmbeddingServiceUnavailableException(
+                                "blocked sibling interrupted", expectedInterruption);
+                    }
+                });
+
+        assertThrows(
+                EmbeddingServiceUnavailableException.class,
+                () -> EmbeddingBatchEmbedder.embedDocuments(
+                        embeddingClient, sequentialDocuments(EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE * 2)));
+
+        assertTrue(blockedRequestInterrupted.get());
     }
 
     @Test
