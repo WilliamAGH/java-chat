@@ -4,6 +4,7 @@ import com.williamcallahan.javachat.application.ingestion.FileLimit;
 import com.williamcallahan.javachat.application.ingestion.IngestionAlreadyRunningException;
 import com.williamcallahan.javachat.application.ingestion.LocalDocumentationIngestionUseCase;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import com.williamcallahan.javachat.config.QdrantIndexInitializer;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
 import com.williamcallahan.javachat.service.ProgressTracker;
@@ -151,8 +152,11 @@ public class DocumentProcessor {
      * @return the command line runner that performs ingestion
      */
     @Bean
-    public CommandLineRunner processDocuments() {
-        return this::runDocumentProcessing;
+    public CommandLineRunner processDocuments(QdrantIndexInitializer qdrantIndexInitializer) {
+        return commandLineArguments -> {
+            qdrantIndexInitializer.requireCollectionsAndIndexesReady();
+            runDocumentProcessing(commandLineArguments);
+        };
     }
 
     private void runDocumentProcessing(final String... ignoredArgs) {

@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-Generates a deterministic URL seed list for Oracle Javadoc sites (Java SE / JDK API docs).
+Generates a deterministic URL seed list for standard Javadoc sites.
 
 Why this exists:
-- Oracle Javadoc is large and recursive crawls can stall or miss portions of the graph.
+- Javadoc sites are large and recursive crawls can stall or miss portions of the graph.
 - The Javadoc search index files contain an authoritative list of packages/types.
-- Seeding wget with explicit URLs makes repeated runs incremental and complete.
+- Seeding Wget2 with explicit URLs makes repeated runs incremental and complete.
 """
 
 from __future__ import annotations
 
 import argparse
+import html
+import html.parser
 import json
 import re
 import sys
@@ -32,6 +34,29 @@ class JavadocIndexUrls:
 
     def index_file_1(self) -> str:
         return urllib.parse.urljoin(self.base_url, "index-files/index-1.html")
+
+
+class JavadocLinkParser(html.parser.HTMLParser):
+    """Collects Javadoc anchor targets without interpreting HTML through regular expressions."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.link_targets: list[str] = []
+
+    def handle_starttag(self, tag: str, attributes: list[tuple[str, str | None]]) -> None:
+        if tag.casefold() != "a":
+            return
+        for attribute_name, attribute_text in attributes:
+            if attribute_name.casefold() == "href" and attribute_text is not None:
+                self.link_targets.append(attribute_text)
+
+
+def parse_link_targets(index_html: str) -> list[str]:
+    """Returns anchor targets from one Javadoc page."""
+    link_parser = JavadocLinkParser()
+    link_parser.feed(index_html)
+    link_parser.close()
+    return link_parser.link_targets
 
 
 def fetch_text(url: str) -> str:
@@ -76,6 +101,12 @@ def package_path(package_name: str) -> str:
     return package_name.replace(".", "/")
 
 
+def is_java_package_name(package_name: object) -> bool:
+    return isinstance(package_name, str) and re.fullmatch(
+        r"[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*", package_name
+    ) is not None
+
+
 def url_join(base_url: str, *parts: str) -> str:
     path = "/".join(part.strip("/") for part in parts if part is not None)
     return urllib.parse.urljoin(base_url, path + ("" if path.endswith(".html") else ""))
@@ -89,9 +120,13 @@ def encode_url(url: str) -> str:
 
 
 def parse_index_files(index_1_html: str) -> set[str]:
-    # Collect all "index-N.html" references from index-1.
-    matches = set(re.findall(r'href="(index-[0-9]+\\.html)"', index_1_html))
-    return {m for m in matches if m.startswith("index-") and m.endswith(".html")}
+    return {
+        link_target
+        for link_target in parse_link_targets(index_1_html)
+        if link_target.startswith("index-")
+        and link_target.removeprefix("index-").removesuffix(".html").isdigit()
+        and link_target.endswith(".html")
+    }
 
 
 def root_pages_for_release(base_url: str) -> tuple[str, ...]:
@@ -116,6 +151,17 @@ def root_pages_for_release(base_url: str) -> tuple[str, ...]:
     return common_root_pages + ("external-specs.html", "restricted-list.html", "search-tags.html")
 
 
+def root_pages_from_index(index_html: str) -> tuple[str, ...]:
+    """Returns root HTML pages linked by a non-JDK standard-doclet index."""
+    root_pages: set[str] = set()
+    for link_target in parse_link_targets(index_html):
+        linked_page = link_target.split("#", 1)[0]
+        if linked_page.endswith(".html") and "/" not in linked_page:
+            root_pages.add(linked_page)
+    root_pages.add("index.html")
+    return tuple(sorted(root_pages))
+
+
 def generate_seed_urls(base_url: str) -> list[str]:
     normalized_base = base_url if base_url.endswith("/") else base_url + "/"
     index_urls = JavadocIndexUrls(normalized_base)
@@ -128,9 +174,14 @@ def generate_seed_urls(base_url: str) -> list[str]:
     type_index = parse_assigned_json_array(type_js, "typeSearchIndex")
 
     package_to_module = build_package_to_module(package_index)
+    packages = {
+        package_entry["l"]
+        for package_entry in package_index
+        if is_java_package_name(package_entry.get("l"))
+    }
     modules = sorted(set(package_to_module.values()))
     print(
-        f"parsed: modules={len(modules)} packages={len(package_to_module)} types={len(type_index)}",
+        f"parsed: modules={len(modules)} packages={len(packages)} types={len(type_index)}",
         file=sys.stderr,
     )
 
@@ -138,7 +189,15 @@ def generate_seed_urls(base_url: str) -> list[str]:
 
     # Root pages vary with the standard-doclet release. Legacy allclasses.html is
     # not emitted by the modern releases governed by this repository.
-    for page in root_pages_for_release(normalized_base):
+    oracle_release_match = re.search(
+        r"/java/javase/([0-9]+)/docs/api/?$", urllib.parse.urlsplit(normalized_base).path
+    )
+    if oracle_release_match is None:
+        root_index_html = fetch_text(urllib.parse.urljoin(normalized_base, "index.html"))
+        root_pages = root_pages_from_index(root_index_html)
+    else:
+        root_pages = root_pages_for_release(normalized_base)
+    for page in root_pages:
         urls.add(urllib.parse.urljoin(normalized_base, page))
 
     # Index pages (A..Z.._).
@@ -152,31 +211,32 @@ def generate_seed_urls(base_url: str) -> list[str]:
         urls.add(urllib.parse.urljoin(normalized_base, f"{module}/module-summary.html"))
 
     # Package pages + trees.
-    for package, module in package_to_module.items():
-        package_dir = f"{module}/{package_path(package)}"
+    for package in packages:
+        module = package_to_module.get(package)
+        package_dir = f"{module}/{package_path(package)}" if module else package_path(package)
         urls.add(urllib.parse.urljoin(normalized_base, f"{package_dir}/package-summary.html"))
         urls.add(urllib.parse.urljoin(normalized_base, f"{package_dir}/package-tree.html"))
         urls.add(urllib.parse.urljoin(normalized_base, f"{package_dir}/package-use.html"))
 
     # Type pages.
-    missing_modules = 0
+    missing_packages = 0
     for entry in type_index:
         package = entry.get("p")
         type_name = entry.get("l")
         if not isinstance(package, str) or not isinstance(type_name, str) or not package or not type_name:
             continue
-        module = package_to_module.get(package)
-        if not module:
-            missing_modules += 1
+        if package not in packages:
+            missing_packages += 1
             continue
+        module = package_to_module.get(package)
         type_file = f"{type_name}.html"
-        type_dir = f"{module}/{package_path(package)}"
+        type_dir = f"{module}/{package_path(package)}" if module else package_path(package)
         urls.add(urllib.parse.urljoin(normalized_base, f"{type_dir}/{type_file}"))
 
-    if missing_modules > 0:
+    if missing_packages > 0:
         # Keep output deterministic but surface the warning on stderr.
         print(
-            f"warning: {missing_modules} types had packages not found in packageSearchIndex",
+            f"warning: {missing_packages} types had packages not found in packageSearchIndex",
             file=sys.stderr,
         )
 

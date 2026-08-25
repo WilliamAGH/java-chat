@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -55,6 +56,61 @@ class SystemPromptConfigTest {
                 () -> assertTrue(corePrompt.contains(SystemPromptConfig.VIRTUAL_THREAD_SEMANTICS_CLAUSE)),
                 () -> assertTrue(corePrompt.contains("that is not pinning")),
                 () -> assertTrue(corePrompt.contains("For Java 24 and later")));
+    }
+
+    @Test
+    void shouldRequireExactlyOneTerminalOutcomePerGeneratedCandidate() {
+        String corePrompt = systemPromptConfig.getCoreSystemPrompt();
+
+        assertAll(
+                () -> assertTrue(corePrompt.contains(SystemPromptConfig.GENERATED_CONTROL_FLOW_CLAUSE)),
+                () -> assertTrue(corePrompt.contains("record exactly one terminal outcome for each candidate")),
+                () -> assertTrue(corePrompt.contains("prevent fall-through to success")),
+                () -> assertTrue(corePrompt.contains("value returned by `getOrElse`")));
+    }
+
+    @Test
+    void shouldExposeExactUnavailableSourcesBeforeUnsupportedClaims() {
+        String corePrompt = systemPromptConfig.getCoreSystemPrompt();
+
+        assertAll(
+                () -> assertTrue(corePrompt.contains(SystemPromptConfig.SOURCE_FIDELITY_CLAUSE)),
+                () -> assertTrue(corePrompt.contains("at the requested major version")),
+                () -> assertTrue(corePrompt.contains("Source unavailable: <requested source or version>")),
+                () -> assertTrue(corePrompt.contains("never imply that the Sources panel verifies it")));
+    }
+
+    /**
+     * A same-major documentation record answers the question rather than being demoted to general
+     * knowledge, so a patch-level corpus drift stops emitting a spurious unavailable-source notice.
+     */
+    @Test
+    void shouldGroundSameMajorRecordsInsteadOfDemandingAnExactVersionMatch() {
+        String corePrompt = systemPromptConfig.getCoreSystemPrompt();
+
+        assertAll(
+                () -> assertTrue(corePrompt.contains(
+                        "covers the claimed library or source family at the requested major version")),
+                () -> assertFalse(corePrompt.contains("the exact requested version")),
+                () -> assertFalse(corePrompt.contains("Never substitute a nearby patch version")));
+    }
+
+    /**
+     * Loosening the grounding test to the major version is only safe while every claim still carries
+     * the version that backs it, so answers drawn from different majors can never silently merge.
+     */
+    @Test
+    void shouldAttributeEveryGroundedClaimToItsOwnSourceVersion() {
+        String corePrompt = systemPromptConfig.getCoreSystemPrompt();
+
+        assertAll(
+                () -> assertTrue(corePrompt.contains("Name that record's exact version inline with the claim")),
+                () -> assertTrue(
+                        corePrompt.contains("when it differs from the version the reader asked about, name both")),
+                () -> assertTrue(
+                        corePrompt.contains("never merge SOURCE RECORDS from different major versions into one claim")),
+                () -> assertTrue(corePrompt.contains("attribute each major separately and state how they differ")),
+                () -> assertTrue(corePrompt.contains("state that change and the release that introduced it")));
     }
 
     @Test

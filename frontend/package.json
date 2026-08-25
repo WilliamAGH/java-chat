@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
+    "test:browser": "playwright test",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "npm run lint:ox && npm run lint:zod && npm run lint:ox:typeaware && npm run lint:sg",
@@ -17,8 +18,8 @@
     "lint:ox:typeaware": "oxlint -c config/oxlintrc.json --ignore-pattern \"node_modules/**\" --type-aware .",
     "lint:zod": "eslint --config config/eslint.config.js .",
     "lint:fix": "oxlint -c config/oxlintrc.json --ignore-pattern \"node_modules/**\" --fix . && eslint --config config/eslint.config.js --fix .",
-    "format": "oxfmt --write .",
-    "format:check": "oxfmt --check .",
+    "format": "oxfmt --ignore-path ../.gitignore --write .",
+    "format:check": "oxfmt --ignore-path ../.gitignore --check .",
     "validate:node-version": "node scripts/verify-node-version.mjs",
     "validate": "npm run validate:node-version && npm run format:check && npm run lint && npm run check"
   },
@@ -33,6 +34,8 @@
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.44.1",
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.62.1",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/svelte": "^5.3.1",

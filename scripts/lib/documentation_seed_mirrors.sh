@@ -58,6 +58,22 @@ discard_documentation_fetch_staging_directory() {
     find "$staging_directory" -depth -delete
 }
 
+# Copies a published mirror into writable validation staging without shared mutable inodes.
+copy_documentation_mirror_to_staging() {
+    local published_directory="$1"
+    local staging_directory="$2"
+    if [ "$(uname -s)" = "Darwin" ]; then
+        cp -cRp "$published_directory/." "$staging_directory/" 2>/dev/null \
+            || cp -Rp "$published_directory/." "$staging_directory/"
+        return
+    fi
+    if cp --help 2>/dev/null | grep -Fq -- "--reflink"; then
+        cp -a --reflink=auto -- "$published_directory/." "$staging_directory/"
+        return
+    fi
+    cp -Rp "$published_directory/." "$staging_directory/"
+}
+
 restore_retired_documentation_mirror() {
     local retired_mirror_path="$1"
     local active_mirror_path="$2"
@@ -177,12 +193,13 @@ publish_staged_documentation_mirror() {
     fi
 }
 
-# Writes the local paths represented by the current Java API seed.
-write_java_api_seed_mirror_paths() {
+# Writes the local paths represented by a current documentation seed.
+write_documentation_seed_mirror_paths() {
     local remote_base_url="$1"
     local seed_file="$2"
     local cut_directories="$3"
     local mirror_paths_file="$4"
+    local documentation_source_name="$5"
 
     if ! python3 "$SCRIPT_DIR/documentation_seed.py" \
         --project-mirror-paths-file \
@@ -190,12 +207,12 @@ write_java_api_seed_mirror_paths() {
         --output "$mirror_paths_file" \
         --required-prefix "$remote_base_url" \
         --cut-directories "$cut_directories"; then
-        log "${RED}✗ Java API seed mirror-path projection failed${NC}"
+        log "${RED}✗ $documentation_source_name seed mirror-path projection failed${NC}"
         return 1
     fi
 
     if [ ! -s "$mirror_paths_file" ]; then
-        log "${RED}✗ Java API seed produced no mirror paths${NC}"
+        log "${RED}✗ $documentation_source_name seed produced no mirror paths${NC}"
         return 1
     fi
 }
@@ -270,22 +287,23 @@ verify_seeded_html_mirror() {
     done < <(find "$target_dir" -type f \( -name "*.html" -o -name "*.htm" \) -print0)
 }
 
-# Quarantines Java API HTML files that are absent from the current canonical seed.
-reconcile_java_api_seed_mirror() {
+# Quarantines Javadoc HTML files that are absent from the current canonical seed.
+reconcile_javadoc_seed_mirror() {
     local remote_base_url="$1"
     local target_dir="$2"
     local documentation_source_name="$3"
     local cut_directories="$4"
-    local seed_file="$target_dir/.oracle-javadoc-seed.txt"
+    local seed_file="$target_dir/.javadoc-seed.txt"
 
     if [ ! -d "$target_dir" ] || [ ! -s "$seed_file" ]; then
-        log "${RED}✗ Java API mirror reconciliation requires a nonempty current seed for $documentation_source_name${NC}"
+        log "${RED}✗ Javadoc mirror reconciliation requires a nonempty current seed for $documentation_source_name${NC}"
         return 1
     fi
 
     local mirror_paths_file
-    mirror_paths_file="$(mktemp "$target_dir/.java-api-seed-paths.XXXXXX")"
-    if ! write_java_api_seed_mirror_paths "$remote_base_url" "$seed_file" "$cut_directories" "$mirror_paths_file" \
+    mirror_paths_file="$(mktemp "$target_dir/.javadoc-seed-paths.XXXXXX")"
+    if ! write_documentation_seed_mirror_paths \
+        "$remote_base_url" "$seed_file" "$cut_directories" "$mirror_paths_file" "$documentation_source_name" \
         || ! reconcile_seeded_html_mirror \
             "$target_dir" "$documentation_source_name" "$mirror_paths_file" "unseeded-java-api"; then
         rm -f "$mirror_paths_file"
@@ -294,25 +312,26 @@ reconcile_java_api_seed_mirror() {
     rm -f "$mirror_paths_file"
 }
 
-# Requires every canonical Java API seed path, and no unseeded HTML path, to exist in the mirror.
-verify_java_api_seed_mirror() {
+# Requires every canonical Javadoc seed path, and no unseeded HTML path, to exist in the mirror.
+verify_javadoc_seed_mirror() {
     local remote_base_url="$1"
     local target_dir="$2"
     local documentation_source_name="$3"
     local cut_directories="$4"
-    local seed_file="$target_dir/.oracle-javadoc-seed.txt"
+    local seed_file="$target_dir/.javadoc-seed.txt"
 
     if [ ! -d "$target_dir" ] || [ ! -s "$seed_file" ]; then
-        log "${RED}✗ Java API mirror verification requires a nonempty current seed for $documentation_source_name${NC}"
+        log "${RED}✗ Javadoc mirror verification requires a nonempty current seed for $documentation_source_name${NC}"
         return 1
     fi
 
     local mirror_paths_file
-    if ! mirror_paths_file="$(mktemp "$target_dir/.java-api-seed-paths.XXXXXX")"; then
-        log "${RED}✗ Could not create Java API mirror paths for $documentation_source_name${NC}"
+    if ! mirror_paths_file="$(mktemp "$target_dir/.javadoc-seed-paths.XXXXXX")"; then
+        log "${RED}✗ Could not create Javadoc mirror paths for $documentation_source_name${NC}"
         return 1
     fi
-    if ! write_java_api_seed_mirror_paths "$remote_base_url" "$seed_file" "$cut_directories" "$mirror_paths_file" \
+    if ! write_documentation_seed_mirror_paths \
+        "$remote_base_url" "$seed_file" "$cut_directories" "$mirror_paths_file" "$documentation_source_name" \
         || ! verify_seeded_html_mirror "$target_dir" "$documentation_source_name" "$mirror_paths_file"; then
         rm -f "$mirror_paths_file"
         return 1
@@ -320,37 +339,37 @@ verify_java_api_seed_mirror() {
     rm -f "$mirror_paths_file"
 }
 
-# Generates the explicit Java API URL seed from the configured remote base.
-generate_java_api_javadoc_seed() {
+# Generates the explicit Javadoc URL seed from the configured remote base.
+generate_javadoc_seed() {
     local remote_base_url="$1"
     local target_dir="$2"
-    local seed_file="$target_dir/.oracle-javadoc-seed.txt"
+    local seed_file="$target_dir/.javadoc-seed.txt"
     local generated_seed_file
-    generated_seed_file="$(mktemp "$target_dir/.oracle-javadoc-seed.XXXXXX")"
+    generated_seed_file="$(mktemp "$target_dir/.javadoc-seed.XXXXXX")"
 
-    log "${BLUE}ℹ Java API Javadoc source; generating explicit URL seed list...${NC}"
+    log "${BLUE}ℹ Javadoc source; generating explicit URL seed list...${NC}"
     local generator_exit_code
-    if python3 "$SCRIPT_DIR/oracle_javadoc_seed.py" \
+    if python3 "$SCRIPT_DIR/javadoc_seed.py" \
         --base-url "$remote_base_url" \
         --output "$generated_seed_file" 2>&1 | tee -a "$LOG_FILE"; then
         generator_exit_code="${PIPESTATUS[0]}"
     else
         generator_exit_code="${PIPESTATUS[0]}"
         rm -f "$generated_seed_file"
-        log "${RED}✗ Java API Javadoc seed generation failed (exit code: $generator_exit_code)${NC}"
+        log "${RED}✗ Javadoc seed generation failed (exit code: $generator_exit_code)${NC}"
         return 1
     fi
     if [ "$generator_exit_code" -ne 0 ] || [ ! -s "$generated_seed_file" ]; then
         rm -f "$generated_seed_file"
-        log "${RED}✗ Java API Javadoc seed generation produced no URLs${NC}"
+        log "${RED}✗ Javadoc seed generation produced no URLs${NC}"
         return 1
     fi
     if ! mv "$generated_seed_file" "$seed_file"; then
         rm -f "$generated_seed_file"
-        log "${RED}✗ Java API Javadoc seed could not replace the active seed${NC}"
+        log "${RED}✗ Javadoc seed could not replace the active seed${NC}"
         return 1
     fi
     local seed_url_count
     seed_url_count="$(wc -l "$seed_file" | awk '{print $1}')"
-    log "${BLUE}ℹ Java API Javadoc seed URLs: $seed_url_count${NC}"
+    log "${BLUE}ℹ Javadoc seed URLs: $seed_url_count${NC}"
 }

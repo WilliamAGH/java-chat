@@ -162,6 +162,22 @@ export const ContactAcceptedSchema = z.object({
 });
 
 // =============================================================================
+// CLI Authorization Schemas
+// =============================================================================
+
+/** Validates the loopback callback requested by the JavaChat CLI login flow. */
+export const CliAuthorizationQuerySchema = z.object({
+  port: z.coerce.number().int().min(1).max(65_535),
+  state: z.string().regex(/^[A-Za-z0-9_-]{32,128}$/),
+  label: z.string().trim().min(1).max(64),
+});
+
+/** Validates Clerk's one-time API-key creation response before the secret leaves the SDK boundary. */
+export const CliApiKeyCreationSchema = z.object({
+  secret: z.string().startsWith("ak_").max(512),
+});
+
+// =============================================================================
 // Local Storage Schemas
 // =============================================================================
 

@@ -16,7 +16,7 @@ alwaysApply: true
 ## Rule Summary [SUM]
 
 - [ZA1a-c] Zero Tolerance Policy (zero assumptions, validation workflow, forbidden practices)
-- [GT1a-o] Git, history safety, hooks/signing, dirty paths, worktrees, and clean commits
+- [GT1a-p] Git, history safety, hooks/signing, dirty paths, worktrees, and clean commits
 - [CC1a-d] Clean Code & DDD (Mandatory)
 - [SS1a-j] Direct Ownership & Boundary Locality
 - [ID1a-d] Idiomatic Patterns & Defaults
@@ -29,7 +29,7 @@ alwaysApply: true
 - [NO1a-e] Null/Optional Discipline (no null returns, use Optional/empty collections)
 - [AR1a-f] Architecture & Boundaries (canonical roots, layer rules, framework-free domain)
 - [CS1a-h] Code Smells (primitive obsession, data clumps, magic literals)
-- [VR1a-c] Verification Loops (build/test/run)
+- [VR1a-f] Verification Loops (build/test/run, slice validation, completion tail)
 - [JD1a-h] Javadoc Standards (mandatory, why > what)
 - [ND1a-h] Naming Discipline (intent-revealing, banned generics, constant naming, type names)
 
@@ -52,16 +52,17 @@ alwaysApply: true
 - [GT1c] Read-only git commands (e.g., `git status`, `git diff`, `git log`, `git show`) never require permission. Any git command that writes to the working tree, index, or history requires explicit permission.
 - [GT1d] Commit message standards: one logical change per commit; describe the change and purpose; no tooling/AI references; no `Co-authored-by` or AI attribution.
 - [GT1e] Do not amend or rewrite history (no `--amend`, no force pushes) without explicit user permission.
-- [GT1f] Do not change branches (checkout/merge/rebase/pull) unless the user explicitly instructs it.
+- [GT1f] Task worktree branch creation and its merge back to `dev` are part of task authorization; any other branch change (checkout/merge/rebase/pull) requires explicit user instruction.
 - [GT1g] Destructive git commands are prohibited unless explicitly ordered by the user (e.g., `git restore`, `git reset`, force checkout).
 - [GT1h] Never delete lock files automatically (including `.git/index.lock`). Stop and ask for instruction.
 - [GT1i] Treat existing staged/unstaged changes as intentional unless the user says otherwise; never “clean up” someone else’s work unprompted.
 - [GT1j] Git commands that write to the working tree, index, or history require elevated permissions; never run without escalation.
 - [GT1k] **Do Not Block On Baseline Diffs**: If `git status` already shows modified files when you start, assume those changes are intentional and continue the requested task without stopping to ask about them. Avoid touching unrelated files.
 - [GT1l] **Stop Only On Concurrent Drift**: Only stop and ask for direction if a file changes unexpectedly *during your work* in a way that conflicts with edits you are actively making (e.g., a file you are editing changes on disk between reads/writes). Otherwise, proceed and keep changes scoped.
-- [GT1m] **Repository-Local Writes Only**: NEVER commit or push to this repository from a temporary clone, alternate checkout/worktree, or any other directory copy of the same repo. All git writes must be executed from this exact working tree.
+- [GT1m] **Authorized-Root Writes Only**: Git writes run only from an authorized worktree's single writable agent root ([GT1o]); never from unrelated clones, temporary clones, or other directory copies of the repo.
 - [GT1n] **Dirty-Path Integrity**: Never rewrite, restore, replace, regenerate, or copy a dirty path from `HEAD`, the index, cached copies, an alternate worktree, or a temporary clone. Read the live path and apply the smallest in-place edit.
 - [GT1o] **Writable Agent Root**: Each worktree has exactly one writable agent root. All other agents remain read-only in that worktree or use a distinct worktree; never share write authority.
+- [GT1p] **Integration Branch**: `dev` is the integration branch; task work merges to and pushes on `dev`.
 
 ## [CC1] Clean Code & DDD (Mandatory)
 
@@ -95,13 +96,15 @@ alwaysApply: true
 ## [EV1] Secrets and Env Vars
 
 - [EV1a] **No Secrets In Properties/YAML**: Secrets are PROHIBITED in `.properties` and `.yml/.yaml` (including examples). Do not add secret-looking keys with blank defaults to property files.
-- [EV1b] **Secrets Source Of Truth**: Secrets MUST be provided via `.env` (local) and environment variables (deployment). Deployment uses Coolify containers with BuildKit secrets; keep secrets out of tracked config.
+- [EV1b] **Secrets Source Of Truth**: Secrets MUST be provided via `.env` locally and Infisical-backed Dokploy environment references in deployment; keep secrets out of tracked config.
 - [EV1c] **Non-Secret Defaults In Properties**: All non-secret defaults and environment-specific overrides MUST live in Spring property files (`src/main/resources/application*.properties`) and Spring profiles.
-- [EV1d] **Allowed `.env`/Env Vars For External Services**: Shared-gateway inference and Qdrant connectivity MUST come from `.env`/environment variables:
+- [EV1d] **Allowed `.env`/Env Vars For External Services and CLI Authentication**: Shared-gateway inference, Qdrant connectivity, Clerk authentication, and non-interactive CLI access MUST come from `.env`/environment variables:
   - LLM (model/base-url/api-key): `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`
   - Qdrant (host/ports/tls/api-key): `QDRANT_HOST`, `QDRANT_PORT`, `QDRANT_REST_PORT`, `QDRANT_SSL`, `QDRANT_API_KEY`
+  - Clerk (frontend publishable key/server credential): `VITE_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`
+  - JavaChat CLI (headless key/target deployment): `JAVACHAT_API_KEY`, `JAVACHAT_HOST`
 - [EV1e] **No New Env Var Settings**: Do not introduce any additional env-var-driven settings without explicit written approval.
-- [EV1f] **Dotenv Handling**: `.env` loading MUST remain supported for local development and scripts. Do not add dotenv libraries into the Java runtime; load env vars at the process level (Makefile/scripts/Coolify).
+- [EV1f] **Dotenv Handling**: `.env` loading MUST remain supported for local development and scripts. Do not add dotenv libraries into the Java runtime; load env vars at the process level (Makefile/scripts/Dokploy).
 
 ## [RC1] Root Cause Resolution — No Fallbacks
 
@@ -190,6 +193,7 @@ alwaysApply: true
 - [VR1c] **Runtime**: `make run &`, hit `/actuator/health` and changed endpoints; then stop.
 - [VR1d] **Validate each slice**: After completing an end-to-end slice ([CC1e]), run `make build` and `make test` before starting the next slice.
 - [VR1e] **Direct-Owner Cleanup Handoff**: Name the direct production owner, list redundant artifacts deleted, identify each intentional small boundary-local duplication and why it avoids schema machinery, and cite tests that exercise the behavior. Do not create a manifest, catalog, contract, registry, or parity report for handoff.
+- [VR1f] **Completion Tail**: When verification loops are green: commit, merge the task worktree to `dev`, push, and watch any CI run to a terminal verdict. GitHub issues are filed only for material defects or features (behavior, correctness, security, performance, data quality, or a governed contract); pedantic/nitpick/style-only findings are fixed in place or dropped, never filed. Fixes and issue scope follow the minimalism bar — reuse before new code, simplify before completing, per the `ponytail` and `ce-simplify-code` skills.
 
 ## [JD1] Javadoc Standards
 

@@ -24,6 +24,8 @@ public final class JavaApiPageExtractor {
 
     private static final String JAVA_API_CLASS_DECLARATION_PAGE_CLASS = "class-declaration-page";
     private static final String JAVA_API_CLASS_USE_PAGE_CLASS = "class-use-page";
+    private static final String JAVA_API_FRAMESET_SELECTOR = "frameset";
+    private static final String JAVA_API_NOFRAMES_SELECTOR = "noframes";
     private static final String JAVA_API_CLASS_TITLE_SELECTOR = "main > .header .title, .header .title, h1.title";
     private static final String JAVA_API_CLASS_DESCRIPTION_SELECTOR =
             "main > section.class-description, section.class-description";
@@ -65,6 +67,10 @@ public final class JavaApiPageExtractor {
         Element documentBody = Objects.requireNonNull(extractionDocument.body(), "document.body");
         if (documentBody.hasClass(JAVA_API_CLASS_USE_PAGE_CLASS)) {
             return JavaApiPageExtraction.excludedClassUsePage();
+        }
+        if (extractionDocument.selectFirst(JAVA_API_FRAMESET_SELECTOR) != null
+                && extractionDocument.selectFirst(JAVA_API_NOFRAMES_SELECTOR) != null) {
+            return JavaApiPageExtraction.excludedNavigationPage();
         }
         if (!documentBody.hasClass(JAVA_API_CLASS_DECLARATION_PAGE_CLASS)) {
             return JavaApiPageExtraction.included(extractUnanchoredOverview(extractionDocument), List.of());

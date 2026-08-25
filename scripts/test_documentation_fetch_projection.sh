@@ -7,6 +7,7 @@ set -euo pipefail
 TEST_SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$TEST_SCRIPT_DIRECTORY/.." && pwd)"
 FETCH_SCRIPT="$PROJECT_ROOT/scripts/fetch_all_docs.sh"
+FETCH_SOURCE_LIBRARY="$PROJECT_ROOT/scripts/lib/documentation_fetch_sources.sh"
 TEST_WORK_DIRECTORY="$(mktemp -d)"
 TEST_DOCS_ROOT="$TEST_WORK_DIRECTORY/docs"
 DISCOVERED_FETCH_CAPTURE="$TEST_WORK_DIRECTORY/discovered-fetch"
@@ -51,6 +52,23 @@ assert_no_source_dispatch() {
     fi
 }
 
+assert_documentation_mirror_path_policy() {
+    local policy_test_directory="$TEST_WORK_DIRECTORY/path-policy"
+    mkdir -p "$policy_test_directory"
+    printf '<html>Doppler</html>\n' > "$policy_test_directory/dns-made-easy.html"
+    printf '<html>Doppler</html>\n' > "$policy_test_directory/secret-snapshots.html"
+    validate_staged_documentation_mirror "$policy_test_directory" "Path Policy" 1 "Doppler"
+    printf '<html>Doppler</html>\n' > "$policy_test_directory/reference-2.0-eap.html"
+    if validate_staged_documentation_mirror "$policy_test_directory" "Path Policy" 1 "Doppler"; then
+        fail_documentation_fetch_test "early-access documentation path was accepted"
+    fi
+    command rm "$policy_test_directory/reference-2.0-eap.html"
+    printf '<html>Doppler</html>\n' > "$policy_test_directory/reference-SNAPSHOT.html"
+    if validate_staged_documentation_mirror "$policy_test_directory" "Path Policy" 1 "Doppler"; then
+        fail_documentation_fetch_test "snapshot documentation path was accepted"
+    fi
+}
+
 write_java25_specification_byte_gate_stub() {
     local downloaded_specification_path="$1"
     local title_fragment="$2"
@@ -85,9 +103,18 @@ log() {
     :
 }
 
+assert_documentation_mirror_path_policy
+
+if grep -Fq -- '--retry-on-http-error' "$FETCH_SOURCE_LIBRARY"; then
+    fail_documentation_fetch_test "documented Ubuntu Wget2 does not support --retry-on-http-error"
+fi
+if ! grep -Fq -- '--discovery-url "$seed_additional_discovery_url"' "$FETCH_SOURCE_LIBRARY"; then
+    fail_documentation_fetch_test "additional discovery links do not resolve against their own document URL"
+fi
+
 fetch_discovered_documentation_seed() {
     printf '%s\n' "$@" > "$DISCOVERED_FETCH_CAPTURE"
-    local captured_target_directory="$2"
+    local captured_target_directory="$4"
     local generated_page_number
     for generated_page_number in 1 2 3 4 5 6 7; do
         printf '<html>Example Reference stable</html>\n' > "$captured_target_directory/page-$generated_page_number.html"
@@ -114,16 +141,31 @@ if ! (
 fi
 
 assert_captured_arguments "$DISCOVERED_FETCH_CAPTURE" \
+    --canonical-prefix \
     "https://docs.example.invalid/reference/" \
+    --target-dir \
     "$(dirname "$TEST_DOCS_ROOT")/.documentation-fetch-staging/reference.599af15c691cb0976ef8042aaaf54bb39c76fed2c030db21d93b263113606c4c.partial" \
+    --name \
     "Example Reference" \
+    --cut-directories \
     3 \
+    --minimum-html-files \
     7 \
+    --reject-regex \
     "/archive" \
+    --partial-mirror-allowed \
     false \
+    --seed-document-type \
     xml-sitemap \
+    --seed-discovery-url \
     "https://docs.example.invalid/sitemap.xml" \
+    --seed-source-prefix \
     "https://docs.example.invalid/reference/" \
+    --seed-reject-regex \
+    "" \
+    --request-delay-seconds \
+    0 \
+    --seed-additional-discovery-url \
     ""
 
 if [ -f "$TEST_DOCS_ROOT/example/reference/robots.txt" ]; then
@@ -214,6 +256,38 @@ assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
     "https://kotlinlang.org/sitemap.xml" \
     --seed-source-prefix \
     "https://kotlinlang.org/docs/"
+
+if ! (
+    run_documentation_fetch --doc-sets=doppler-guides > /dev/null
+); then
+    fail_documentation_fetch_test "named Doppler guides selection did not complete"
+fi
+
+assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
+    --url \
+    "https://docs.doppler.com/docs/" \
+    --mirror-path \
+    "doppler/docs" \
+    --name \
+    "Doppler Guides" \
+    --source-version \
+    current \
+    --identity-regex \
+    Doppler \
+    --cut-directories \
+    1 \
+    --minimum-html-files \
+    200 \
+    --seed-document-type \
+    html-links \
+    --seed-discovery-url \
+    "https://docs.doppler.com/docs/start" \
+    --seed-source-prefix \
+    "https://docs.doppler.com/docs/" \
+    --seed-reject-regex \
+    '^https://docs\.doppler\.com/docs/(enclave-installation(-docker|-serverless)?|enclave-service-tokens)$' \
+    --request-delay-seconds \
+    1
 
 if ! (
     set --
@@ -335,6 +409,96 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     --seed-source-prefix \
     "https://quarkus.io/guides/"
 
+assert_current_documentation_source_dispatch() {
+    local documentation_source_identifier="$1"
+    local expected_citation_base="$2"
+    local expected_mirror_path="$3"
+    local expected_discovery_url="$4"
+    if ! (
+        set --
+        # shellcheck source=fetch_all_docs.sh
+        source "$FETCH_SCRIPT"
+        log() {
+            :
+        }
+        record_documentation_fetch() {
+            printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+        }
+        fetch_named_official_source "$documentation_source_identifier"
+    ); then
+        fail_documentation_fetch_test "current documentation source dispatch failed: $documentation_source_identifier"
+    fi
+    if ! grep -Fxq -- "$expected_citation_base" "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+        || ! grep -Fxq -- "$expected_mirror_path" "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+        || ! grep -Fxq -- "$expected_discovery_url" "$ENVIRONMENT_OVERRIDE_CAPTURE"; then
+        fail_documentation_fetch_test "current documentation source dispatch lost its canonical boundary: $documentation_source_identifier"
+    fi
+}
+
+assert_current_documentation_source_dispatch \
+    anthropic-api \
+    "https://platform.claude.com/docs/en/" \
+    "anthropic/api" \
+    "https://platform.claude.com/sitemap.xml"
+if ! grep -Fxq -- '^https://platform\.claude\.com/docs/en/home$' "$ENVIRONMENT_OVERRIDE_CAPTURE"; then
+    fail_documentation_fetch_test "Anthropic API dispatch retained its non-content landing shell"
+fi
+assert_current_documentation_source_dispatch \
+    claude-code \
+    "https://code.claude.com/docs/en/" \
+    "anthropic/claude-code" \
+    "https://code.claude.com/sitemap.xml"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source amp-code
+); then
+    fail_documentation_fetch_test "canonical Amp Code documentation dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://ampcode.com/" \
+    --mirror-path \
+    amp-code \
+    --name \
+    "Amp Code CLI Manual" \
+    --source-version \
+    current \
+    --identity-regex \
+    Amp \
+    --cut-directories \
+    0 \
+    --minimum-html-files \
+    8 \
+    --seed-document-type \
+    html-links \
+    --seed-discovery-url \
+    "https://ampcode.com/manual" \
+    --seed-source-prefix \
+    "https://ampcode.com/" \
+    --seed-reject-regex \
+    '^https://ampcode\.com/(?:manual/appendix/legacy-permissions-rules\.txt$|(?!manual(?:/|$)).*)' \
+    --seed-url \
+    "https://ampcode.com/manual/orbs/oidc" \
+    --seed-url \
+    "https://ampcode.com/manual/sdk/python" \
+    --seed-url \
+    "https://ampcode.com/manual/sdk/typescript"
+assert_current_documentation_source_dispatch \
+    tinker \
+    "https://tinker-docs.thinkingmachines.ai/" \
+    tinker \
+    "https://tinker-docs.thinkingmachines.ai/sitemap.xml"
+
 if ! (
     set --
     # shellcheck source=fetch_all_docs.sh
@@ -373,6 +537,37 @@ assert_rejected_selector "kotlin,unknown-source"
 assert_rejected_selector "kotlin,kotlin"
 assert_rejected_selector "kotlin,,java/java25-complete"
 assert_rejected_selector "all,kotlin"
+
+assert_current_documentation_source_dispatch \
+    lombok-1.18.46-reference \
+    "https://projectlombok.org/features/" \
+    "lombok/1.18.46/reference" \
+    "https://projectlombok.org/features/"
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://projectlombok.org/features/" \
+    --mirror-path \
+    "lombok/1.18.46/reference" \
+    --name \
+    "Lombok 1.18.46 Feature Reference" \
+    --source-version \
+    "1.18.46" \
+    --identity-regex \
+    "Project Lombok" \
+    --cut-directories \
+    1 \
+    --minimum-html-files \
+    30 \
+    --seed-document-type \
+    html-links \
+    --seed-discovery-url \
+    "https://projectlombok.org/features/" \
+    --seed-additional-discovery-url \
+    "https://projectlombok.org/features/experimental/" \
+    --seed-source-prefix \
+    "https://projectlombok.org/features/"
 
 if ! (
     set --
@@ -608,16 +803,16 @@ if ! (
         fi
         builtin command "$@"
     }
-    JAVA25_MISSING_PARSER_WGET_CALLS=0
-    wget() {
-        JAVA25_MISSING_PARSER_WGET_CALLS=$((JAVA25_MISSING_PARSER_WGET_CALLS + 1))
+    JAVA25_MISSING_PARSER_WGET2_CALLS=0
+    wget2() {
+        JAVA25_MISSING_PARSER_WGET2_CALLS=$((JAVA25_MISSING_PARSER_WGET2_CALLS + 1))
         return 1
     }
     if fetch_java25_specification_pdfs \
         "$TEST_WORK_DIRECTORY/java25-missing-parser-stage" "Java 25 Complete API"; then
         exit 1
     fi
-    [ "$JAVA25_MISSING_PARSER_WGET_CALLS" -eq 0 ]
+    [ "$JAVA25_MISSING_PARSER_WGET2_CALLS" -eq 0 ]
 ); then
     fail_documentation_fetch_test "missing mutool did not fail before Java 25 specification downloads"
 fi
@@ -627,7 +822,7 @@ if ! grep -Fq -- "brew install mupdf" "$JAVA25_MISSING_PARSER_LOG" \
 fi
 
 JAVA25_PDF_SUCCESS_ROOT="$TEST_WORK_DIRECTORY/java25-pdf-success"
-JAVA25_PDF_SUCCESS_CAPTURE="$JAVA25_PDF_SUCCESS_ROOT/wget-arguments"
+JAVA25_PDF_SUCCESS_CAPTURE="$JAVA25_PDF_SUCCESS_ROOT/wget2-arguments"
 JAVA25_PDF_SUCCESS_PARSER_CAPTURE="$JAVA25_PDF_SUCCESS_ROOT/mutool-arguments"
 if ! (
     set --
@@ -643,20 +838,20 @@ if ! (
         mkdir -p "$JAVA25_PDF_SUCCESS_ROOT" "$JAVA25_PDF_SUCCESS_STAGE"
         printf '%s\n' "$JAVA25_PDF_SUCCESS_STAGE"
     }
-    generate_java_api_javadoc_seed() {
+    generate_javadoc_seed() {
         :
     }
-    reconcile_java_api_seed_mirror() {
+    reconcile_javadoc_seed_mirror() {
         :
     }
-    fetch_java_api_javadoc_seed() {
+    fetch_javadoc_seed() {
         printf '<html>Java 25 API</html>\n' > "$1/index.html"
         cd - > /dev/null
     }
     validate_staged_documentation_identity() {
         :
     }
-    wget() {
+    wget2() {
         local wget_argument
         local output_document=""
         local requested_url=""
@@ -769,20 +964,20 @@ if ! (
         mkdir -p "$JAVA25_PDF_FAILURE_STAGE"
         printf '%s\n' "$JAVA25_PDF_FAILURE_STAGE"
     }
-    generate_java_api_javadoc_seed() {
+    generate_javadoc_seed() {
         :
     }
-    reconcile_java_api_seed_mirror() {
+    reconcile_javadoc_seed_mirror() {
         :
     }
-    fetch_java_api_javadoc_seed() {
+    fetch_javadoc_seed() {
         printf '<html>Java 25 API</html>\n' > "$1/index.html"
         cd - > /dev/null
     }
     validate_staged_documentation_identity() {
         :
     }
-    wget() {
+    wget2() {
         local wget_argument
         local output_document=""
         local requested_url=""
@@ -937,14 +1132,14 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     --single-page
 
 SINGLE_PAGE_STAGE="$TEST_WORK_DIRECTORY/single-page-stage"
-SINGLE_PAGE_WGET_CAPTURE="$TEST_WORK_DIRECTORY/single-page-wget"
+SINGLE_PAGE_WGET2_CAPTURE="$TEST_WORK_DIRECTORY/single-page-wget2"
 mkdir -p "$SINGLE_PAGE_STAGE"
 printf '<html><body>stale recursive page</body></html>\n' > "$SINGLE_PAGE_STAGE/unrelated.html"
 LOG_FILE="$TEST_WORK_DIRECTORY/single-page.log"
-wget() {
+wget2() {
     local wget_argument
     local output_document=""
-    printf '%s\n' "$@" > "$SINGLE_PAGE_WGET_CAPTURE"
+    printf '%s\n' "$@" > "$SINGLE_PAGE_WGET2_CAPTURE"
     for wget_argument in "$@"; do
         case "$wget_argument" in
             --output-document=*) output_document="${wget_argument#--output-document=}" ;;
@@ -967,14 +1162,14 @@ if ! (
 ); then
     fail_documentation_fetch_test "governed single-page fetch did not complete"
 fi
-unset -f wget
+unset -f wget2
 if [ ! -f "$SINGLE_PAGE_STAGE/25-relnote-issues.html" ]; then
     fail_documentation_fetch_test "governed single-page fetch used the wrong projected path"
 fi
 if [ -f "$SINGLE_PAGE_STAGE/unrelated.html" ]; then
     fail_documentation_fetch_test "governed single-page fetch retained an unrelated resumed page"
 fi
-if ! grep -Fqx -- "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "$SINGLE_PAGE_WGET_CAPTURE"; then
+if ! grep -Fqx -- "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "$SINGLE_PAGE_WGET2_CAPTURE"; then
     fail_documentation_fetch_test "governed single-page fetch did not use the verified browser request identity"
 fi
 
@@ -1042,25 +1237,25 @@ if ! (
     DOCS_ROOT="$TEST_WORK_DIRECTORY/java-post-fetch/data/docs"
     LOG_FILE="$TEST_WORK_DIRECTORY/java-post-fetch.log"
     JAVA_POST_FETCH_TARGET_DIRECTORY="$DOCS_ROOT/java/java25-complete"
-    JAVA_POST_FETCH_WGET_ARGUMENTS="$TEST_WORK_DIRECTORY/java-post-fetch-wget-arguments"
+    JAVA_POST_FETCH_WGET2_ARGUMENTS="$TEST_WORK_DIRECTORY/java-post-fetch-wget2-arguments"
     mkdir -p "$JAVA_POST_FETCH_TARGET_DIRECTORY"
     printf '%s\n%s\n' \
         "https://docs.example.invalid/Record.html" \
         "https://docs.example.invalid/String.html" \
-        > "$JAVA_POST_FETCH_TARGET_DIRECTORY/.oracle-javadoc-seed.txt"
+        > "$JAVA_POST_FETCH_TARGET_DIRECTORY/.javadoc-seed.txt"
     log() {
         :
     }
-    wget() {
-        printf '%s\n' "$@" > "$JAVA_POST_FETCH_WGET_ARGUMENTS"
+    wget2() {
+        printf '%s\n' "$@" > "$JAVA_POST_FETCH_WGET2_ARGUMENTS"
         printf '<html>Record</html>\n' > "$JAVA_POST_FETCH_TARGET_DIRECTORY/Record.html"
     }
-    write_java_api_seed_mirror_paths() {
+    write_documentation_seed_mirror_paths() {
         printf '%s\n%s\n' Record.html String.html > "$4"
     }
     if (
         cd "$JAVA_POST_FETCH_TARGET_DIRECTORY"
-        fetch_java_api_javadoc_seed \
+        fetch_javadoc_seed \
             "$JAVA_POST_FETCH_TARGET_DIRECTORY" \
             "Java post-fetch verification" \
             0 \
@@ -1073,7 +1268,7 @@ if ! (
     fi
     [ -f "$JAVA_POST_FETCH_TARGET_DIRECTORY/Record.html" ] || exit 1
     [ ! -f "$JAVA_POST_FETCH_TARGET_DIRECTORY/String.html" ] || exit 1
-    grep -Fxq -- "--max-redirect=0" "$JAVA_POST_FETCH_WGET_ARGUMENTS"
+    grep -Fxq -- "--max-redirect=0" "$JAVA_POST_FETCH_WGET2_ARGUMENTS"
 ); then
     fail_documentation_fetch_test "Java seed fetch did not reject redirects or verify fetched seed paths"
 fi
@@ -1087,17 +1282,17 @@ if ! (
     JAVA_QUARANTINE_TARGET_DIRECTORY="$DOCS_ROOT/java/java25-complete"
     mkdir -p "$JAVA_QUARANTINE_TARGET_DIRECTORY/java.base/java/lang"
     printf '%s\n' "https://docs.example.invalid/java.base/java/lang/Record.html" \
-        > "$JAVA_QUARANTINE_TARGET_DIRECTORY/.oracle-javadoc-seed.txt"
+        > "$JAVA_QUARANTINE_TARGET_DIRECTORY/.javadoc-seed.txt"
     printf '<html>Canonical</html>\n' \
         > "$JAVA_QUARANTINE_TARGET_DIRECTORY/java.base/java/lang/Record.html"
     printf '<html>Stale</html>\n' > "$JAVA_QUARANTINE_TARGET_DIRECTORY/Record.html"
     log() {
         :
     }
-    write_java_api_seed_mirror_paths() {
+    write_documentation_seed_mirror_paths() {
         printf '%s\n' "java.base/java/lang/Record.html" > "$4"
     }
-    reconcile_java_api_seed_mirror \
+    reconcile_javadoc_seed_mirror \
         "https://docs.example.invalid/" \
         "$JAVA_QUARANTINE_TARGET_DIRECTORY" \
         "Java stale-page quarantine" \
@@ -1116,7 +1311,7 @@ if ! (
     LOG_FILE="$TEST_WORK_DIRECTORY/java-seed-generation.log"
     JAVA_SEED_TARGET_DIRECTORY="$TEST_WORK_DIRECTORY/java-seed-generation"
     mkdir -p "$JAVA_SEED_TARGET_DIRECTORY"
-    printf 'retained-seed\n' > "$JAVA_SEED_TARGET_DIRECTORY/.oracle-javadoc-seed.txt"
+    printf 'retained-seed\n' > "$JAVA_SEED_TARGET_DIRECTORY/.javadoc-seed.txt"
     log() {
         :
     }
@@ -1130,12 +1325,12 @@ if ! (
         done
         return 1
     }
-    if generate_java_api_javadoc_seed \
+    if generate_javadoc_seed \
         "https://docs.example.invalid/" \
         "$JAVA_SEED_TARGET_DIRECTORY" > /dev/null 2>&1; then
         exit 1
     fi
-    [ "$(< "$JAVA_SEED_TARGET_DIRECTORY/.oracle-javadoc-seed.txt")" = "retained-seed" ]
+    [ "$(< "$JAVA_SEED_TARGET_DIRECTORY/.javadoc-seed.txt")" = "retained-seed" ]
 ); then
     fail_documentation_fetch_test "failed Java seed generation replaced the active seed"
 fi

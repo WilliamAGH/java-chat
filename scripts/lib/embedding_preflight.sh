@@ -311,7 +311,7 @@ check_embedding_server() {
         $'public class ProbeExample {\n  private int count = 1;\n  public void increment() { count++; }\n}' \
         "code-like batch" \
         "$log_fn" \
-        4 \
+        8 \
         "$expected_dimensions"; then
         $log_fn "${GREEN}Remote embedding endpoint probes passed${NC}"
         return 0

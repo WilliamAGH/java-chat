@@ -23,12 +23,19 @@ public final class DocsSourceRegistry {
     private static final String LOCAL_DOCS_BOOKS = LOCAL_DOCS_ROOT + "books/";
     private static final String PUBLIC_PDFS_BASE = "/pdfs/";
     private static final String PDF_EXTENSION = ".pdf";
+    private static final String HTML_EXTENSION = ".html";
+    private static final String HTM_EXTENSION = ".htm";
+    private static final String JAVA_EXTENSION = ".java";
+    private static final String HTML_INDEX_FILE_NAME = "index.html";
+    private static final String HTM_INDEX_FILE_NAME = "index.htm";
     private static final String HTTPS_PREFIX = "https://";
     private static final String DOCS_ORACLE_HOST_MARKER = "docs.oracle.com/";
     private static final String SPRING_DOCS_HOST_MARKER = "docs.spring.io/";
     private static final String SPRING_DOCS_HTTPS_PREFIX = HTTPS_PREFIX + SPRING_DOCS_HOST_MARKER;
     private static final String EMPTY_TEXT = "";
     private static final String PATH_SEPARATOR_TEXT = "/";
+    private static final String GITHUB_BLOB_PATH = "/blob/";
+    private static final String GITHUB_TREE_PATH = "/tree/";
     private static final String SPRING_FRAMEWORK_MARKER = "spring-framework";
     private static final String SPRING_FRAMEWORK_LEGACY_DUPLICATE_JAVADOC_PREFIX =
             "docs/current/api/current/javadoc-api/";
@@ -51,11 +58,11 @@ public final class DocsSourceRegistry {
     private static final String API_PREFIX = "api/";
 
     private static final String SPRING_FRAMEWORK_REFERENCE_URL_PREFIX =
-            SPRING_DOCS_HTTPS_PREFIX + SPRING_FRAMEWORK_MARKER + "/reference/current";
+            SPRING_DOCS_HTTPS_PREFIX + SPRING_FRAMEWORK_MARKER + "/reference";
     private static final String SPRING_FRAMEWORK_JAVADOC_URL_PREFIX =
             SPRING_DOCS_HTTPS_PREFIX + SPRING_FRAMEWORK_MARKER + "/docs/current/javadoc-api";
     private static final String SPRING_BOOT_REFERENCE_URL_PREFIX =
-            SPRING_DOCS_HTTPS_PREFIX + SPRING_BOOT_MARKER + "/reference/current";
+            SPRING_DOCS_HTTPS_PREFIX + SPRING_BOOT_MARKER + "/reference";
     private static final String SPRING_BOOT_API_URL_PREFIX =
             SPRING_DOCS_HTTPS_PREFIX + SPRING_BOOT_MARKER + "/docs/current/api";
 
@@ -137,7 +144,7 @@ public final class DocsSourceRegistry {
                     "kotlin",
                     "Kotlin Documentation",
                     "kotlin",
-                    "official",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
                     "language-reference",
                     "2.4.10"),
             new DocumentationSource(
@@ -145,7 +152,7 @@ public final class DocsSourceRegistry {
                     "scala",
                     "Scala 3 Documentation",
                     "scala",
-                    "official",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
                     "language-reference",
                     ""),
             new DocumentationSource(
@@ -153,7 +160,7 @@ public final class DocsSourceRegistry {
                     "groovy/5.0.7",
                     "Groovy 5.0.7 Documentation",
                     "groovy",
-                    "official",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
                     "language-reference",
                     "5.0.7"),
             new DocumentationSource(
@@ -161,9 +168,207 @@ public final class DocsSourceRegistry {
                     "clojure",
                     "Clojure Guides",
                     "clojure",
-                    "official",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
                     "language-guide",
                     ""),
+            new DocumentationSource(
+                    "https://www.jooq.org/doc/3.21.7/manual/",
+                    "jooq/3.21/manual",
+                    "jOOQ 3.21.7 Manual",
+                    "jooq/3.21/manual",
+                    "official",
+                    "framework-reference",
+                    "3.21.7",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://www.jooq.org/javadoc/3.21.7/",
+                    "jooq/3.21/api",
+                    "jOOQ 3.21.7 API",
+                    "jooq/3.21/api",
+                    "official",
+                    "api-docs",
+                    "3.21.7"),
+            new DocumentationSource(
+                    "https://docs.python.org/release/3.14.7/",
+                    "python/3.14",
+                    "Python 3.14.7 Documentation",
+                    "python/3.14",
+                    "official",
+                    "language-reference",
+                    "3.14.7"),
+            new DocumentationSource(
+                    "https://www.postgresql.org/docs/17/",
+                    "postgresql/17",
+                    "PostgreSQL 17 Documentation",
+                    "postgresql/17",
+                    "official",
+                    "database-reference",
+                    "17.11"),
+            new DocumentationSource(
+                    "https://www.postgresql.org/docs/18/",
+                    "postgresql/18",
+                    "PostgreSQL 18 Documentation",
+                    "postgresql/18",
+                    "official",
+                    "database-reference",
+                    "18.6"),
+            new DocumentationSource(
+                    "https://javadoc.io/doc/com.zaxxer/HikariCP/7.1.0/",
+                    "hikaricp/7.1.0/api",
+                    "HikariCP 7.1.0 API",
+                    "hikaricp/7.1.0/api",
+                    "official",
+                    "api-docs",
+                    "7.1.0"),
+            new DocumentationSource(
+                    "https://javadoc.io/doc/com.zaxxer/HikariCP/7.0.2/",
+                    "hikaricp/7.0.2/api",
+                    "HikariCP 7.0.2 API (Spring Boot 4.0.6)",
+                    "hikaricp/7.0.2/api",
+                    "official",
+                    "api-docs",
+                    "7.0.2"),
+            new DocumentationSource(
+                    "https://github.com/FasterXML/jackson-databind/blob/jackson-databind-2.22.2/src/main/java/",
+                    "jackson/2.22.2/api",
+                    "Jackson Databind 2.22.2 API",
+                    "jackson/2.22.2/api",
+                    "official",
+                    "api-docs",
+                    "2.22.2",
+                    DocumentationCitationPathStyle.JAVA_SOURCE),
+            new DocumentationSource(
+                    "https://javadoc.io/doc/com.fasterxml.jackson.core/jackson-databind/2.21.2/",
+                    "jackson/2.21.2/api",
+                    "Jackson Databind 2.21.2 API (Spring Boot 4.0.6)",
+                    "jackson/2.21.2/api",
+                    "official",
+                    "api-docs",
+                    "2.21.2"),
+            new DocumentationSource(
+                    "https://github.com/FasterXML/jackson-databind/blob/jackson-databind-3.2.2/src/main/java/",
+                    "jackson/3.2.2/api",
+                    "Jackson Databind 3.2.2 API",
+                    "jackson/3.2.2/api",
+                    "official",
+                    "api-docs",
+                    "3.2.2",
+                    DocumentationCitationPathStyle.JAVA_SOURCE),
+            new DocumentationSource(
+                    "https://javadoc.io/doc/tools.jackson.core/jackson-databind/3.1.2/",
+                    "jackson/3.1.2/api",
+                    "Jackson Databind 3.1.2 API (Spring Boot 4.0.6)",
+                    "jackson/3.1.2/api",
+                    "official",
+                    "api-docs",
+                    "3.1.2"),
+            new DocumentationSource(
+                    "https://javadoc.io/doc/org.projectlombok/lombok/1.18.46/",
+                    "lombok/1.18.46/api",
+                    "Lombok 1.18.46 API (Spring Boot 4.0.6)",
+                    "lombok/1.18.46/api",
+                    "official",
+                    "api-docs",
+                    "1.18.46"),
+            new DocumentationSource(
+                    "https://projectlombok.org/features/",
+                    "lombok/1.18.46/reference",
+                    "Lombok 1.18.46 Feature Reference",
+                    "lombok/1.18.46/reference",
+                    "official",
+                    "reference",
+                    "1.18.46",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://docs.docker.com/",
+                    "docker",
+                    "Docker Documentation",
+                    "docker",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://docs.dokploy.com/",
+                    "dokploy",
+                    "Dokploy Documentation",
+                    "dokploy",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://infisical.com/docs/",
+                    "infisical",
+                    "Infisical Documentation",
+                    "infisical",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://docs.doppler.com/docs/",
+                    "doppler/docs",
+                    "Doppler Guides",
+                    "doppler-guides",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-guide",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://docs.doppler.com/reference/",
+                    "doppler/reference",
+                    "Doppler API Reference",
+                    "doppler-reference",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "api-docs",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://docs.doppler.com/changelog/",
+                    "doppler/changelog",
+                    "Doppler Changelog",
+                    "doppler-changelog",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "release-notes",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://platform.claude.com/docs/en/",
+                    "anthropic/api",
+                    "Anthropic API Documentation",
+                    "anthropic-api",
+                    "official",
+                    "api-docs",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://code.claude.com/docs/en/",
+                    "anthropic/claude-code",
+                    "Claude Code Documentation",
+                    "claude-code",
+                    "official",
+                    "tool-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://ampcode.com/",
+                    "amp-code",
+                    "Amp Code CLI Manual",
+                    "amp-code",
+                    "official",
+                    "tool-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://tinker-docs.thinkingmachines.ai/",
+                    "tinker",
+                    "Tinker Documentation",
+                    "tinker",
+                    "official",
+                    "api-docs",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
             new DocumentationSource(
                     "https://docs.spring.io/spring-boot/reference/",
                     "spring-boot",
@@ -213,6 +418,14 @@ public final class DocsSourceRegistry {
                     "api-docs",
                     ""),
             new DocumentationSource(
+                    "https://docs.spring.io/spring-framework/docs/7.0.7/javadoc-api/",
+                    "spring-framework/7.0.7/api",
+                    "Spring Framework 7.0.7 API",
+                    "spring-framework/7.0.7/api",
+                    "official",
+                    "api-docs",
+                    "7.0.7"),
+            new DocumentationSource(
                     ORACLE_JAVASE_BASE,
                     "oracle/javase",
                     "Java 25 Release Notes Issues",
@@ -246,7 +459,7 @@ public final class DocsSourceRegistry {
             .toList();
 
     private static final String[] EMBEDDED_HOST_MARKERS = {DOCS_ORACLE_HOST_MARKER, SPRING_DOCS_HOST_MARKER};
-    private static final Map<String, String> LOCAL_PREFIX_TO_REMOTE_BASE = buildLocalPrefixLookup();
+    private static final Map<String, CitationRoute> LOCAL_PREFIX_TO_CITATION_ROUTE = buildLocalPrefixLookup();
 
     private DocsSourceRegistry() {}
 
@@ -274,7 +487,31 @@ public final class DocsSourceRegistry {
             String docSet,
             String sourceKind,
             String docType,
-            String docVersion) {
+            String docVersion,
+            DocumentationCitationPathStyle citationPathStyle) {
+        /**
+         * Preserves literal citation paths for existing documentation sources whose mirrors retain canonical
+         * filenames.
+         */
+        public DocumentationSource(
+                String citationBaseUrl,
+                String relativeMirrorPath,
+                String displayName,
+                String docSet,
+                String sourceKind,
+                String docType,
+                String docVersion) {
+            this(
+                    citationBaseUrl,
+                    relativeMirrorPath,
+                    displayName,
+                    docSet,
+                    sourceKind,
+                    docType,
+                    docVersion,
+                    DocumentationCitationPathStyle.LITERAL);
+        }
+
         public DocumentationSource {
             Objects.requireNonNull(citationBaseUrl, "citationBaseUrl");
             Objects.requireNonNull(relativeMirrorPath, "relativeMirrorPath");
@@ -283,6 +520,36 @@ public final class DocsSourceRegistry {
             Objects.requireNonNull(sourceKind, "sourceKind");
             Objects.requireNonNull(docType, "docType");
             Objects.requireNonNull(docVersion, "docVersion");
+            Objects.requireNonNull(citationPathStyle, "citationPathStyle");
+        }
+    }
+
+    /** Describes how a mirrored HTML filename maps back to its canonical citation route. */
+    public enum DocumentationCitationPathStyle {
+        /** Keeps the mirrored relative path unchanged. */
+        LITERAL,
+        /** Maps an extracted Javadoc page to the matching source file in the official repository. */
+        JAVA_SOURCE,
+        /** Removes the HTML filename synthesized for an extensionless canonical route. */
+        EXTENSIONLESS_HTML;
+
+        String citationRelativePath(String mirroredRelativePath) {
+            if (this == LITERAL || mirroredRelativePath == null) {
+                return mirroredRelativePath;
+            }
+            if (mirroredRelativePath.endsWith(HTML_INDEX_FILE_NAME)) {
+                return mirroredRelativePath.substring(0, mirroredRelativePath.length() - HTML_INDEX_FILE_NAME.length());
+            }
+            if (mirroredRelativePath.endsWith(HTM_INDEX_FILE_NAME)) {
+                return mirroredRelativePath.substring(0, mirroredRelativePath.length() - HTM_INDEX_FILE_NAME.length());
+            }
+            if (mirroredRelativePath.endsWith(HTML_EXTENSION)) {
+                return mirroredRelativePath.substring(0, mirroredRelativePath.length() - HTML_EXTENSION.length());
+            }
+            if (mirroredRelativePath.endsWith(HTM_EXTENSION)) {
+                return mirroredRelativePath.substring(0, mirroredRelativePath.length() - HTM_EXTENSION.length());
+            }
+            return mirroredRelativePath;
         }
     }
 
@@ -346,19 +613,52 @@ public final class DocsSourceRegistry {
         return environmentBaseUrl != null ? environmentBaseUrl : defaultBaseUrl;
     }
 
-    private static Map<String, String> buildLocalPrefixLookup() {
-        Map<String, String> prefixLookup = new LinkedHashMap<>();
+    private static Map<String, CitationRoute> buildLocalPrefixLookup() {
+        Map<String, CitationRoute> prefixLookup = new LinkedHashMap<>();
         for (JavaApiDocumentationSource javaApiDocumentationSource : JAVA_API_DOCUMENTATION_SOURCES) {
             prefixLookup.put(
                     LOCAL_DOCS_ROOT + javaApiDocumentationSource.relativeMirrorPath() + "/",
-                    javaApiDocumentationSource.remoteBaseUrl());
+                    new CitationRoute(
+                            javaApiDocumentationSource.remoteBaseUrl(), DocumentationCitationPathStyle.LITERAL));
         }
         for (DocumentationSource documentationSource : DOCUMENTATION_SOURCES) {
             prefixLookup.put(
                     LOCAL_DOCS_ROOT + documentationSource.relativeMirrorPath() + "/",
-                    documentationSource.citationBaseUrl());
+                    new CitationRoute(documentationSource.citationBaseUrl(), documentationSource.citationPathStyle()));
         }
         return Map.copyOf(prefixLookup);
+    }
+
+    private record CitationRoute(String citationBaseUrl, DocumentationCitationPathStyle citationPathStyle) {
+        private CitationRoute {
+            Objects.requireNonNull(citationBaseUrl, "citationBaseUrl");
+            Objects.requireNonNull(citationPathStyle, "citationPathStyle");
+        }
+
+        Optional<String> resolveCitationUrl(String mirroredRelativePath) {
+            if (citationPathStyle == DocumentationCitationPathStyle.JAVA_SOURCE) {
+                return resolveJavaSourceCitation(citationBaseUrl, mirroredRelativePath);
+            }
+            return joinBaseAndRel(citationBaseUrl, citationPathStyle.citationRelativePath(mirroredRelativePath));
+        }
+    }
+
+    private static Optional<String> resolveJavaSourceCitation(String sourceBaseUrl, String mirroredRelativePath) {
+        if (mirroredRelativePath == null || mirroredRelativePath.isBlank()) {
+            return Optional.empty();
+        }
+        int fileNameStartIndex = mirroredRelativePath.lastIndexOf(UNIX_PATH_SEPARATOR) + 1;
+        String fileName = mirroredRelativePath.substring(fileNameStartIndex);
+        String sourceDirectory = mirroredRelativePath.substring(0, fileNameStartIndex);
+        if (fileName.endsWith(HTML_EXTENSION) && Character.isUpperCase(fileName.charAt(0))) {
+            String typeName = fileName.substring(0, fileName.length() - HTML_EXTENSION.length());
+            int nestedTypeSeparatorIndex = typeName.indexOf(VERSION_SEPARATOR);
+            String sourceTypeName =
+                    nestedTypeSeparatorIndex < 0 ? typeName : typeName.substring(0, nestedTypeSeparatorIndex);
+            return joinBaseAndRel(sourceBaseUrl, sourceDirectory + sourceTypeName + JAVA_EXTENSION);
+        }
+        String sourceTreeBaseUrl = sourceBaseUrl.replace(GITHUB_BLOB_PATH, GITHUB_TREE_PATH);
+        return joinBaseAndRel(sourceTreeBaseUrl, sourceDirectory);
     }
 
     /** Resolves a file beneath a selected mirror root without assuming a literal host path. */
@@ -397,7 +697,9 @@ public final class DocsSourceRegistry {
         return DOCUMENTATION_SOURCES.stream()
                 .filter(source -> pathEndsWith(normalizedRoot, source.relativeMirrorPath()))
                 .findFirst()
-                .flatMap(source -> joinBaseAndRel(source.citationBaseUrl(), relativeDocumentPath));
+                .flatMap(source -> new CitationRoute(source.citationBaseUrl(), source.citationPathStyle())
+                        .resolveCitationUrl(relativeDocumentPath))
+                .map(DocsSourceRegistry::canonicalizeHttpDocUrl);
     }
 
     private static boolean pathEndsWith(String normalizedRoot, String relativeMirrorPath) {
@@ -576,13 +878,13 @@ public final class DocsSourceRegistry {
         Optional<String> mappedUrl = Optional.empty();
         if (localPath != null) {
             String normalizedPath = localPath.replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR);
-            for (Map.Entry<String, String> prefixEntry : LOCAL_PREFIX_TO_REMOTE_BASE.entrySet()) {
+            for (Map.Entry<String, CitationRoute> prefixEntry : LOCAL_PREFIX_TO_CITATION_ROUTE.entrySet()) {
                 String localPrefix = prefixEntry.getKey();
                 if (normalizedPath.contains(localPrefix)) {
                     String relativePath =
                             normalizedPath.substring(normalizedPath.indexOf(localPrefix) + localPrefix.length());
                     String adjustedPath = normalizeRelativePath(localPrefix, relativePath);
-                    mappedUrl = joinBaseAndRel(prefixEntry.getValue(), adjustedPath);
+                    mappedUrl = prefixEntry.getValue().resolveCitationUrl(adjustedPath);
                     break;
                 }
             }
@@ -676,7 +978,7 @@ public final class DocsSourceRegistry {
         return Optional.of(PUBLIC_PDFS_BASE + baseName);
     }
 
-    /** Canonicalizes common duplicated path segments in HTTP documentation URLs. */
+    /** Canonicalizes duplicated segments and retired Spring reference aliases in HTTP documentation URLs. */
     public static String canonicalizeHttpDocUrl(String url) {
         if (url == null || url.isBlank()) {
             return url;
@@ -685,6 +987,11 @@ public final class DocsSourceRegistry {
         if (canonicalUrl.contains(SPRING_DOCS_HTTPS_PREFIX)) {
             canonicalUrl = canonicalUrl.replace(
                     "/spring-framework/docs/current/javadoc-api/java/", "/spring-framework/docs/current/javadoc-api/");
+            canonicalUrl = canonicalUrl
+                    .replace("/spring-framework/reference/reference/", "/spring-framework/reference/")
+                    .replace("/spring-framework/reference/current/", "/spring-framework/reference/")
+                    .replace("/spring-boot/reference/reference/", "/spring-boot/reference/")
+                    .replace("/spring-boot/reference/current/", "/spring-boot/reference/");
         }
         int protocolIndex = canonicalUrl.indexOf("://");
         String protocolPrefix = protocolIndex >= 0 ? canonicalUrl.substring(0, protocolIndex + 3) : "";

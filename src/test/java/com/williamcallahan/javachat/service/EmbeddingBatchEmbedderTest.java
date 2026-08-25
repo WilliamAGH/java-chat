@@ -10,6 +10,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
@@ -21,6 +24,7 @@ class EmbeddingBatchEmbedderTest {
     private static final int THREE_BATCH_DOCUMENT_COUNT = EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE * 2 + 1;
     private static final int REPRESENTATIVE_JAVA_CORPUS_CHUNK_COUNT = 177_000;
     private static final int MAX_REPRESENTATIVE_JAVA_CORPUS_REQUEST_COUNT = 45_000;
+    private static final int MINIMUM_PARALLEL_REQUEST_COUNT = 2;
     private static final float[] EMBEDDING_VECTOR = new float[] {0.25f, 0.75f};
 
     @Test
@@ -36,10 +40,13 @@ class EmbeddingBatchEmbedderTest {
         assertEquals(3, embeddingClient.requestedTextBatches.size());
         assertEquals(
                 List.of(
+                        1,
                         EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE,
-                        EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE,
-                        1),
-                embeddingClient.requestedTextBatches.stream().map(List::size).toList());
+                        EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE),
+                embeddingClient.requestedTextBatches.stream()
+                        .map(List::size)
+                        .sorted()
+                        .toList());
         assertTrue(embeddingClient.requestedTextBatches.stream()
                 .allMatch(textBatch -> textBatch.size() <= EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE));
         assertTrue(
@@ -63,12 +70,13 @@ class EmbeddingBatchEmbedderTest {
     }
 
     @Test
-    void rejectsResponseCountMismatchWithoutContinuing() {
+    void rejectsResponseCountMismatch() {
         int documentCount = EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE + 1;
         RecordingEmbeddingClient embeddingClient = new RecordingEmbeddingClient(
                 EMBEDDING_DIMENSIONS,
-                (requestIndex, textBatch) ->
-                        requestIndex == 0 ? repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR) : List.of());
+                (requestIndex, textBatch) -> documentIndexFromText(textBatch.getFirst()) == 0
+                        ? repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR)
+                        : List.of());
 
         EmbeddingServiceUnavailableException mismatchFailure = assertThrows(
                 EmbeddingServiceUnavailableException.class,
@@ -79,17 +87,19 @@ class EmbeddingBatchEmbedderTest {
                 .getMessage()
                 .contains("batch [" + EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE + ".."
                         + EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE + "]"));
-        assertEquals(2, embeddingClient.requestedTextBatches.size());
+        assertTrue(embeddingClient.requestedTextBatches.size() >= 1);
+        assertTrue(embeddingClient.requestedTextBatches.size() <= 2);
     }
 
     @Test
-    void propagatesBatchFailureWithoutFallbackOrLaterRequests() {
+    void propagatesBatchFailureWithoutFallback() {
         int documentCount = EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE * 2 + 1;
         EmbeddingServiceUnavailableException providerFailure =
                 new EmbeddingServiceUnavailableException("provider unavailable");
         RecordingEmbeddingClient embeddingClient =
                 new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
-                    if (requestIndex == 1) {
+                    if (documentIndexFromText(textBatch.getFirst())
+                            == EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE) {
                         throw providerFailure;
                     }
                     return repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR);
@@ -108,7 +118,8 @@ class EmbeddingBatchEmbedderTest {
         assertTrue(
                 batchFailure.getMessage().contains("firstUrl=https://docs.example.com/java/" + secondBatchStartIndex));
         assertTrue(batchFailure.getMessage().contains("lastUrl=https://docs.example.com/java/" + secondBatchEndIndex));
-        assertEquals(2, embeddingClient.requestedTextBatches.size());
+        assertTrue(embeddingClient.requestedTextBatches.size() >= 2);
+        assertTrue(embeddingClient.requestedTextBatches.size() <= 3);
     }
 
     @Test
@@ -144,9 +155,117 @@ class EmbeddingBatchEmbedderTest {
         int expectedFinalBatchSize = Math.floorMod(
                         REPRESENTATIVE_JAVA_CORPUS_CHUNK_COUNT - 1, EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE)
                 + 1;
-        assertEquals(
-                expectedFinalBatchSize,
-                embeddingClient.requestedTextBatches.getLast().size());
+        assertTrue(embeddingClient.requestedTextBatches.stream()
+                .anyMatch(requestedTextBatch -> requestedTextBatch.size() == expectedFinalBatchSize));
+    }
+
+    @Test
+    void executesProviderRequestsConcurrently() {
+        int documentCount = EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE * MINIMUM_PARALLEL_REQUEST_COUNT;
+        CountDownLatch concurrentRequestBarrier = new CountDownLatch(MINIMUM_PARALLEL_REQUEST_COUNT);
+        RecordingEmbeddingClient embeddingClient =
+                new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
+                    concurrentRequestBarrier.countDown();
+                    try {
+                        assertTrue(
+                                concurrentRequestBarrier.await(5, TimeUnit.SECONDS),
+                                "all requests in the bounded wave must execute concurrently");
+                    } catch (InterruptedException interruptedBarrier) {
+                        Thread.currentThread().interrupt();
+                        throw new AssertionError("concurrency barrier was interrupted", interruptedBarrier);
+                    }
+                    return repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR);
+                });
+
+        EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(documentCount));
+
+        assertEquals(MINIMUM_PARALLEL_REQUEST_COUNT, embeddingClient.maximumConcurrentRequests.get());
+    }
+
+    @Test
+    void boundsConcurrentProviderRequests() {
+        int documentCount = EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE
+                * (EmbeddingBatchEmbedder.MAX_CONCURRENT_EMBEDDING_REQUESTS + 1);
+        RecordingEmbeddingClient embeddingClient = new RecordingEmbeddingClient(
+                EMBEDDING_DIMENSIONS,
+                (requestIndex, textBatch) -> repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR));
+
+        EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(documentCount));
+
+        assertTrue(embeddingClient.maximumConcurrentRequests.get()
+                <= EmbeddingBatchEmbedder.MAX_CONCURRENT_EMBEDDING_REQUESTS);
+    }
+
+    @Test
+    void retriesTemporaryProviderFailuresBeforeMutationBoundary() {
+        AtomicInteger providerAttempts = new AtomicInteger();
+        RecordingEmbeddingClient embeddingClient =
+                new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
+                    if (providerAttempts.incrementAndGet() < EmbeddingBatchEmbedder.MAX_EMBEDDING_ATTEMPTS) {
+                        throw new EmbeddingServiceTemporarilyUnavailableException("temporary gateway failure");
+                    }
+                    return repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR);
+                });
+
+        List<float[]> embeddingVectors = EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1));
+
+        assertEquals(1, embeddingVectors.size());
+        assertEquals(EmbeddingBatchEmbedder.MAX_EMBEDDING_ATTEMPTS, providerAttempts.get());
+    }
+
+    @Test
+    void doesNotRetryNonTransientProviderFailures() {
+        AtomicInteger providerAttempts = new AtomicInteger();
+        RecordingEmbeddingClient embeddingClient =
+                new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
+                    providerAttempts.incrementAndGet();
+                    throw new EmbeddingServiceUnavailableException("invalid provider response");
+                });
+
+        assertThrows(
+                EmbeddingServiceUnavailableException.class,
+                () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1)));
+
+        assertEquals(1, providerAttempts.get());
+    }
+
+    @Test
+    void exhaustsBoundedRetriesForTemporaryProviderFailures() {
+        AtomicInteger providerAttempts = new AtomicInteger();
+        RecordingEmbeddingClient embeddingClient =
+                new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
+                    providerAttempts.incrementAndGet();
+                    throw new EmbeddingServiceTemporarilyUnavailableException("temporary gateway failure");
+                });
+
+        assertThrows(
+                EmbeddingServiceUnavailableException.class,
+                () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1)));
+
+        assertEquals(EmbeddingBatchEmbedder.MAX_EMBEDDING_ATTEMPTS, providerAttempts.get());
+    }
+
+    @Test
+    void preservesCallerInterruptionInFailureCauseChain() {
+        EmbeddingServiceTemporarilyUnavailableException providerFailure =
+                new EmbeddingServiceTemporarilyUnavailableException("temporary gateway failure");
+        RecordingEmbeddingClient embeddingClient =
+                new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
+                    throw providerFailure;
+                });
+
+        Thread.currentThread().interrupt();
+        try {
+            EmbeddingServiceUnavailableException batchFailure = assertThrows(
+                    EmbeddingServiceUnavailableException.class,
+                    () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1)));
+
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertTrue(batchFailure.getCause().getCause() instanceof InterruptedException);
+            assertSame(providerFailure, batchFailure.getCause().getSuppressed()[0]);
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     private static List<Document> sequentialDocuments(int documentCount) {
@@ -174,8 +293,11 @@ class EmbeddingBatchEmbedderTest {
     private static final class RecordingEmbeddingClient implements EmbeddingClient {
         private final int embeddingDimensions;
         private final BiFunction<Integer, List<String>, List<float[]>> batchEmbeddingFunction;
-        private final List<List<String>> requestedTextBatches = new ArrayList<>();
-        private final List<LlmGatewayTier> requestedTiers = new ArrayList<>();
+        private final AtomicInteger requestSequence = new AtomicInteger();
+        private final AtomicInteger activeRequests = new AtomicInteger();
+        private final AtomicInteger maximumConcurrentRequests = new AtomicInteger();
+        private final List<List<String>> requestedTextBatches = Collections.synchronizedList(new ArrayList<>());
+        private final List<LlmGatewayTier> requestedTiers = Collections.synchronizedList(new ArrayList<>());
 
         private RecordingEmbeddingClient(
                 int embeddingDimensions, BiFunction<Integer, List<String>, List<float[]>> batchEmbeddingFunction) {
@@ -185,10 +307,16 @@ class EmbeddingBatchEmbedderTest {
 
         @Override
         public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier) {
-            int requestIndex = requestedTextBatches.size();
+            int requestIndex = requestSequence.getAndIncrement();
             requestedTextBatches.add(List.copyOf(texts));
             requestedTiers.add(requestTier);
-            return batchEmbeddingFunction.apply(requestIndex, texts);
+            int activeRequestCount = activeRequests.incrementAndGet();
+            maximumConcurrentRequests.accumulateAndGet(activeRequestCount, Math::max);
+            try {
+                return batchEmbeddingFunction.apply(requestIndex, texts);
+            } finally {
+                activeRequests.decrementAndGet();
+            }
         }
 
         @Override

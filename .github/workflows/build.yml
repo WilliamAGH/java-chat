@@ -5,10 +5,12 @@ on:
     branches:
       - main
       - dev
+      - prod
   pull_request:
     branches:
       - main
       - dev
+      - prod
 
 permissions:
   contents: read
@@ -49,6 +51,16 @@ jobs:
 
       - name: Test frontend
         run: npm run test
+
+      - name: Test command-line client
+        working-directory: cli
+        run: npm test && npm run pack:check
+
+      - name: Install browser for accessibility tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Test answer accessibility in Chromium
+        run: npm run test:browser
 
       - name: Build frontend
         run: npm run build
@@ -133,6 +145,16 @@ jobs:
             --build-arg SOURCE_COMMIT="${{ github.sha }}" \
             --tag java-chat:ci \
             .
+
+          docker buildx build --load \
+            --build-arg SOURCE_COMMIT="${{ github.sha }}" \
+            --target ingestion \
+            --tag java-chat-ingestion:ci \
+            .
+
+          docker run --rm --entrypoint /bin/bash java-chat-ingestion:ci \
+            -c 'curl --version >/dev/null && jq --version >/dev/null && python3 --version >/dev/null'
+          docker run --rm java-chat-ingestion:ci --help | grep --fixed-strings 'Usage:'
 
       - name: Start pinned Qdrant dependency
         run: |

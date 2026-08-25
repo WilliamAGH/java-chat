@@ -26,9 +26,13 @@ public class Chunker {
 
     /**
      * Splits text into fixed-size token windows with optional overlap.
+     *
+     * <p>Uses ordinary encoding because ingested text is content, not a model prompt: documentation
+     * legitimately quotes special-token strings such as {@code <|endoftext|>}, which
+     * {@link Encoding#encode(String)} rejects.
      */
     public List<String> chunkByTokens(String text, int maxTokens, int overlapTokens) {
-        IntArrayList tokens = encoding.encode(text);
+        IntArrayList tokens = encoding.encodeOrdinary(text);
         List<String> chunks = new ArrayList<>();
         int start = 0;
         while (start < tokens.size()) {
@@ -57,7 +61,7 @@ public class Chunker {
         if (text == null || text.isEmpty()) {
             return "";
         }
-        IntArrayList tokens = encoding.encode(text);
+        IntArrayList tokens = encoding.encodeOrdinary(text);
         if (tokens.size() <= maxTokens) {
             return text;
         }
@@ -78,6 +82,6 @@ public class Chunker {
         if (text == null || text.isEmpty()) {
             return 0;
         }
-        return encoding.encode(text).size();
+        return encoding.countTokensOrdinary(text);
     }
 }

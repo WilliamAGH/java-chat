@@ -15,6 +15,8 @@ source "$SCRIPT_DIR/lib/env_loader.sh"
 source "$SCRIPT_DIR/lib/documentation_sources.sh"
 # shellcheck source=lib/documentation_fetch_sources.sh
 source "$SCRIPT_DIR/lib/documentation_fetch_sources.sh"
+# shellcheck source=lib/documentation_archives.sh
+source "$SCRIPT_DIR/lib/documentation_archives.sh"
 # shellcheck source=lib/documentation_seed_mirrors.sh
 source "$SCRIPT_DIR/lib/documentation_seed_mirrors.sh"
 
@@ -296,8 +298,12 @@ validate_staged_documentation_mirror() {
     local malformed_path
     malformed_path="$(find "$staging_directory" -type f \( \
         -name '._*' -o -name '*.tmp' -o -name '*.part' -o -name '*~' \
-        -o -name '*\?*' -o -iname '*%3f*' -o -iname '*SNAPSHOT*' \
-        -o -iname '*-ea*' -o -iname '*-eap*' -o -iname 'eap-*' \) -print -quit)"
+        -o -name '*\?*' -o -iname '*%3f*' \
+        -o -iname 'SNAPSHOT' -o -iname 'SNAPSHOT-*' \
+        -o -iname '*-SNAPSHOT-*' -o -iname '*-SNAPSHOT.html' -o -iname '*-SNAPSHOT.htm' \
+        -o -iname '*-ea-*' -o -iname '*-ea.html' -o -iname '*-ea.htm' \
+        -o -iname '*-eap-*' -o -iname '*-eap.html' -o -iname '*-eap.htm' \
+        -o -iname 'eap-*' \) -print -quit)"
     if [ -n "$malformed_path" ]; then
         log "${RED}✗ $documentation_source_name staging contains a forbidden path: $malformed_path${NC}"
         return 1
@@ -359,9 +365,15 @@ fetch_source() {
     local seed_discovery_url=""
     local seed_source_prefix=""
     local seed_reject_regex=""
+    local -a supplemental_seed_urls=()
+    local seed_additional_discovery_url=""
+    local request_delay_seconds="0"
     local single_page_only="false"
     local java25_specification_pdfs="false"
+    local javadoc_seed="false"
     local superseded_relative_mirror_path=""
+    local archive_format=""
+    local archive_strip_components="0"
 
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -383,9 +395,15 @@ fetch_source() {
             --seed-discovery-url) seed_discovery_url="$2"; shift 2 ;;
             --seed-source-prefix) seed_source_prefix="$2"; shift 2 ;;
             --seed-reject-regex) seed_reject_regex="$2"; shift 2 ;;
+            --seed-url) supplemental_seed_urls+=("$2"); shift 2 ;;
+            --seed-additional-discovery-url) seed_additional_discovery_url="$2"; shift 2 ;;
+            --request-delay-seconds) request_delay_seconds="$2"; shift 2 ;;
             --single-page) single_page_only="true"; shift ;;
             --java25-specification-pdfs) java25_specification_pdfs="true"; shift ;;
+            --javadoc-seed) javadoc_seed="true"; shift ;;
             --superseded-mirror-path) superseded_relative_mirror_path="$2"; shift 2 ;;
+            --archive-format) archive_format="$2"; shift 2 ;;
+            --archive-strip-components) archive_strip_components="$2"; shift 2 ;;
             *) echo "Unknown documentation fetch option: $1" >&2; return 1 ;;
         esac
     done
@@ -399,12 +417,33 @@ fetch_source() {
         return 1
     fi
     if [ "$single_page_only" = "true" ] \
-        && { [ -n "$java_release" ] || [ -n "$seed_discovery_url" ]; }; then
+        && { [ -n "$java_release" ] || [ "$javadoc_seed" = "true" ] || [ -n "$seed_discovery_url" ] || [ -n "$archive_format" ]; }; then
         echo "Single-page documentation cannot use another fetch strategy: $name" >&2
+        return 1
+    fi
+    if [ -n "$archive_format" ] \
+        && { [ -n "$java_release" ] || [ "$javadoc_seed" = "true" ] || [ -n "$seed_discovery_url" ]; }; then
+        echo "Archived documentation cannot use another fetch strategy: $name" >&2
         return 1
     fi
     if [ -n "$seed_reject_regex" ] && [ -z "$seed_discovery_url" ]; then
         echo "A discovery-only rejection requires structured discovery: $name" >&2
+        return 1
+    fi
+    if [ "${#supplemental_seed_urls[@]}" -gt 0 ] && [ -z "$seed_discovery_url" ]; then
+        echo "Supplemental documentation seeds require structured discovery: $name" >&2
+        return 1
+    fi
+    if [ -n "$seed_additional_discovery_url" ] && [ "$seed_document_type" != "html-links" ]; then
+        echo "Additional documentation discovery requires HTML link discovery: $name" >&2
+        return 1
+    fi
+    if [[ ! "$request_delay_seconds" =~ ^[0-9]+$ ]]; then
+        echo "Documentation request delay must be a nonnegative integer: $name" >&2
+        return 1
+    fi
+    if [ "$request_delay_seconds" -gt 0 ] && [ -z "$seed_discovery_url" ]; then
+        echo "Documentation request delay requires structured discovery: $name" >&2
         return 1
     fi
     if [ "$java25_specification_pdfs" = "true" ] \
@@ -434,12 +473,36 @@ fetch_source() {
         return 1
     fi
     fetch_target_directory="$staging_directory"
+    if { [ -n "$seed_discovery_url" ] || [ -n "$archive_format" ] \
+            || [ -n "$java_release" ] || [ "$javadoc_seed" = "true" ]; } \
+        && [ "$FORCE_REFRESH" != "true" ] \
+        && [ -d "$target_dir" ] \
+        && [ "$(count_html_files "$staging_directory")" -eq 0 ] \
+        && ! copy_documentation_mirror_to_staging "$target_dir" "$staging_directory"; then
+        discard_documentation_fetch_staging_directory "$staging_directory"
+        log "${RED}✗ Could not seed validation staging from the published $name mirror${NC}"
+        return 1
+    fi
 
     # ── Pre-fetch: check existing mirror and quarantine if incomplete ──
     local existing_count
     existing_count="$(count_html_files "$fetch_target_directory")"
     if [ "$existing_count" -gt 0 ]; then
         log "${BLUE}ℹ Existing mirror: $existing_count HTML files${NC}"
+    fi
+    if [ -n "$archive_format" ] \
+        && [ "$FORCE_REFRESH" != "true" ] \
+        && [ "$existing_count" -ge "$min_files" ] \
+        && validate_staged_documentation_mirror \
+            "$staging_directory" "$name" "$min_files" "$identity_regex" "$forbidden_identity_regex" \
+        && validate_staged_documentation_identity \
+            "$staging_directory" "$name" "$required_identity_page" "$required_identity_text" "$expected_meta_version"; then
+        log "${GREEN}✓ $name already fetched: $existing_count HTML files (validated pinned archive)${NC}"
+        if ! discard_documentation_fetch_staging_directory "$staging_directory"; then
+            log "${RED}✗ Could not discard validated archive staging for $name${NC}"
+            return 1
+        fi
+        return 0
     fi
     # Proactive cleanup for known legacy Spring mirror layouts that otherwise mask incomplete fetches.
     if [[ "$name" == *"Spring Framework Javadoc"* ]]; then
@@ -464,6 +527,7 @@ fetch_source() {
 
     # ── Dispatch to strategy ──
     local documentation_fetch_status=0
+    DOCUMENTATION_SOURCE_ALREADY_COMPLETE="false"
     if [ "$single_page_only" = "true" ]; then
         fetch_single_documentation_page \
             "$url" \
@@ -472,28 +536,43 @@ fetch_source() {
             "$cut_dirs" \
             "$min_files" \
             "$partial_mirror_allowed" || documentation_fetch_status=$?
-    elif [ -n "$java_release" ]; then
+    elif [ -n "$archive_format" ]; then
+        fetch_documentation_archive \
+            "$url" \
+            "$fetch_target_directory" \
+            "$name" \
+            "$min_files" \
+            "$archive_format" \
+            "$archive_strip_components" || documentation_fetch_status=$?
+    elif [ -n "$java_release" ] || [ "$javadoc_seed" = "true" ]; then
         local java_api_fetch_required="true"
-        if ! generate_java_api_javadoc_seed "$url" "$fetch_target_directory" \
-            || ! reconcile_java_api_seed_mirror "$url" "$fetch_target_directory" "$name" "$cut_dirs"; then
+        if ! generate_javadoc_seed "$url" "$fetch_target_directory" \
+            || ! reconcile_javadoc_seed_mirror "$url" "$fetch_target_directory" "$name" "$cut_dirs"; then
             cd - > /dev/null
             return 1
         fi
         existing_count="$(count_html_files "$fetch_target_directory")"
         if [ "$FORCE_REFRESH" != "true" ] && [ "$min_files" -gt 0 ] && [ "$existing_count" -ge "$min_files" ]; then
-            if verify_java_api_seed_mirror "$url" "$fetch_target_directory" "$name" "$cut_dirs"; then
+            if verify_javadoc_seed_mirror "$url" "$fetch_target_directory" "$name" "$cut_dirs" \
+                && validate_staged_documentation_mirror \
+                    "$staging_directory" "$name" "$min_files" "$identity_regex" "$forbidden_identity_regex" \
+                && validate_staged_documentation_identity \
+                    "$staging_directory" "$name" "$required_identity_page" "$required_identity_text" "$expected_meta_version" \
+                && { [ "$java25_specification_pdfs" != "true" ] \
+                    || validate_java25_specification_pdfs "$staging_directory" "$name"; }; then
                 log "${GREEN}✓ $name already fetched: $existing_count HTML files (minimum: $min_files)${NC}"
                 if ! cd - > /dev/null; then
                     log "${RED}✗ Could not restore the working directory after checking $name${NC}"
                     return 1
                 fi
                 java_api_fetch_required="false"
+                DOCUMENTATION_SOURCE_ALREADY_COMPLETE="true"
             else
                 log "${YELLOW}⚠ $name cached mirror is missing canonical seed paths; refetching${NC}"
             fi
         fi
         if [ "$java_api_fetch_required" = "true" ]; then
-            fetch_java_api_javadoc_seed \
+            fetch_javadoc_seed \
                 "$fetch_target_directory" \
                 "$name" \
                 "$cut_dirs" \
@@ -503,18 +582,27 @@ fetch_source() {
                 "$url" || documentation_fetch_status=$?
         fi
     elif [ -n "$seed_discovery_url" ]; then
-        fetch_discovered_documentation_seed \
-            "$url" \
-            "$fetch_target_directory" \
-            "$name" \
-            "$cut_dirs" \
-            "$min_files" \
-            "$reject_regex" \
-            "$partial_mirror_allowed" \
-            "$seed_document_type" \
-            "$seed_discovery_url" \
-            "$seed_source_prefix" \
-            "$seed_reject_regex" || documentation_fetch_status=$?
+        local -a discovered_documentation_arguments=(
+            --canonical-prefix "$url"
+            --target-dir "$fetch_target_directory"
+            --name "$name"
+            --cut-directories "$cut_dirs"
+            --minimum-html-files "$min_files"
+            --reject-regex "$reject_regex"
+            --partial-mirror-allowed "$partial_mirror_allowed"
+            --seed-document-type "$seed_document_type"
+            --seed-discovery-url "$seed_discovery_url"
+            --seed-source-prefix "$seed_source_prefix"
+            --seed-reject-regex "$seed_reject_regex"
+            --request-delay-seconds "$request_delay_seconds"
+            --seed-additional-discovery-url "$seed_additional_discovery_url"
+        )
+        local supplemental_seed_url
+        for supplemental_seed_url in "${supplemental_seed_urls[@]}"; do
+            discovered_documentation_arguments+=(--supplemental-seed-url "$supplemental_seed_url")
+        done
+        fetch_discovered_documentation_seed "${discovered_documentation_arguments[@]}" \
+            || documentation_fetch_status=$?
     else
         fetch_docs_mirror \
             "$url" \
@@ -526,9 +614,22 @@ fetch_source() {
             "$partial_mirror_allowed" || documentation_fetch_status=$?
     fi
 
+    if ! cd "$PROJECT_ROOT" > /dev/null; then
+        log "${RED}✗ Could not restore the project working directory after fetching $name${NC}"
+        return 1
+    fi
+
     if [ "$documentation_fetch_status" -ne 0 ]; then
         log "${YELLOW}⚠ Preserving source-matched staging for a verified resume: $staging_directory${NC}"
         return "$documentation_fetch_status"
+    fi
+
+    if [ "$DOCUMENTATION_SOURCE_ALREADY_COMPLETE" = "true" ]; then
+        if ! discard_documentation_fetch_staging_directory "$staging_directory"; then
+            log "${RED}✗ Could not discard validated staging copy for $name${NC}"
+            return 1
+        fi
+        return 0
     fi
 
     if ! quarantine_staged_non_html_files "$staging_directory" "$name"; then
@@ -588,6 +689,29 @@ fetch_named_official_source() {
         scala) "$source_dispatch" fetch_source --url "https://docs.scala-lang.org/scala3/reference/" --mirror-path "scala" --name "Scala 3 Documentation" --source-version "3-stable" --identity-regex "Scala 3" --cut-directories 2 --minimum-html-files 300 --seed-document-type html-links --seed-discovery-url "https://docs.scala-lang.org/scala3/reference/" --seed-source-prefix "https://docs.scala-lang.org/scala3/reference/" --seed-reject-regex "/index\\.html$" ;;
         groovy) "$source_dispatch" fetch_source --url "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" --mirror-path "groovy/5.0.7" --name "Groovy 5.0.7 Documentation" --source-version "5.0.7" --identity-regex "Groovy.*5\\.0\\.7|5\\.0\\.7.*Groovy" --cut-directories 4 --minimum-html-files 9 --reject-regex "/(gdk|templating|type-checking-extensions)\\.html$" --seed-document-type html-links --seed-discovery-url "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" --seed-source-prefix "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" ;;
         clojure) "$source_dispatch" fetch_source --url "https://clojure.org/guides/" --mirror-path "clojure" --name "Clojure Guides" --source-version "stable-current" --identity-regex "Clojure" --cut-directories 1 --minimum-html-files 20 --reject-regex "/guides/guides$" --seed-document-type xml-sitemap --seed-discovery-url "https://clojure.org/sitemap.xml" --seed-source-prefix "https://clojure.org/guides/" ;;
+        jooq-3.21-manual) "$source_dispatch" fetch_source --url "https://www.jooq.org/doc/3.21.7/manual/" --mirror-path "jooq/3.21/manual" --name "jOOQ 3.21.7 Manual" --source-version "3.21.7" --identity-regex "jOOQ.*3\.21\.7|3\.21\.7.*jOOQ" --cut-directories 3 --minimum-html-files 1350 --seed-document-type html-links --seed-discovery-url "https://www.jooq.org/doc/3.21.7/manual/" --seed-source-prefix "https://www.jooq.org/doc/3.21.7/manual/" ;;
+        jooq-3.21-api) "$source_dispatch" fetch_source --url "https://repo.maven.apache.org/maven2/org/jooq/jooq/3.21.7/jooq-3.21.7-javadoc.jar" --mirror-path "jooq/3.21/api" --name "jOOQ 3.21.7 API" --source-version "3.21.7" --identity-regex "jOOQ 3\.21\.7 API" --required-identity-page "index.html" --required-identity-text "jOOQ 3.21.7 API" --cut-directories 0 --minimum-html-files 3200 --archive-format zip ;;
+        python-3.14) "$source_dispatch" fetch_source --url "https://docs.python.org/ftp/python/doc/3.14.7/python-3.14.7-docs-html.tar.bz2" --mirror-path "python/3.14" --name "Python 3.14.7 Documentation" --source-version "3.14.7" --identity-regex "3\.14\.7 Documentation" --required-identity-page "index.html" --required-identity-text "3.14.7 Documentation" --cut-directories 0 --minimum-html-files 570 --archive-format tar-bz2 --archive-strip-components 1 ;;
+        postgresql-17) "$source_dispatch" fetch_source --url "https://www.postgresql.org/docs/17/" --mirror-path "postgresql/17" --name "PostgreSQL 17 Documentation" --source-version "17.11" --identity-regex "PostgreSQL 17\.11 Documentation" --cut-directories 2 --minimum-html-files 1100 --seed-document-type xml-sitemap --seed-discovery-url "https://www.postgresql.org/sitemap.xml" --seed-source-prefix "https://www.postgresql.org/docs/17/" --seed-reject-regex '\.(css|js|mjs|xml|txt|svg|png|jpe?g|gif|webp|ico|pdf|zip|gz)$' ;;
+        postgresql-18) "$source_dispatch" fetch_source --url "https://www.postgresql.org/docs/18/" --mirror-path "postgresql/18" --name "PostgreSQL 18 Documentation" --source-version "18.6" --identity-regex "PostgreSQL 18\.6 Documentation" --cut-directories 2 --minimum-html-files 1100 --seed-document-type xml-sitemap --seed-discovery-url "https://www.postgresql.org/sitemap.xml" --seed-source-prefix "https://www.postgresql.org/docs/18/" --seed-reject-regex '\.(css|js|mjs|xml|txt|svg|png|jpe?g|gif|webp|ico|pdf|zip|gz)$' ;;
+        hikaricp-7.1.0-api) "$source_dispatch" fetch_source --url "https://repo.maven.apache.org/maven2/com/zaxxer/HikariCP/7.1.0/HikariCP-7.1.0-javadoc.jar" --mirror-path "hikaricp/7.1.0/api" --name "HikariCP 7.1.0 API" --source-version "7.1.0" --identity-regex "HikariCP 7\.1\.0 API" --required-identity-page "index.html" --required-identity-text "HikariCP 7.1.0 API" --cut-directories 0 --minimum-html-files 100 --archive-format zip ;;
+        hikaricp-spring-7.0.2-api) "$source_dispatch" fetch_source --url "https://repo.maven.apache.org/maven2/com/zaxxer/HikariCP/7.0.2/HikariCP-7.0.2-javadoc.jar" --mirror-path "hikaricp/7.0.2/api" --name "HikariCP 7.0.2 API (Spring Boot 4.0.6)" --source-version "7.0.2" --identity-regex "HikariCP 7\.0\.2 API" --required-identity-page "index.html" --required-identity-text "HikariCP 7.0.2 API" --cut-directories 0 --minimum-html-files 100 --archive-format zip ;;
+        jackson-2.22.2-api) "$source_dispatch" fetch_source --url "https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-databind/2.22.2/jackson-databind-2.22.2-javadoc.jar" --mirror-path "jackson/2.22.2/api" --name "Jackson Databind 2.22.2 API" --source-version "2.22.2" --identity-regex "jackson-databind 2\.22\.2 API" --required-identity-page "index.html" --required-identity-text "jackson-databind 2.22.2 API" --cut-directories 0 --minimum-html-files 1330 --archive-format zip ;;
+        jackson-spring-2.21.2-api) "$source_dispatch" fetch_source --url "https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-databind/2.21.2/jackson-databind-2.21.2-javadoc.jar" --mirror-path "jackson/2.21.2/api" --name "Jackson Databind 2.21.2 API (Spring Boot 4.0.6)" --source-version "2.21.2" --identity-regex "jackson-databind 2\.21\.2 API" --required-identity-page "index.html" --required-identity-text "jackson-databind 2.21.2 API" --cut-directories 0 --minimum-html-files 1330 --archive-format zip ;;
+        jackson-3.2.2-api) "$source_dispatch" fetch_source --url "https://repo.maven.apache.org/maven2/tools/jackson/core/jackson-databind/3.2.2/jackson-databind-3.2.2-javadoc.jar" --mirror-path "jackson/3.2.2/api" --name "Jackson Databind 3.2.2 API" --source-version "3.2.2" --identity-regex "jackson-databind 3\.2\.2 API" --required-identity-page "index.html" --required-identity-text "jackson-databind 3.2.2 API" --cut-directories 0 --minimum-html-files 1480 --archive-format zip ;;
+        jackson-spring-3.1.2-api) "$source_dispatch" fetch_source --url "https://repo.maven.apache.org/maven2/tools/jackson/core/jackson-databind/3.1.2/jackson-databind-3.1.2-javadoc.jar" --mirror-path "jackson/3.1.2/api" --name "Jackson Databind 3.1.2 API (Spring Boot 4.0.6)" --source-version "3.1.2" --identity-regex "jackson-databind 3\.1\.2 API" --required-identity-page "index.html" --required-identity-text "jackson-databind 3.1.2 API" --cut-directories 0 --minimum-html-files 1470 --archive-format zip ;;
+        lombok-1.18.46-api) "$source_dispatch" fetch_source --url "https://repo.maven.apache.org/maven2/org/projectlombok/lombok/1.18.46/lombok-1.18.46-javadoc.jar" --mirror-path "lombok/1.18.46/api" --name "Lombok 1.18.46 API (Spring Boot 4.0.6)" --source-version "1.18.46" --identity-regex "Overview \(Lombok\)" --required-identity-page "index.html" --required-identity-text "Overview (Lombok)" --cut-directories 0 --minimum-html-files 90 --archive-format zip ;;
+        lombok-1.18.46-reference) "$source_dispatch" fetch_source --url "https://projectlombok.org/features/" --mirror-path "lombok/1.18.46/reference" --name "Lombok 1.18.46 Feature Reference" --source-version "1.18.46" --identity-regex "Project Lombok" --cut-directories 1 --minimum-html-files 30 --seed-document-type html-links --seed-discovery-url "https://projectlombok.org/features/" --seed-additional-discovery-url "https://projectlombok.org/features/experimental/" --seed-source-prefix "https://projectlombok.org/features/" ;;
+        anthropic-api) "$source_dispatch" fetch_source --url "https://platform.claude.com/docs/en/" --mirror-path "anthropic/api" --name "Anthropic API Documentation" --source-version "current" --identity-regex "Anthropic|Claude" --cut-directories 2 --minimum-html-files 580 --seed-document-type xml-sitemap --seed-discovery-url "https://platform.claude.com/sitemap.xml" --seed-source-prefix "https://platform.claude.com/docs/en/" --seed-reject-regex '^https://platform\.claude\.com/docs/en/home$' ;;
+        claude-code) "$source_dispatch" fetch_source --url "https://code.claude.com/docs/en/" --mirror-path "anthropic/claude-code" --name "Claude Code Documentation" --source-version "current" --identity-regex "Claude Code" --cut-directories 2 --minimum-html-files 185 --seed-document-type xml-sitemap --seed-discovery-url "https://code.claude.com/sitemap.xml" --seed-source-prefix "https://code.claude.com/docs/en/" ;;
+        amp-code) "$source_dispatch" fetch_source --url "https://ampcode.com/" --mirror-path "amp-code" --name "Amp Code CLI Manual" --source-version "current" --identity-regex "Amp" --cut-directories 0 --minimum-html-files 8 --seed-document-type html-links --seed-discovery-url "https://ampcode.com/manual" --seed-source-prefix "https://ampcode.com/" --seed-reject-regex '^https://ampcode\.com/(?:manual/appendix/legacy-permissions-rules\.txt$|(?!manual(?:/|$)).*)' --seed-url "https://ampcode.com/manual/orbs/oidc" --seed-url "https://ampcode.com/manual/sdk/python" --seed-url "https://ampcode.com/manual/sdk/typescript" ;;
+        tinker) "$source_dispatch" fetch_source --url "https://tinker-docs.thinkingmachines.ai/" --mirror-path "tinker" --name "Tinker Documentation" --source-version "current" --identity-regex "Tinker" --cut-directories 0 --minimum-html-files 320 --seed-document-type xml-sitemap --seed-discovery-url "https://tinker-docs.thinkingmachines.ai/sitemap.xml" --seed-source-prefix "https://tinker-docs.thinkingmachines.ai/" ;;
+        docker) "$source_dispatch" fetch_source --url "https://docs.docker.com/" --mirror-path "docker" --name "Docker Documentation" --source-version "current" --identity-regex "Docker" --cut-directories 0 --minimum-html-files 1600 --seed-document-type xml-sitemap --seed-discovery-url "https://docs.docker.com/sitemap.xml" --seed-source-prefix "https://docs.docker.com/" --seed-reject-regex '^https://docs\.docker\.com/(build/(buildkit/dockerfile-release-notes|release-notes)|enterprise/security/provisioning/scim|reference/cli/docker/(build|builder/build|exec|images|info|mcp/(feature|tools)/list|ps|pull|push|run)|scout/release-notes/cli)/$' ;;
+        dokploy) "$source_dispatch" fetch_source --url "https://docs.dokploy.com/" --mirror-path "dokploy" --name "Dokploy Documentation" --source-version "current" --identity-regex "Dokploy" --cut-directories 0 --minimum-html-files 200 --seed-document-type xml-sitemap --seed-discovery-url "https://docs.dokploy.com/sitemap.xml" --seed-source-prefix "https://docs.dokploy.com/" ;;
+        infisical) "$source_dispatch" fetch_source --url "https://infisical.com/docs/" --mirror-path "infisical" --name "Infisical Documentation" --source-version "current" --identity-regex "Infisical" --cut-directories 1 --minimum-html-files 2200 --seed-document-type xml-sitemap --seed-discovery-url "https://infisical.com/docs/sitemap.xml" --seed-source-prefix "https://infisical.com/docs/" ;;
+        doppler-guides) "$source_dispatch" fetch_source --url "https://docs.doppler.com/docs/" --mirror-path "doppler/docs" --name "Doppler Guides" --source-version "current" --identity-regex "Doppler" --cut-directories 1 --minimum-html-files 200 --seed-document-type html-links --seed-discovery-url "https://docs.doppler.com/docs/start" --seed-source-prefix "https://docs.doppler.com/docs/" --seed-reject-regex '^https://docs\.doppler\.com/docs/(enclave-installation(-docker|-serverless)?|enclave-service-tokens)$' --request-delay-seconds 1 ;;
+        doppler-reference) "$source_dispatch" fetch_source --url "https://docs.doppler.com/reference/" --mirror-path "doppler/reference" --name "Doppler API Reference" --source-version "current" --identity-regex "Doppler" --cut-directories 1 --minimum-html-files 130 --seed-document-type html-links --seed-discovery-url "https://docs.doppler.com/reference/api" --seed-source-prefix "https://docs.doppler.com/reference/" --request-delay-seconds 1 ;;
+        doppler-changelog) "$source_dispatch" fetch_source --url "https://docs.doppler.com/changelog/" --mirror-path "doppler/changelog" --name "Doppler Changelog" --source-version "current" --identity-regex "Doppler" --cut-directories 1 --minimum-html-files 20 --seed-document-type html-links --seed-discovery-url "https://docs.doppler.com/changelog/" --seed-source-prefix "https://docs.doppler.com/changelog/" --seed-additional-discovery-url "https://docs.doppler.com/changelog?page=2" --request-delay-seconds 1 ;;
         spring-boot) "$source_dispatch" fetch_source --url "https://docs.spring.io/spring-boot/reference/" --mirror-path "spring-boot" --name "Spring Boot Reference" --source-version "stable-current" --identity-regex "Spring Boot" --cut-directories 2 --minimum-html-files 89 --seed-document-type html-links --seed-discovery-url "https://docs.spring.io/spring-boot/reference/index.html" --seed-source-prefix "https://docs.spring.io/spring-boot/reference/" ;;
         quarkus) "$source_dispatch" fetch_source --url "https://quarkus.io/guides/" --mirror-path "quarkus" --name "Quarkus Guides" --source-version "stable-current" --identity-regex "Quarkus" --cut-directories 1 --minimum-html-files 200 --reject-regex "%7[BbDd]" --seed-document-type html-links --seed-discovery-url "https://quarkus.io/guides/" --seed-source-prefix "https://quarkus.io/guides/" ;;
         java/java21-complete) "$source_dispatch" fetch_source --java-release 21 --url "https://docs.oracle.com/en/java/javase/21/docs/api/" --mirror-path "java/java21-complete" --name "Java 21 Complete API" --source-version "21-ga" --identity-regex "Overview \\(Java SE 21 &amp; JDK 21\\)" --required-identity-page "api/index.html" --required-identity-text "Overview (Java SE 21 & JDK 21)" --cut-directories 5 --minimum-html-files 5000 ;;
@@ -597,6 +721,7 @@ fetch_named_official_source() {
         spring-ai-api-stable) "$source_dispatch" fetch_source --url "$SPRING_AI_API_STABLE_BASE" --mirror-path "spring-ai-api-stable" --name "Spring AI API 1.1.2" --source-version "1.1.2" --identity-regex "Spring AI Parent 1\\.1\\.2 API" --forbidden-identity-regex "Spring AI Parent (2\\.[^ ]*|[^ ]*SNAPSHOT) API" --cut-directories 4 --minimum-html-files 4000 --reject-regex "SNAPSHOT|/spring-ai/docs/2\\." ;;
         spring-framework-reference) "$source_dispatch" fetch_source --url "$SPRING_FRAMEWORK_REFERENCE_BASE" --mirror-path "spring-framework-reference" --name "Spring Framework Reference (current)" --source-version "stable-current" --identity-regex "Spring Framework" --cut-directories 2 --minimum-html-files 450 --reject-regex "/spring-framework/reference/[0-9]|/spring-framework/reference/[^/]*SNAPSHOT" --seed-document-type xml-sitemap --seed-discovery-url "https://docs.spring.io/spring-framework/reference/sitemap.xml" --seed-source-prefix "$SPRING_FRAMEWORK_REFERENCE_BASE" --superseded-mirror-path "spring-framework-complete" ;;
         spring-framework-api) "$source_dispatch" fetch_source --url "$SPRING_FRAMEWORK_API_BASE" --mirror-path "spring-framework-api" --name "Spring Framework Javadoc (current)" --source-version "stable-current" --identity-regex "Spring Framework" --cut-directories 4 --minimum-html-files 7000 ;;
+        spring-framework-7.0.7-api) "$source_dispatch" fetch_source --url "https://docs.spring.io/spring-framework/docs/7.0.7/javadoc-api/" --mirror-path "spring-framework/7.0.7/api" --name "Spring Framework 7.0.7 API" --source-version "7.0.7" --identity-regex "Spring Framework 7\.0\.7 API" --required-identity-page "index.html" --required-identity-text "Spring Framework 7.0.7 API" --cut-directories 4 --minimum-html-files 5800 --javadoc-seed ;;
         oracle-java25-release-notes) "$source_dispatch" fetch_source --url "$JAVA25_RELEASE_NOTES_ISSUES_URL" --mirror-path "oracle/javase" --name "Java 25 Release Notes Issues" --source-version "25-ga" --identity-regex "Java.*25|25.*Java" --cut-directories 3 --minimum-html-files 1 --single-page ;;
         ibm-java25-overview) "$source_dispatch" fetch_source --url "$IBM_JAVA25_ARTICLE_URL" --mirror-path "ibm/articles" --name "IBM Java 25 Overview" --source-version "25-ga" --identity-regex "Java.*25|25.*Java" --cut-directories 1 --minimum-html-files 1 ;;
         jetbrains-java25-article) "$source_dispatch" fetch_source --url "$JETBRAINS_JAVA25_BLOG_URL" --mirror-path "jetbrains/idea/2025/09" --name "JetBrains Java 25 Blog" --source-version "25-ga" --identity-regex "Java.*25|25.*Java" --cut-directories 3 --minimum-html-files 1 --single-page ;;
@@ -644,9 +769,17 @@ fetch_selected_official_sources() {
 
 fetch_all_official_sources() {
     local source_identifier
-    for source_identifier in dev-java kotlin scala groovy clojure spring-boot quarkus \
+    for source_identifier in dev-java kotlin scala groovy clojure \
+        jooq-3.21-manual jooq-3.21-api python-3.14 postgresql-17 postgresql-18 \
+        hikaricp-7.1.0-api hikaricp-spring-7.0.2-api \
+        jackson-2.22.2-api jackson-spring-2.21.2-api \
+        jackson-3.2.2-api jackson-spring-3.1.2-api \
+        lombok-1.18.46-api lombok-1.18.46-reference anthropic-api claude-code amp-code tinker \
+        docker dokploy infisical doppler-guides doppler-reference doppler-changelog \
+        spring-boot quarkus \
         java/java21-complete java/java24-complete java/java25-complete \
         spring-ai-reference spring-ai-api-stable spring-framework-reference spring-framework-api \
+        spring-framework-7.0.7-api \
         oracle-java25-release-notes ibm-java25-overview jetbrains-java25-article; do
         fetch_named_official_source "$source_identifier"
     done

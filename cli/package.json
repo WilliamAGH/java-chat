@@ -1,0 +1,28 @@
+{
+  "name": "@williamcallahan/javachat-cli",
+  "version": "0.1.0",
+  "description": "Ask Java Chat from any terminal, with the same retrieval and citations as javachat.ai.",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "bin": {
+    "javachat": "bin/javachat.js"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "node --test",
+    "pack:check": "npm pack --dry-run"
+  },
+  "engines": {
+    "node": ">=24.18.0"
+  }
+}

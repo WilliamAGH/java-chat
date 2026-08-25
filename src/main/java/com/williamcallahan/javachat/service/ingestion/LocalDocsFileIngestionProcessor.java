@@ -41,7 +41,12 @@ public class LocalDocsFileIngestionProcessor {
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
 
     private static final String FILE_URL_PREFIX = "file://";
-    static final int MAX_EMBEDDING_BATCH_DOCUMENTS = 32;
+    private static final String NAVIGATION_FRAMESET_SELECTOR = "frameset";
+    private static final String NAVIGATION_NOFRAMES_SELECTOR = "noframes";
+    private static final String INTERACTIVE_API_REFERENCE_SELECTOR = "main > article.redoc-container > redoc[spec-url]";
+    private static final String INTERACTIVE_API_ALTERNATE_SELECTOR =
+            "head > link[rel=alternate][type=\"text/markdown\"], head > link[rel=alternate][type=\"application/yaml\"]";
+    static final int MAX_EMBEDDING_BATCH_DOCUMENTS = 256;
     static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v4";
 
     private final FileContentServices fileContentServices;
@@ -230,6 +235,7 @@ public class LocalDocsFileIngestionProcessor {
         String packageName;
         boolean isJavaApiPage = JavaPackageExtractor.isJavaApiUrl(url);
         boolean excludedJavaApiPage = false;
+        boolean excludedNavigationPage = false;
         List<ChunkProcessingService.JavaApiPageSegment> javaApiPageSegments = List.of();
 
         if (fileName.endsWith(".pdf")) {
@@ -254,7 +260,8 @@ public class LocalDocsFileIngestionProcessor {
                 String html = fileOps.readTextFile(file);
                 parsedDocument = Jsoup.parse(html);
                 title = Optional.ofNullable(parsedDocument.title()).orElse("");
-                if (isJavaApiPage) {
+                excludedNavigationPage = isNavigationOnlyDocument(parsedDocument);
+                if (!excludedNavigationPage && isJavaApiPage) {
                     JavaApiPageExtraction javaApiPageExtraction = htmlExtractor.extractJavaApiPage(parsedDocument);
                     excludedJavaApiPage = javaApiPageExtraction.excluded();
                     bodyText = javaApiPageExtraction.combinedText();
@@ -273,7 +280,7 @@ public class LocalDocsFileIngestionProcessor {
                         LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "html-read", htmlReadException)));
             }
 
-            if (!excludedJavaApiPage) {
+            if (!excludedJavaApiPage && !excludedNavigationPage) {
                 var contentGuard = fileContentServices.contentGuard();
                 GuardDecision guardDecision = contentGuard.evaluate(new GuardInput(bodyText, parsedDocument));
                 if (!guardDecision.acceptable()) {
@@ -291,9 +298,9 @@ public class LocalDocsFileIngestionProcessor {
             requiresFullReindex = unmarkedVectorDecision.requiresFullReindex();
         }
 
-        if (excludedJavaApiPage) {
+        if (excludedJavaApiPage || excludedNavigationPage) {
             boolean replacementRequired = requiresFullReindex;
-            return deferred(() -> processExcludedJavaApiPage(markerContext, replacementRequired));
+            return deferred(() -> processExcludedPage(markerContext, replacementRequired));
         }
 
         ChunkProcessingService.ChunkProcessingOutcome chunkingOutcome;
@@ -670,7 +677,7 @@ public class LocalDocsFileIngestionProcessor {
                 formattedPercent);
     }
 
-    private LocalDocsFileOutcome processExcludedJavaApiPage(MarkerContext markerContext, boolean requiresFullReindex) {
+    private LocalDocsFileOutcome processExcludedPage(MarkerContext markerContext, boolean requiresFullReindex) {
         try {
             if (requiresFullReindex) {
                 storage.hybridVector().deleteByUrl(markerContext.collectionKind(), markerContext.url());
@@ -700,8 +707,16 @@ public class LocalDocsFileIngestionProcessor {
             return LocalDocsFileOutcome.failedFile(
                     failureFactory.failure(markerContext.file(), "marker-transition", markerTransitionException));
         }
-        INDEXING_LOG.info("[INDEXING] Excluded Java API class-use page");
+        INDEXING_LOG.info("[INDEXING] Excluded documentation page from indexing");
         return LocalDocsFileOutcome.skippedFile();
+    }
+
+    private static boolean isNavigationOnlyDocument(org.jsoup.nodes.Document parsedDocument) {
+        boolean navigationFrameset = parsedDocument.selectFirst(NAVIGATION_FRAMESET_SELECTOR) != null
+                && parsedDocument.selectFirst(NAVIGATION_NOFRAMES_SELECTOR) != null;
+        boolean interactiveApiReferenceShell = parsedDocument.selectFirst(INTERACTIVE_API_REFERENCE_SELECTOR) != null
+                && parsedDocument.selectFirst(INTERACTIVE_API_ALTERNATE_SELECTOR) != null;
+        return navigationFrameset || interactiveApiReferenceShell;
     }
 
     private LocalDocsFileOutcome quarantineRejectedFile(Path file, String rejectionReason) {
