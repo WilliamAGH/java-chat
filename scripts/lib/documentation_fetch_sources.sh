@@ -183,7 +183,7 @@ validate_fetch_result() {
 # Requires the single parser that verifies Java 25 specification PDFs are readable.
 require_java25_specification_pdf_parser() {
     if ! command -v mutool >/dev/null 2>&1; then
-        log "${RED}✗ Java 25 specification validation requires mutool. Install with: brew install mupdf (macOS) or apt install mupdf-tools (Ubuntu)${NC}"
+        log "${RED}✗ Java 25 specification validation requires mutool. Install with: brew install mupdf (macOS), apt install mupdf-tools (Ubuntu), or dnf install mupdf (Fedora)${NC}"
         return 1
     fi
 }
@@ -659,6 +659,7 @@ fetch_discovered_documentation_seed() {
     local seed_additional_discovery_url=""
     local require_stable_seed_discovery="false"
     local validate_cloudflare_aliases="false"
+    local canonicalize_extensionless_directory_urls="false"
     local sitemap_index_url=""
     local -a supplemental_seed_urls=()
     while [ "$#" -gt 0 ]; do
@@ -678,6 +679,7 @@ fetch_discovered_documentation_seed() {
             --seed-additional-discovery-url) seed_additional_discovery_url="$2"; shift 2 ;;
             --require-stable-seed-discovery) require_stable_seed_discovery="true"; shift ;;
             --validate-cloudflare-seed-aliases) validate_cloudflare_aliases="true"; shift ;;
+            --canonicalize-extensionless-directory-urls) canonicalize_extensionless_directory_urls="true"; shift ;;
             --sitemap-index-url) sitemap_index_url="$2"; shift 2 ;;
             --supplemental-seed-url) supplemental_seed_urls+=("$2"); shift 2 ;;
             *) echo "Unknown discovered documentation option: $1" >&2; return 1 ;;
@@ -752,6 +754,9 @@ fetch_discovered_documentation_seed() {
         --mirror-path-output "$mirror_paths_file" \
         --cut-directories "$cut_directories"
     )
+    if [ "$canonicalize_extensionless_directory_urls" = "true" ]; then
+        seed_projection_arguments+=(--canonicalize-extensionless-directory-urls)
+    fi
     if ! python3 "$SCRIPT_DIR/documentation_seed.py" "${seed_projection_arguments[@]}"; then
         rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file"
         cd - > /dev/null

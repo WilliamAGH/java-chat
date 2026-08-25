@@ -373,7 +373,7 @@ fi
 assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     fetch_source \
     --url \
-    "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" \
+    "https://archive.apache.org/dist/groovy/5.0.7/distribution/apache-groovy-docs-5.0.7.zip" \
     --mirror-path \
     "groovy/5.0.7" \
     --name \
@@ -382,18 +382,18 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     "5.0.7" \
     --identity-regex \
     'Groovy.*5\.0\.7|5\.0\.7.*Groovy' \
+    --required-identity-page \
+    "core-introduction.html" \
+    --required-identity-text \
+    "version 5.0.7" \
     --cut-directories \
-    4 \
+    0 \
     --minimum-html-files \
-    9 \
-    --reject-regex \
-    '/(gdk|templating|type-checking-extensions)\.html$' \
-    --seed-document-type \
-    html-links \
-    --seed-discovery-url \
-    "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" \
-    --seed-source-prefix \
-    "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/"
+    40 \
+    --archive-format \
+    zip \
+    --archive-publication-root \
+    "groovy-5.0.7/html/documentation"
 
 if ! (
     set --
@@ -473,7 +473,30 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     --seed-discovery-url \
     "https://quarkus.io/guides/" \
     --seed-source-prefix \
-    "https://quarkus.io/guides/"
+    "https://quarkus.io/guides/" \
+    --canonicalize-extensionless-directory-urls
+
+QUARKUS_DISCOVERY_FIXTURE="$TEST_WORK_DIRECTORY/quarkus-guides.html"
+QUARKUS_SEED_OUTPUT="$TEST_WORK_DIRECTORY/quarkus-seed.txt"
+QUARKUS_MIRROR_OUTPUT="$TEST_WORK_DIRECTORY/quarkus-mirror-paths.txt"
+printf '%s\n' '<a href="/guides/aesh">Aesh</a><a href="/guides/stylesheet/config.css">CSS</a>' \
+    > "$QUARKUS_DISCOVERY_FIXTURE"
+python3 "$SCRIPT_DIR/documentation_seed.py" \
+    --document-type html-links \
+    --input "$QUARKUS_DISCOVERY_FIXTURE" \
+    --discovery-url "https://quarkus.io/guides/" \
+    --source-prefix "https://quarkus.io/guides/" \
+    --canonical-prefix "https://quarkus.io/guides/" \
+    --output "$QUARKUS_SEED_OUTPUT" \
+    --mirror-path-output "$QUARKUS_MIRROR_OUTPUT" \
+    --cut-directories 1 \
+    --canonicalize-extensionless-directory-urls
+if ! grep -Fxq 'https://quarkus.io/guides/aesh/' "$QUARKUS_SEED_OUTPUT" \
+    || ! grep -Fxq 'https://quarkus.io/guides/stylesheet/config.css' "$QUARKUS_SEED_OUTPUT" \
+    || ! grep -Fxq 'aesh/index.html' "$QUARKUS_MIRROR_OUTPUT" \
+    || ! grep -Fxq 'stylesheet/config.css.html' "$QUARKUS_MIRROR_OUTPUT"; then
+    fail_documentation_fetch_test "Quarkus extensionless guides did not project onto canonical directory URLs"
+fi
 
 assert_current_documentation_source_dispatch() {
     local documentation_source_identifier="$1"
@@ -1003,7 +1026,8 @@ if ! (
     fail_documentation_fetch_test "missing mutool did not fail before Java 25 specification downloads"
 fi
 if ! grep -Fq -- "brew install mupdf" "$JAVA25_MISSING_PARSER_LOG" \
-    || ! grep -Fq -- "apt install mupdf-tools" "$JAVA25_MISSING_PARSER_LOG"; then
+    || ! grep -Fq -- "apt install mupdf-tools" "$JAVA25_MISSING_PARSER_LOG" \
+    || ! grep -Fq -- "dnf install mupdf" "$JAVA25_MISSING_PARSER_LOG"; then
     fail_documentation_fetch_test "missing mutool did not report its installation command"
 fi
 

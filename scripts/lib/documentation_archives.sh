@@ -8,9 +8,18 @@ fetch_documentation_archive() {
     local minimum_html_files="$4"
     local archive_format="$5"
     local archive_strip_components="$6"
+    local archive_publication_root="${7:-}"
 
     if [[ ! "$archive_strip_components" =~ ^[0-9]+$ ]]; then
         log "${RED}✗ $source_name archive strip-components must be a non-negative integer${NC}"
+        return 1
+    fi
+    if [ -n "$archive_publication_root" ] \
+        && { [[ "$archive_publication_root" == /* ]] \
+            || [[ "$archive_publication_root" == *\\* ]] \
+            || [[ "/$archive_publication_root/" == */../* ]] \
+            || [[ "/$archive_publication_root/" == */./* ]]; }; then
+        log "${RED}✗ $source_name archive publication root must be a safe relative path${NC}"
         return 1
     fi
 
@@ -53,8 +62,21 @@ fetch_documentation_archive() {
                 log "${RED}✗ $source_name ZIP documentation cannot strip path components${NC}"
                 return 1
             fi
+            if [ -n "$archive_publication_root" ] \
+                && ! awk -v publication_prefix="${archive_publication_root%/}/" \
+                    'index($0, publication_prefix) == 1 && length($0) > length(publication_prefix) { found = 1 } END { exit !found }' \
+                    <<< "$archive_listing"; then
+                rm -f "$archive_path"
+                log "${RED}✗ $source_name ZIP archive is missing its publication root${NC}"
+                return 1
+            fi
             ;;
         tar-bz2)
+            if [ -n "$archive_publication_root" ]; then
+                rm -f "$archive_path"
+                log "${RED}✗ $source_name tar documentation cannot select a publication root${NC}"
+                return 1
+            fi
             if ! archive_listing="$(tar -tjf "$archive_path")"; then
                 rm -f "$archive_path"
                 log "${RED}✗ $source_name did not provide a readable tar.bz2 documentation archive${NC}"
@@ -87,7 +109,31 @@ fetch_documentation_archive() {
     local extraction_exit_code=0
     case "$archive_format" in
         zip)
-            unzip -q -o "$archive_path" -d "$target_directory" || extraction_exit_code=$?
+            if [ -n "$archive_publication_root" ]; then
+                local archive_extraction_directory
+                if ! archive_extraction_directory="$(
+                    mktemp -d "$target_directory/.documentation-archive-extraction.XXXXXX"
+                )"; then
+                    extraction_exit_code=1
+                else
+                    unzip -q -o "$archive_path" "${archive_publication_root%/}/*" \
+                        -d "$archive_extraction_directory" || extraction_exit_code=$?
+                fi
+                if [ "$extraction_exit_code" -eq 0 ]; then
+                    local publication_source_directory="$archive_extraction_directory/${archive_publication_root%/}"
+                    while IFS= read -r -d '' publication_entry; do
+                        if ! mv -- "$publication_entry" "$target_directory/"; then
+                            extraction_exit_code=1
+                            break
+                        fi
+                    done < <(find "$publication_source_directory" -mindepth 1 -maxdepth 1 -print0)
+                fi
+                if [ -n "${archive_extraction_directory:-}" ]; then
+                    find "$archive_extraction_directory" -depth -type d -empty -delete
+                fi
+            else
+                unzip -q -o "$archive_path" -d "$target_directory" || extraction_exit_code=$?
+            fi
             ;;
         tar-bz2)
             tar -xjf "$archive_path" \

@@ -420,7 +420,8 @@ public final class DocsSourceRegistry {
                     "quarkus",
                     "official",
                     "framework-guide",
-                    ""),
+                    "",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
             new DocumentationSource(
                     SPRING_AI_BASE + "reference/1.1/",
                     "spring-ai-reference",

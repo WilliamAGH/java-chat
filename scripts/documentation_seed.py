@@ -189,6 +189,19 @@ def prefer_directory_urls(seed_urls: list[str]) -> list[str]:
     ]
 
 
+def canonicalize_extensionless_directory_urls(seed_urls: list[str]) -> list[str]:
+    """Projects extensionless page aliases onto their canonical directory URLs."""
+    canonical_seed_urls: list[str] = []
+    for seed_url in seed_urls:
+        parsed_seed_url = urllib.parse.urlsplit(seed_url)
+        final_path_segment = parsed_seed_url.path.rsplit("/", 1)[-1]
+        if final_path_segment and "." not in final_path_segment:
+            canonical_seed_urls.append(f"{seed_url}/")
+        else:
+            canonical_seed_urls.append(seed_url)
+    return canonical_seed_urls
+
+
 def require_remote_url(remote_url: str, allow_http: bool, require_trailing_slash: bool) -> None:
     """Rejects remote URLs that carry credentials or non-path request components."""
     if (
@@ -534,6 +547,7 @@ def main() -> int:
     argument_parser.add_argument("--output", required=True, type=pathlib.Path)
     argument_parser.add_argument("--mirror-path-output", required=True, type=pathlib.Path)
     argument_parser.add_argument("--cut-directories", required=True, type=int)
+    argument_parser.add_argument("--canonicalize-extensionless-directory-urls", action="store_true")
     parsed_arguments = argument_parser.parse_args()
     if parsed_arguments.cut_directories < 0:
         argument_parser.error("--cut-directories cannot be negative")
@@ -548,6 +562,8 @@ def main() -> int:
         parsed_arguments.source_prefix,
         parsed_arguments.canonical_prefix,
     )
+    if parsed_arguments.canonicalize_extensionless_directory_urls:
+        seed_urls = canonicalize_extensionless_directory_urls(seed_urls)
     seed_urls = prefer_directory_urls(seed_urls)
     if parsed_arguments.reject_regex:
         try:

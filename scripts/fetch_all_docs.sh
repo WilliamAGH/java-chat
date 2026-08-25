@@ -369,6 +369,7 @@ fetch_source() {
     local seed_additional_discovery_url=""
     local require_stable_seed_discovery="false"
     local validate_cloudflare_aliases="false"
+    local canonicalize_extensionless_directory_urls="false"
     local request_delay_seconds="0"
     local single_page_only="false"
     local java25_specification_pdfs="false"
@@ -376,6 +377,7 @@ fetch_source() {
     local superseded_relative_mirror_path=""
     local archive_format=""
     local archive_strip_components="0"
+    local archive_publication_root=""
     local plain_text_document_url=""
     local plain_text_document_title=""
     local minimum_plain_text_bytes="0"
@@ -409,6 +411,7 @@ fetch_source() {
             --seed-additional-discovery-url) seed_additional_discovery_url="$2"; shift 2 ;;
             --require-stable-seed-discovery) require_stable_seed_discovery="true"; shift ;;
             --validate-cloudflare-seed-aliases) validate_cloudflare_aliases="true"; shift ;;
+            --canonicalize-extensionless-directory-urls) canonicalize_extensionless_directory_urls="true"; shift ;;
             --request-delay-seconds) request_delay_seconds="$2"; shift 2 ;;
             --single-page) single_page_only="true"; shift ;;
             --java25-specification-pdfs) java25_specification_pdfs="true"; shift ;;
@@ -416,6 +419,7 @@ fetch_source() {
             --superseded-mirror-path) superseded_relative_mirror_path="$2"; shift 2 ;;
             --archive-format) archive_format="$2"; shift 2 ;;
             --archive-strip-components) archive_strip_components="$2"; shift 2 ;;
+            --archive-publication-root) archive_publication_root="$2"; shift 2 ;;
             --plain-text-document-url) plain_text_document_url="$2"; shift 2 ;;
             --plain-text-document-title) plain_text_document_title="$2"; shift 2 ;;
             --minimum-plain-text-bytes) minimum_plain_text_bytes="$2"; shift 2 ;;
@@ -444,6 +448,10 @@ fetch_source() {
     if [ -n "$archive_format" ] \
         && { [ -n "$java_release" ] || [ "$javadoc_seed" = "true" ] || [ -n "$seed_discovery_url" ]; }; then
         echo "Archived documentation cannot use another fetch strategy: $name" >&2
+        return 1
+    fi
+    if [ -n "$archive_publication_root" ] && [ "$archive_format" != "zip" ]; then
+        echo "Archive publication root selection requires a ZIP source: $name" >&2
         return 1
     fi
     if [[ ! "$minimum_plain_text_bytes" =~ ^[0-9]+$ ]] \
@@ -493,6 +501,13 @@ fetch_source() {
     fi
     if [ -n "$seed_additional_discovery_url" ] && [ "$seed_document_type" != "html-links" ]; then
         echo "Additional documentation discovery requires HTML link discovery: $name" >&2
+        return 1
+    fi
+    if [ "$canonicalize_extensionless_directory_urls" = "true" ] \
+        && { [ "$seed_document_type" != "html-links" ] \
+            || [ -n "$seed_additional_discovery_url" ] \
+            || [ "$require_stable_seed_discovery" = "true" ]; }; then
+        echo "Extensionless directory URL canonicalization requires one non-stable HTML-link discovery source" >&2
         return 1
     fi
     if [ "$require_stable_seed_discovery" = "true" ] \
@@ -655,7 +670,8 @@ fetch_source() {
             "$name" \
             "$min_files" \
             "$archive_format" \
-            "$archive_strip_components" || documentation_fetch_status=$?
+            "$archive_strip_components" \
+            "$archive_publication_root" || documentation_fetch_status=$?
     elif [ -n "$java_release" ] || [ "$javadoc_seed" = "true" ]; then
         local java_api_fetch_required="true"
         if ! generate_javadoc_seed "$url" "$fetch_target_directory" \
@@ -717,6 +733,9 @@ fetch_source() {
         fi
         if [ "$validate_cloudflare_aliases" = "true" ]; then
             discovered_documentation_arguments+=(--validate-cloudflare-seed-aliases)
+        fi
+        if [ "$canonicalize_extensionless_directory_urls" = "true" ]; then
+            discovered_documentation_arguments+=(--canonicalize-extensionless-directory-urls)
         fi
         local supplemental_seed_url
         for supplemental_seed_url in "${supplemental_seed_urls[@]}"; do
@@ -810,7 +829,7 @@ fetch_named_official_source() {
         dev-java) "$source_dispatch" fetch_source --url "https://dev.java/learn/" --mirror-path "dev-java" --name "Dev.java Learning" --source-version "stable-current" --identity-regex "Learn Java" --cut-directories 1 --minimum-html-files 40 ;;
         kotlin) "$source_dispatch" fetch_source --url "https://kotlinlang.org/docs/" --mirror-path "kotlin" --name "Kotlin 2.4.10 Documentation" --source-version "2.4.10" --identity-regex "2\\.4\\.10" --required-identity-page "faq.html" --required-identity-text "The currently released version is 2.4.10, published on July 14, 2026." --cut-directories 1 --minimum-html-files 250 --reject-regex "(^|/)([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(/|(-[^/]+)?\\.html$)|(^|/)[^/]*-([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(-[^/]+)?\\.html$" --seed-document-type xml-sitemap --seed-discovery-url "https://kotlinlang.org/sitemap.xml" --seed-source-prefix "https://kotlinlang.org/docs/" ;;
         scala) "$source_dispatch" fetch_source --url "https://docs.scala-lang.org/scala3/reference/" --mirror-path "scala" --name "Scala 3 Documentation" --source-version "3-stable" --identity-regex "Scala 3" --cut-directories 2 --minimum-html-files 300 --seed-document-type html-links --seed-discovery-url "https://docs.scala-lang.org/scala3/reference/" --seed-source-prefix "https://docs.scala-lang.org/scala3/reference/" --seed-reject-regex "/index\\.html$" ;;
-        groovy) "$source_dispatch" fetch_source --url "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" --mirror-path "groovy/5.0.7" --name "Groovy 5.0.7 Documentation" --source-version "5.0.7" --identity-regex "Groovy.*5\\.0\\.7|5\\.0\\.7.*Groovy" --cut-directories 4 --minimum-html-files 9 --reject-regex "/(gdk|templating|type-checking-extensions)\\.html$" --seed-document-type html-links --seed-discovery-url "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" --seed-source-prefix "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" ;;
+        groovy) "$source_dispatch" fetch_source --url "https://archive.apache.org/dist/groovy/5.0.7/distribution/apache-groovy-docs-5.0.7.zip" --mirror-path "groovy/5.0.7" --name "Groovy 5.0.7 Documentation" --source-version "5.0.7" --identity-regex "Groovy.*5\\.0\\.7|5\\.0\\.7.*Groovy" --required-identity-page "core-introduction.html" --required-identity-text "version 5.0.7" --cut-directories 0 --minimum-html-files 40 --archive-format zip --archive-publication-root "groovy-5.0.7/html/documentation" ;;
         clojure) "$source_dispatch" fetch_source --url "https://clojure.org/guides/" --mirror-path "clojure" --name "Clojure Guides" --source-version "stable-current" --identity-regex "Clojure" --cut-directories 1 --minimum-html-files 20 --reject-regex "/guides/guides$" --seed-document-type xml-sitemap --seed-discovery-url "https://clojure.org/sitemap.xml" --seed-source-prefix "https://clojure.org/guides/" ;;
         jooq-3.21-manual) "$source_dispatch" fetch_source --url "https://www.jooq.org/doc/3.21.7/manual/" --mirror-path "jooq/3.21/manual" --name "jOOQ 3.21.7 Manual" --source-version "3.21.7" --identity-regex "jOOQ.*3\.21\.7|3\.21\.7.*jOOQ" --cut-directories 3 --minimum-html-files 1350 --seed-document-type html-links --seed-discovery-url "https://www.jooq.org/doc/3.21.7/manual/" --seed-source-prefix "https://www.jooq.org/doc/3.21.7/manual/" ;;
         jooq-3.21-api) "$source_dispatch" fetch_source --url "https://repo.maven.apache.org/maven2/org/jooq/jooq/3.21.7/jooq-3.21.7-javadoc.jar" --mirror-path "jooq/3.21/api" --name "jOOQ 3.21.7 API" --source-version "3.21.7" --identity-regex "jOOQ 3\.21\.7 API" --required-identity-page "index.html" --required-identity-text "jOOQ 3.21.7 API" --cut-directories 0 --minimum-html-files 3200 --archive-format zip ;;
@@ -840,7 +859,7 @@ fetch_named_official_source() {
         doppler-reference) "$source_dispatch" fetch_source --url "https://docs.doppler.com/reference/" --mirror-path "doppler/reference" --name "Doppler API Reference" --source-version "current" --identity-regex "Doppler" --cut-directories 1 --minimum-html-files 130 --seed-document-type html-links --seed-discovery-url "https://docs.doppler.com/reference/api" --seed-source-prefix "https://docs.doppler.com/reference/" --request-delay-seconds 1 ;;
         doppler-changelog) "$source_dispatch" fetch_source --url "https://docs.doppler.com/changelog/" --mirror-path "doppler/changelog" --name "Doppler Changelog" --source-version "current" --identity-regex "Doppler" --cut-directories 1 --minimum-html-files 20 --seed-document-type html-links --seed-discovery-url "https://docs.doppler.com/changelog/" --seed-source-prefix "https://docs.doppler.com/changelog/" --seed-additional-discovery-url "https://docs.doppler.com/changelog?page=2" --request-delay-seconds 1 ;;
         spring-boot) "$source_dispatch" fetch_source --url "https://docs.spring.io/spring-boot/reference/" --mirror-path "spring-boot" --name "Spring Boot Reference" --source-version "stable-current" --identity-regex "Spring Boot" --cut-directories 2 --minimum-html-files 89 --seed-document-type html-links --seed-discovery-url "https://docs.spring.io/spring-boot/reference/index.html" --seed-source-prefix "https://docs.spring.io/spring-boot/reference/" ;;
-        quarkus) "$source_dispatch" fetch_source --url "https://quarkus.io/guides/" --mirror-path "quarkus" --name "Quarkus Guides" --source-version "stable-current" --identity-regex "Quarkus" --cut-directories 1 --minimum-html-files 200 --reject-regex "%7[BbDd]" --seed-document-type html-links --seed-discovery-url "https://quarkus.io/guides/" --seed-source-prefix "https://quarkus.io/guides/" ;;
+        quarkus) "$source_dispatch" fetch_source --url "https://quarkus.io/guides/" --mirror-path "quarkus" --name "Quarkus Guides" --source-version "stable-current" --identity-regex "Quarkus" --cut-directories 1 --minimum-html-files 200 --reject-regex "%7[BbDd]" --seed-document-type html-links --seed-discovery-url "https://quarkus.io/guides/" --seed-source-prefix "https://quarkus.io/guides/" --canonicalize-extensionless-directory-urls ;;
         java/java21-complete) "$source_dispatch" fetch_source --java-release 21 --url "https://docs.oracle.com/en/java/javase/21/docs/api/" --mirror-path "java/java21-complete" --name "Java 21 Complete API" --source-version "21-ga" --identity-regex "Overview \\(Java SE 21 &amp; JDK 21\\)" --required-identity-page "api/index.html" --required-identity-text "Overview (Java SE 21 & JDK 21)" --cut-directories 5 --minimum-html-files 5000 ;;
         java/java24-complete) "$source_dispatch" fetch_source --java-release 24 --url "https://docs.oracle.com/en/java/javase/24/docs/api/" --mirror-path "java/java24-complete" --name "Java 24 Complete API" --source-version "24-ga" --identity-regex "Overview \\(Java SE 24 &amp; JDK 24\\)" --required-identity-page "api/index.html" --required-identity-text "Overview (Java SE 24 & JDK 24)" --cut-directories 5 --minimum-html-files 5000 ;;
         java/java25-complete) "$source_dispatch" fetch_source --java-release 25 --url "https://docs.oracle.com/en/java/javase/25/docs/api/" --mirror-path "java/java25-complete" --name "Java 25 Complete API" --source-version "25-ga" --identity-regex "Overview \\(Java SE 25 &amp; JDK 25\\)" --required-identity-page "api/index.html" --required-identity-text "Overview (Java SE 25 & JDK 25)" --cut-directories 5 --minimum-html-files 5000 --java25-specification-pdfs ;;
