@@ -119,6 +119,13 @@ fi
 if [ -e "$WRITER_LEASE_CAPTURE" ]; then
     fail_process_environment_test "unknown CLI option acquired the writer lease"
 fi
+if (run_documentation_ingestion --doc-sets= >/dev/null 2>&1) \
+    || (run_documentation_ingestion "--doc-sets=   " >/dev/null 2>&1); then
+    fail_process_environment_test "blank targeted documentation selector was accepted"
+fi
+if [ -e "$WRITER_LEASE_CAPTURE" ]; then
+    fail_process_environment_test "blank targeted documentation selector acquired the writer lease"
+fi
 
 run_documentation_ingestion --doc-sets=kotlin >/dev/null
 if [ "$(wc -l < "$WRITER_LEASE_CAPTURE" | tr -d ' ')" -ne 1 ]; then

@@ -150,6 +150,10 @@ for ingestion_argument in "$@"; do
     case $ingestion_argument in
         --doc-sets=*)
             DOCS_SETS_FILTER="${ingestion_argument#*=}"
+            if [[ "$DOCS_SETS_FILTER" =~ ^[[:space:]]*$ ]]; then
+                echo "--doc-sets requires at least one documentation set" >&2
+                return 1
+            fi
             ;;
         --app-jar=*)
             PREBUILT_APP_JAR="${ingestion_argument#*=}"

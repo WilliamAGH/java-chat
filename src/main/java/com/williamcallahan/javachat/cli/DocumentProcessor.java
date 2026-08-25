@@ -342,8 +342,11 @@ public class DocumentProcessor {
     }
 
     List<DocumentationSet> selectDocumentationSets(final String filter, final boolean includeQuickSets) {
-        if (filter == null || filter.isBlank()) {
+        if (filter == null) {
             return includeQuickSets ? QUICK_DOCUMENTATION_SETS : BASE_DOCUMENTATION_SETS;
+        }
+        if (filter.isBlank()) {
+            throw new DocumentProcessingException("DOCS_SETS contains a blank selector");
         }
         final Set<String> selectorTokens = parseDocSetFilter(filter);
         if (selectorTokens.isEmpty()) {
@@ -355,17 +358,22 @@ public class DocumentProcessor {
             }
             return BASE_DOCUMENTATION_SETS;
         }
+        final List<String> unmatchedSelectorTokens = selectorTokens.stream()
+                .filter(selectorToken -> ALL_DOCUMENTATION_SETS.stream()
+                        .noneMatch(documentationSet -> documentationSet.matchesSelectorTokens(Set.of(selectorToken))))
+                .toList();
+        if (!unmatchedSelectorTokens.isEmpty()) {
+            throw new DocumentProcessingException(String.format(
+                    Locale.ROOT,
+                    "DOCS_SETS contains unknown selectors: %s. Available doc sets: %s",
+                    String.join(DOCSET_FILTER_DELIMITER, unmatchedSelectorTokens),
+                    formatDocSetSummary(ALL_DOCUMENTATION_SETS)));
+        }
         final List<DocumentationSet> selectedDocumentationSets = new ArrayList<>();
         for (DocumentationSet documentationSet : ALL_DOCUMENTATION_SETS) {
             if (documentationSet.matchesSelectorTokens(selectorTokens)) {
                 selectedDocumentationSets.add(documentationSet);
             }
-        }
-        if (selectedDocumentationSets.isEmpty()) {
-            throw new DocumentProcessingException(String.format(
-                    Locale.ROOT,
-                    "DOCS_SETS matched no documentation sets. Available doc sets: %s",
-                    formatDocSetSummary(ALL_DOCUMENTATION_SETS)));
         }
         boolean includesCanonicalSet = selectedDocumentationSets.stream().anyMatch(BASE_DOCUMENTATION_SETS::contains);
         boolean includesQuickSet = selectedDocumentationSets.stream().anyMatch(QUICK_DOCUMENTATION_SETS::contains);
@@ -385,11 +393,12 @@ public class DocumentProcessor {
         if (filter == null || filter.isBlank()) {
             return selectorTokens;
         }
-        for (String commaSeparatedSelector : filter.split(DOCSET_FILTER_DELIMITER)) {
+        for (String commaSeparatedSelector : filter.split(DOCSET_FILTER_DELIMITER, -1)) {
             final String selectorToken = commaSeparatedSelector.trim();
-            if (!selectorToken.isBlank()) {
-                selectorTokens.add(selectorToken);
+            if (selectorToken.isBlank()) {
+                throw new DocumentProcessingException("DOCS_SETS contains a blank selector");
             }
+            selectorTokens.add(selectorToken);
         }
         return selectorTokens;
     }
@@ -475,13 +484,21 @@ public class DocumentProcessor {
                     envOrDefault(ENV_QDRANT_HOST, QDRANT_HOST_DEFAULT),
                     envOrDefault(ENV_QDRANT_PORT, QDRANT_PORT_DEFAULT),
                     envOrDefault(ENV_APP_PORT, APP_PORT_DEFAULT),
-                    envOrDefault(ENV_DOCS_SETS, ""),
+                    optionalEnv(ENV_DOCS_SETS),
                     envBooleanOrDefault(ENV_DOCS_INCLUDE_QUICK, false));
         }
 
         private static String envOrDefault(final String key, final String fallbackText) {
             final String envSetting = System.getenv(key);
             return envSetting == null || envSetting.isBlank() ? fallbackText : envSetting;
+        }
+
+        private static String optionalEnv(final String key) {
+            final String envSetting = System.getenv(key);
+            if (envSetting != null && envSetting.isBlank()) {
+                throw new DocumentProcessingException("DOCS_SETS contains a blank selector");
+            }
+            return envSetting;
         }
 
         private static boolean envBooleanOrDefault(final String key, final boolean fallbackValue) {

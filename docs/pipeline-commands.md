@@ -100,7 +100,7 @@ make process-github-repo  # GitHub repo ingestion (REPO_PATH / REPO_URL / SYNC_E
 
 | Flag | Effect |
 |---|---|
-| `--doc-sets=...` | Comma-separated doc set paths (or IDs for non-Java sets) to process (see [doc set filtering](#doc-set-filtering)) |
+| `--doc-sets=...` | Comma-separated exact documentation mirror paths to process (see [doc set filtering](#doc-set-filtering)) |
 | `--help` | Show usage |
 
 ## GitHub repository ingestion
@@ -130,7 +130,7 @@ GitHub ingestion runs in headless CLI mode (`spring.main.web-application-type=no
 
 ### Doc set filtering
 
-Limit ingestion to specific doc sets by path. Non-Java sets also accept short IDs; Java API sets use their exact mirror paths:
+Limit ingestion to specific doc sets by their exact mirror paths. Blank and unknown selectors are rejected even when the same filter contains valid paths:
 
 ```bash
 DOCS_SETS=java/java25-complete make process-doc-sets
@@ -141,7 +141,7 @@ DOCS_SETS=java/java25-complete make process-doc-sets
 
 Canonical framework doc sets include:
 
-| ID | Content |
+| Mirror path | Content |
 |---|---|
 | `spring-framework-reference` | Spring Framework reference |
 | `spring-framework-api` | Spring Framework Javadocs |

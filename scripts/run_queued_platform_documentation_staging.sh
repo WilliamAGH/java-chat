@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Waits for the current local embedding backlog, then appends the newly fetched
-# platform corpora through the same remote gateway and local-only Qdrant boundary.
+# Waits for the current local embedding backlog, then appends every remaining
+# documentation corpus through the same remote gateway and local-only Qdrant boundary.
 
 set -euo pipefail
 
@@ -9,7 +9,9 @@ SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIRECTORY/.."
 readonly ACTIVE_STAGING_SERVICE="java-chat-local-embedding-staging.service"
 readonly QUEUE_POLL_INTERVAL_SECONDS=60
-readonly QUEUED_DOCUMENTATION_SETS="porkbun,porkbun-mcp,cloudflare"
+readonly STAGING_INVOCATION_RECEIPT="$HOME/.local/state/java-chat/local-embedding-staging.invocation"
+readonly QUEUED_DOCUMENTATION_SOURCES="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,scala,groovy,clojure,spring-boot,quarkus,java/java21-complete,java/java24-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle-java25-release-notes,ibm-java25-overview,jetbrains-java25-article"
+readonly QUEUED_DOCUMENTATION_SETS="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,scala,groovy/5.0.7,clojure,spring-boot,quarkus,java/java21-complete,java/java24-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle/javase,ibm/articles,jetbrains/idea/2025/09"
 
 if [ "$#" -ne 1 ] || [[ "$1" != --after-invocation=* ]]; then
     echo "Usage: $0 --after-invocation=SYSTEMD_INVOCATION_ID" >&2
@@ -52,7 +54,8 @@ expected_staging_invocation_journal() {
 
 current_staging_invocation_id="$(systemctl --user show \
     "$ACTIVE_STAGING_SERVICE" --property=InvocationID --value)"
-if [ "$current_staging_invocation_id" != "$EXPECTED_STAGING_INVOCATION_ID" ]; then
+if [ -n "$current_staging_invocation_id" ] \
+    && [ "$current_staging_invocation_id" != "$EXPECTED_STAGING_INVOCATION_ID" ]; then
     echo "Active staging invocation does not match the queued predecessor" >&2
     exit 1
 fi
@@ -84,26 +87,19 @@ while true; do
     esac
 done
 
-if ! predecessor_result="$(systemctl --user show \
-    "$ACTIVE_STAGING_SERVICE" --property=Result --value)" \
-    || ! predecessor_exit_status="$(systemctl --user show \
-        "$ACTIVE_STAGING_SERVICE" --property=ExecMainStatus --value)" \
-    || [ "$predecessor_result" != "success" ] \
-    || [ "$predecessor_exit_status" != "0" ]; then
-    echo "Current local embedding backlog did not terminate successfully" >&2
-    exit 1
-fi
 if ! expected_staging_invocation_journal | grep -Fq 'LOCAL_STAGING_COMPLETE'; then
     echo "Current local embedding backlog lacks LOCAL_STAGING_COMPLETE" >&2
     exit 1
 fi
+printf '%s\n' "$EXPECTED_STAGING_INVOCATION_ID" > "$STAGING_INVOCATION_RECEIPT.next"
+mv -- "$STAGING_INVOCATION_RECEIPT.next" "$STAGING_INVOCATION_RECEIPT"
 
 # shellcheck source=lib/common_qdrant.sh
 source "$SCRIPT_DIRECTORY/lib/common_qdrant.sh"
+
+./scripts/fetch_all_docs.sh --doc-sets="$QUEUED_DOCUMENTATION_SOURCES"
+
 acquire_qdrant_writer_lease
-
-./scripts/fetch_all_docs.sh --doc-sets="$QUEUED_DOCUMENTATION_SETS"
-
-echo "QUEUED_PLATFORM_STAGING_START $(date -u '+%Y-%m-%dT%H:%M:%SZ') DOCS=3 SETS=$QUEUED_DOCUMENTATION_SETS"
+echo "QUEUED_PLATFORM_STAGING_START $(date -u '+%Y-%m-%dT%H:%M:%SZ') SETS=$QUEUED_DOCUMENTATION_SETS"
 ./scripts/process_all_to_qdrant.sh --doc-sets="$QUEUED_DOCUMENTATION_SETS"
 echo "QUEUED_PLATFORM_STAGING_COMPLETE $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
