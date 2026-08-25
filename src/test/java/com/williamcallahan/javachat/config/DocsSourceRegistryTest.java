@@ -146,18 +146,14 @@ class DocsSourceRegistryTest {
         Path nestedTypePage = mirrorRoot.resolve("com/fasterxml/jackson/databind/ObjectMapper.DefaultTyping.html");
         Path singletonTypePage = mirrorRoot.resolve("com/fasterxml/jackson/databind/JsonNode.html");
 
-        Map<Path, DocsSourceRegistry.MirroredIngestionIdentity> ingestionIdentities =
-                DocsSourceRegistry.resolveMirroredIngestionIdentities(
-                        mirrorRoot, List.of(outerTypePage, nestedTypePage, singletonTypePage));
-        String outerStorageUrl = ingestionIdentities
-                .get(outerTypePage.toAbsolutePath().normalize())
-                .storageUrl();
-        String nestedStorageUrl = ingestionIdentities
-                .get(nestedTypePage.toAbsolutePath().normalize())
-                .storageUrl();
-        String singletonStorageUrl = ingestionIdentities
-                .get(singletonTypePage.toAbsolutePath().normalize())
-                .storageUrl();
+        Map<Path, String> ingestionIdentities = DocsSourceRegistry.resolveMirroredIngestionIdentities(
+                mirrorRoot, List.of(outerTypePage, nestedTypePage, singletonTypePage));
+        String outerStorageUrl =
+                ingestionIdentities.get(outerTypePage.toAbsolutePath().normalize());
+        String nestedStorageUrl =
+                ingestionIdentities.get(nestedTypePage.toAbsolutePath().normalize());
+        String singletonStorageUrl =
+                ingestionIdentities.get(singletonTypePage.toAbsolutePath().normalize());
 
         assertNotEquals(outerStorageUrl, nestedStorageUrl);
         assertEquals(

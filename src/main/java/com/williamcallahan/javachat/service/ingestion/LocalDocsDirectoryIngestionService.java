@@ -3,7 +3,6 @@ package com.williamcallahan.javachat.service.ingestion;
 import com.williamcallahan.javachat.application.ingestion.FileLimit;
 import com.williamcallahan.javachat.application.ingestion.LocalDocumentationIngestionUseCase;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
-import com.williamcallahan.javachat.config.DocsSourceRegistry.MirroredIngestionIdentity;
 import com.williamcallahan.javachat.domain.ingestion.IngestionBacklogStatus;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
@@ -82,7 +81,7 @@ public final class LocalDocsDirectoryIngestionService implements LocalDocumentat
         try (ingestionRunClaim) {
             EligibleFileInventory eligibleFileInventory = eligibleFileInventory(realSelectedRoot);
             List<Path> eligibleFiles = eligibleFileInventory.eligibleFiles();
-            Map<Path, MirroredIngestionIdentity> ingestionIdentities =
+            Map<Path, String> ingestionIdentities =
                     DocsSourceRegistry.resolveMirroredIngestionIdentities(realSelectedRoot, eligibleFiles);
             String selectedDirectoryLabel = selectedDirectoryLabel(realDocumentationRoot, realSelectedRoot);
             backlogStatus = resumableBacklog(

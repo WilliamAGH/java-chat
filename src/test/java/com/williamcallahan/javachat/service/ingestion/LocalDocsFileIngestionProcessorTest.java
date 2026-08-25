@@ -145,12 +145,6 @@ class LocalDocsFileIngestionProcessorTest {
                 })
                 .when(ingestionFixture.fileIngestionMarkerStore)
                 .markFileIngested(anyString(), any(FileIngestionRecord.class));
-        doAnswer(invocation -> {
-                    ingestionRecords.remove(invocation.getArgument(1, String.class));
-                    return null;
-                })
-                .when(ingestionFixture.ingestedFilePruneService)
-                .pruneCollectionFileStrict(anyString(), anyString(), any());
         when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
         when(ingestionFixture.chunkProcessingService.processAndStoreChunks(
                         anyString(), anyString(), anyString(), anyString()))
@@ -175,8 +169,9 @@ class LocalDocsFileIngestionProcessorTest {
         assertEquals(
                 DocsSourceRegistry.normalizeDocUrl(markerIdentities.getFirst()),
                 DocsSourceRegistry.normalizeDocUrl(markerIdentities.getLast()));
-        verify(ingestionFixture.ingestedFilePruneService)
-                .pruneCollectionFileStrict(eq("documentation"), eq(legacyCitationUrl), isNull());
+        assertEquals(legacyCitationUrl, markerIdentities.getFirst());
+        verify(ingestionFixture.ingestedFilePruneService, never())
+                .pruneCollectionFileStrict(anyString(), anyString(), any());
 
         clearInvocations(
                 ingestionFixture.chunkProcessingService,

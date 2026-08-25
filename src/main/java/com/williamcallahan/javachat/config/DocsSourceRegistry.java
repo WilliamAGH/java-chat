@@ -757,8 +757,7 @@ public final class DocsSourceRegistry {
     /**
      * Resolves per-file storage identities, disambiguating only canonical URLs shared by multiple mirror files.
      */
-    public static Map<Path, MirroredIngestionIdentity> resolveMirroredIngestionIdentities(
-            Path mirrorRoot, List<Path> documentFiles) {
+    public static Map<Path, String> resolveMirroredIngestionIdentities(Path mirrorRoot, List<Path> documentFiles) {
         Objects.requireNonNull(mirrorRoot, "mirrorRoot");
         List<Path> requiredDocumentFiles = List.copyOf(Objects.requireNonNull(documentFiles, "documentFiles"));
         Path absoluteMirrorRoot = mirrorRoot.toAbsolutePath().normalize();
@@ -772,35 +771,27 @@ public final class DocsSourceRegistry {
             });
         }
 
-        Map<String, Path> legacyIdentityOwners = new LinkedHashMap<>();
-        Map<Path, MirroredIngestionIdentity> ingestionIdentities = new LinkedHashMap<>();
+        Map<String, Path> canonicalIdentityOwners = new LinkedHashMap<>();
+        Map<Path, String> ingestionIdentities = new LinkedHashMap<>();
         canonicalUrlsByFile.forEach((documentFile, canonicalUrl) -> {
             boolean citationCollision = canonicalUrlCounts.getOrDefault(canonicalUrl, 0) > 1;
             if (!citationCollision) {
-                ingestionIdentities.put(documentFile, new MirroredIngestionIdentity(canonicalUrl, Optional.empty()));
+                ingestionIdentities.put(documentFile, canonicalUrl);
+                return;
+            }
+            Path canonicalIdentityOwner =
+                    canonicalIdentityOwners.computeIfAbsent(canonicalUrl, ignoredUrl -> documentFile);
+            if (canonicalIdentityOwner.equals(documentFile)) {
+                ingestionIdentities.put(documentFile, canonicalUrl);
                 return;
             }
             String mirroredRelativePath = absoluteMirrorRoot
                     .relativize(documentFile)
                     .toString()
                     .replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR);
-            Path legacyIdentityOwner = legacyIdentityOwners.computeIfAbsent(canonicalUrl, ignoredUrl -> documentFile);
-            Optional<String> legacyCitationUrl =
-                    legacyIdentityOwner.equals(documentFile) ? Optional.of(canonicalUrl) : Optional.empty();
-            ingestionIdentities.put(
-                    documentFile,
-                    new MirroredIngestionIdentity(
-                            canonicalUrl + ingestionIdentityQuery(mirroredRelativePath), legacyCitationUrl));
+            ingestionIdentities.put(documentFile, canonicalUrl + ingestionIdentityQuery(mirroredRelativePath));
         });
         return Map.copyOf(ingestionIdentities);
-    }
-
-    /** Separates collision-free vector identity from the canonical URL exposed as a citation. */
-    public record MirroredIngestionIdentity(String storageUrl, Optional<String> legacyCitationUrl) {
-        public MirroredIngestionIdentity {
-            Objects.requireNonNull(storageUrl, "storageUrl");
-            legacyCitationUrl = Objects.requireNonNull(legacyCitationUrl, "legacyCitationUrl");
-        }
     }
 
     private static boolean pathEndsWith(String normalizedRoot, String relativeMirrorPath) {
