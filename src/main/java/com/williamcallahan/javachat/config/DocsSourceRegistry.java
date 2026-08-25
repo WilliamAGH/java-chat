@@ -289,6 +289,42 @@ public final class DocsSourceRegistry {
                     "current",
                     DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
             new DocumentationSource(
+                    "https://doc.traefik.io/traefik/",
+                    "traefik",
+                    "Traefik Proxy Documentation",
+                    "traefik",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://porkbun.com/api/json/v3/documentation",
+                    "porkbun",
+                    "Porkbun API v3.15 Documentation",
+                    "porkbun",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "api-docs",
+                    "3.15",
+                    DocumentationCitationPathStyle.SINGLE_DOCUMENT),
+            new DocumentationSource(
+                    "https://github.com/oborseth/Porkbun-MCP/blob/64e8b4f4caad75e99333733bca5f2987afee3c75/README.md",
+                    "porkbun-mcp",
+                    "Porkbun MCP Server 0.17.1",
+                    "porkbun-mcp",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "tool-reference",
+                    "0.17.1-64e8b4f4caad",
+                    DocumentationCitationPathStyle.SINGLE_DOCUMENT),
+            new DocumentationSource(
+                    "https://developers.cloudflare.com/",
+                    "cloudflare",
+                    "Cloudflare Developer Documentation",
+                    "cloudflare",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
                     "https://docs.dokploy.com/",
                     "dokploy",
                     "Dokploy Documentation",
@@ -528,6 +564,8 @@ public final class DocsSourceRegistry {
     public enum DocumentationCitationPathStyle {
         /** Keeps the mirrored relative path unchanged. */
         LITERAL,
+        /** Uses one canonical source URL for every fragment of a single mirrored document. */
+        SINGLE_DOCUMENT,
         /** Maps an extracted Javadoc page to the matching source file in the official repository. */
         JAVA_SOURCE,
         /** Removes the HTML filename synthesized for an extensionless canonical route. */
@@ -636,6 +674,9 @@ public final class DocsSourceRegistry {
         }
 
         Optional<String> resolveCitationUrl(String mirroredRelativePath) {
+            if (citationPathStyle == DocumentationCitationPathStyle.SINGLE_DOCUMENT) {
+                return Optional.of(citationBaseUrl);
+            }
             if (citationPathStyle == DocumentationCitationPathStyle.JAVA_SOURCE) {
                 return resolveJavaSourceCitation(citationBaseUrl, mirroredRelativePath);
             }

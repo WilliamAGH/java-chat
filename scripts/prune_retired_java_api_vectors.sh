@@ -308,6 +308,7 @@ prune_retired_java_api_vectors() {
             ;;
     esac
 
+    acquire_qdrant_writer_lease
     load_env_file
     apply_pipeline_defaults
     local expected_documentation_collection="java-chat-qwen3-embedding-4b-2560-docs"

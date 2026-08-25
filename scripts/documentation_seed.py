@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import html.parser
 import ipaddress
 import pathlib
@@ -20,6 +21,7 @@ DOCUMENTATION_URL_ASCII_CONTROL_MAXIMUM = 0x1F
 DOCUMENTATION_URL_ASCII_DELETE_CHARACTER = 0x7F
 # Per https://www.sitemaps.org/protocol.html, an uncompressed sitemap is capped at 52,428,800 bytes.
 MAXIMUM_XML_SITEMAP_BYTES = 52_428_800
+MAXIMUM_PLAIN_TEXT_DOCUMENT_BYTES = 10_485_760
 
 
 class DocumentationLinkParser(html.parser.HTMLParser):
@@ -68,6 +70,34 @@ class DocumentationIdentityParser(html.parser.HTMLParser):
 
     def handle_data(self, text: str) -> None:
         if self.hidden_element_depth == 0 and text.strip():
+            self.visible_text_segments.append(text.strip())
+
+
+class ArticleVisibleTextParser(html.parser.HTMLParser):
+    """Collects normalized visible text from a page's article boundary."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.article_depth = 0
+        self.hidden_element_depth = 0
+        self.visible_text_segments: list[str] = []
+
+    def handle_starttag(self, tag: str, _attributes: list[tuple[str, str | None]]) -> None:
+        normalized_tag = tag.casefold()
+        if normalized_tag == "article":
+            self.article_depth += 1
+        elif self.article_depth > 0 and normalized_tag in ("script", "style"):
+            self.hidden_element_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized_tag = tag.casefold()
+        if normalized_tag in ("script", "style") and self.hidden_element_depth > 0:
+            self.hidden_element_depth -= 1
+        elif normalized_tag == "article" and self.article_depth > 0:
+            self.article_depth -= 1
+
+    def handle_data(self, text: str) -> None:
+        if self.article_depth > 0 and self.hidden_element_depth == 0 and text.strip():
             self.visible_text_segments.append(text.strip())
 
 
@@ -165,6 +195,7 @@ def require_remote_url(remote_url: str, allow_http: bool, require_trailing_slash
         any(character.isspace() for character in remote_url)
         or has_ascii_control_character(remote_url)
         or "\\" in remote_url
+        or '"' in remote_url
         or "?" in remote_url
         or "#" in remote_url
     ):
@@ -399,6 +430,83 @@ def validate_published_identity_command(command_arguments: list[str]) -> int:
     return 0
 
 
+def wrap_plain_text_html_command(command_arguments: list[str]) -> int:
+    """Encodes one bounded UTF-8 text reference as citation-ready HTML without parsing it."""
+    wrapping_parser = argparse.ArgumentParser()
+    wrapping_parser.add_argument("--input", required=True, type=pathlib.Path)
+    wrapping_parser.add_argument("--output", required=True, type=pathlib.Path)
+    wrapping_parser.add_argument("--title", required=True)
+    wrapping_arguments = wrapping_parser.parse_args(command_arguments)
+
+    if wrapping_arguments.input.stat().st_size > MAXIMUM_PLAIN_TEXT_DOCUMENT_BYTES:
+        raise ValueError(
+            "Plain-text documentation exceeds the supported HTML transport limit: "
+            f"{wrapping_arguments.input}"
+        )
+    source_text = wrapping_arguments.input.read_text(encoding="utf-8")
+    if not source_text.strip():
+        raise ValueError("Plain-text documentation must not be empty")
+    wrapped_html = (
+        "<!doctype html>\n"
+        '<html lang="en"><head><meta charset="utf-8">'
+        f"<title>{html.escape(wrapping_arguments.title)}</title></head>"
+        f"<body><main><article><pre>{html.escape(source_text)}</pre></article></main></body></html>\n"
+    )
+    wrapping_arguments.output.write_text(wrapped_html, encoding="utf-8")
+    return 0
+
+
+def matches_regex_command(command_arguments: list[str]) -> int:
+    """Reports whether one candidate string matches a Python regular expression."""
+    matching_parser = argparse.ArgumentParser()
+    matching_parser.add_argument("--regex", required=True)
+    matching_parser.add_argument("--candidate", required=True)
+    matching_arguments = matching_parser.parse_args(command_arguments)
+    try:
+        compiled_documentation_regex = re.compile(matching_arguments.regex)
+    except re.error as invalid_documentation_regex:
+        print(
+            f"Documentation regex is invalid: {invalid_documentation_regex}",
+            file=sys.stderr,
+        )
+        return 2
+    return 0 if compiled_documentation_regex.search(matching_arguments.candidate) is not None else 1
+
+
+def validate_sitemap_index_command(command_arguments: list[str]) -> int:
+    """Requires a sitemap index to declare exactly the shard this fetcher currently supports."""
+    sitemap_index_parser = argparse.ArgumentParser()
+    sitemap_index_parser.add_argument("--input", required=True, type=pathlib.Path)
+    sitemap_index_parser.add_argument("--expected-sitemap-url", required=True)
+    sitemap_index_arguments = sitemap_index_parser.parse_args(command_arguments)
+    require_remote_url(
+        sitemap_index_arguments.expected_sitemap_url,
+        allow_http=False,
+        require_trailing_slash=False,
+    )
+    declared_sitemap_urls = read_xml_sitemap_urls(sitemap_index_arguments.input)
+    if declared_sitemap_urls != [sitemap_index_arguments.expected_sitemap_url]:
+        raise ValueError(
+            "Sitemap index topology changed; expected exactly "
+            f"{sitemap_index_arguments.expected_sitemap_url}, found {declared_sitemap_urls}"
+        )
+    return 0
+
+
+def extract_article_text_command(command_arguments: list[str]) -> int:
+    """Prints normalized visible text from one HTML article element."""
+    extraction_parser = argparse.ArgumentParser()
+    extraction_parser.add_argument("--input", required=True, type=pathlib.Path)
+    extraction_arguments = extraction_parser.parse_args(command_arguments)
+    article_text_parser = ArticleVisibleTextParser()
+    article_text_parser.feed(extraction_arguments.input.read_text(encoding="utf-8"))
+    article_text_parser.close()
+    if not article_text_parser.visible_text_segments:
+        raise ValueError("HTML document contains no visible article content")
+    print(" ".join(" ".join(article_text_parser.visible_text_segments).split()))
+    return 0
+
+
 def main() -> int:
     if sys.argv[1:2] == ["--validate-remote-url"]:
         return validate_remote_url_command(sys.argv[2:])
@@ -408,6 +516,14 @@ def main() -> int:
         return project_mirror_paths_file_command(sys.argv[2:])
     if sys.argv[1:2] == ["--validate-published-identity"]:
         return validate_published_identity_command(sys.argv[2:])
+    if sys.argv[1:2] == ["--wrap-plain-text-html"]:
+        return wrap_plain_text_html_command(sys.argv[2:])
+    if sys.argv[1:2] == ["--matches-regex"]:
+        return matches_regex_command(sys.argv[2:])
+    if sys.argv[1:2] == ["--validate-sitemap-index"]:
+        return validate_sitemap_index_command(sys.argv[2:])
+    if sys.argv[1:2] == ["--extract-article-text"]:
+        return extract_article_text_command(sys.argv[2:])
     argument_parser = argparse.ArgumentParser()
     argument_parser.add_argument("--document-type", required=True, choices=SUPPORTED_SEED_DOCUMENT_TYPES)
     argument_parser.add_argument("--input", required=True, type=pathlib.Path)

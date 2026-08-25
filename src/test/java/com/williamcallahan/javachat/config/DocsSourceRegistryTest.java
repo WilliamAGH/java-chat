@@ -143,6 +143,14 @@ class DocsSourceRegistryTest {
                 "https://docs.docker.com/engine/swarm/",
                 DocsSourceRegistry.normalizeDocUrl("file:///data/docs/docker/engine/swarm/index.html"));
         assertEquals(
+                "https://doc.traefik.io/traefik/reference/install-configuration/providers/swarm/",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/traefik/reference/install-configuration/providers/swarm/index.html"));
+        assertEquals(
+                "https://developers.cloudflare.com/r2/objects/workers/workers-api-usage/",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/cloudflare/r2/objects/workers/workers-api-usage/index.html"));
+        assertEquals(
                 "https://docs.dokploy.com/docs/core/backups",
                 DocsSourceRegistry.normalizeDocUrl("file:///data/docs/dokploy/docs/core/backups.html"));
         assertEquals(
@@ -163,6 +171,16 @@ class DocsSourceRegistryTest {
                 DocsSourceRegistry.documentationSourceForRelativeMirrorPath("docker")
                         .orElseThrow()
                         .citationPathStyle());
+    }
+
+    @Test
+    void preservesCanonicalUrlsForSingleDocumentMirrors() {
+        assertEquals(
+                "https://porkbun.com/api/json/v3/documentation",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/porkbun/index.html"));
+        assertEquals(
+                "https://github.com/oborseth/Porkbun-MCP/blob/64e8b4f4caad75e99333733bca5f2987afee3c75/README.md",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/porkbun-mcp/index.html"));
     }
 
     @Test

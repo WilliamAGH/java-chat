@@ -81,6 +81,8 @@ for argument in "$@"; do
     esac
 done
 
+acquire_qdrant_writer_lease
+
 prepare_pipeline_environment "QDRANT_HOST" "QDRANT_PORT" "SPRING_PROFILE" "QDRANT_COLLECTION_DOCS" \
     "DOCS_SNAPSHOT_DIR" "DOCS_PARSED_DIR" "DOCS_INDEX_DIR"
 

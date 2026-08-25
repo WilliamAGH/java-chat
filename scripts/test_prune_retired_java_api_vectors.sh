@@ -33,6 +33,10 @@ reset_mock_qdrant() {
     mkdir -p "$MOCK_QDRANT_DIRECTORY"
 }
 
+acquire_qdrant_writer_lease() {
+    printf 'acquired\n' >> "$MOCK_QDRANT_DIRECTORY/writer-lease-acquisitions"
+}
+
 mock_qdrant_reply() {
     local qdrant_json="$1"
     local http_status="$2"
@@ -257,6 +261,9 @@ fi
 if [ -e "$MOCK_QDRANT_DIRECTORY/environment-loads" ]; then
     fail_retired_java_api_vector_prune_test "non-Java-only prune invocation loaded the environment"
 fi
+if [ -e "$MOCK_QDRANT_DIRECTORY/writer-lease-acquisitions" ]; then
+    fail_retired_java_api_vector_prune_test "non-Java-only prune invocation acquired the writer lease"
+fi
 
 reset_mock_qdrant
 if prune_retired_java_api_vectors "java/java25-complete,java/java999-complete" > /dev/null 2>&1; then
@@ -268,11 +275,17 @@ fi
 if [ -e "$MOCK_QDRANT_DIRECTORY/environment-loads" ]; then
     fail_retired_java_api_vector_prune_test "unknown Java API selector loaded the environment"
 fi
+if [ -e "$MOCK_QDRANT_DIRECTORY/writer-lease-acquisitions" ]; then
+    fail_retired_java_api_vector_prune_test "unknown Java API selector acquired the writer lease"
+fi
 
 reset_mock_qdrant
 export SPRING_PROFILE=dev
 if ! prune_retired_java_api_vectors "java/java25-complete" > /dev/null; then
     fail_retired_java_api_vector_prune_test "shared docs collection was rejected under the dev profile"
+fi
+if [ ! -s "$MOCK_QDRANT_DIRECTORY/writer-lease-acquisitions" ]; then
+    fail_retired_java_api_vector_prune_test "validated Java API prune did not acquire the writer lease"
 fi
 export SPRING_PROFILE=local
 

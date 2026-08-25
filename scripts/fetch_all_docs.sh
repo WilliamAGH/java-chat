@@ -5,7 +5,7 @@
 # and ensures no redundant downloads by checking existing files
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$SCRIPT_DIR/.."
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # shellcheck source=lib/shell_bootstrap.sh
 source "$SCRIPT_DIR/lib/shell_bootstrap.sh"
@@ -367,6 +367,8 @@ fetch_source() {
     local seed_reject_regex=""
     local -a supplemental_seed_urls=()
     local seed_additional_discovery_url=""
+    local require_stable_seed_discovery="false"
+    local validate_cloudflare_aliases="false"
     local request_delay_seconds="0"
     local single_page_only="false"
     local java25_specification_pdfs="false"
@@ -374,6 +376,14 @@ fetch_source() {
     local superseded_relative_mirror_path=""
     local archive_format=""
     local archive_strip_components="0"
+    local plain_text_document_url=""
+    local plain_text_document_title=""
+    local minimum_plain_text_bytes="0"
+    local -a plain_text_required_fragments=()
+    local llm_sentinel_url=""
+    local minimum_llm_sentinel_bytes="0"
+    local -a llm_sentinel_required_fragments=()
+    local sitemap_index_url=""
 
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -397,6 +407,8 @@ fetch_source() {
             --seed-reject-regex) seed_reject_regex="$2"; shift 2 ;;
             --seed-url) supplemental_seed_urls+=("$2"); shift 2 ;;
             --seed-additional-discovery-url) seed_additional_discovery_url="$2"; shift 2 ;;
+            --require-stable-seed-discovery) require_stable_seed_discovery="true"; shift ;;
+            --validate-cloudflare-seed-aliases) validate_cloudflare_aliases="true"; shift ;;
             --request-delay-seconds) request_delay_seconds="$2"; shift 2 ;;
             --single-page) single_page_only="true"; shift ;;
             --java25-specification-pdfs) java25_specification_pdfs="true"; shift ;;
@@ -404,6 +416,14 @@ fetch_source() {
             --superseded-mirror-path) superseded_relative_mirror_path="$2"; shift 2 ;;
             --archive-format) archive_format="$2"; shift 2 ;;
             --archive-strip-components) archive_strip_components="$2"; shift 2 ;;
+            --plain-text-document-url) plain_text_document_url="$2"; shift 2 ;;
+            --plain-text-document-title) plain_text_document_title="$2"; shift 2 ;;
+            --minimum-plain-text-bytes) minimum_plain_text_bytes="$2"; shift 2 ;;
+            --plain-text-required-text) plain_text_required_fragments+=("$2"); shift 2 ;;
+            --llm-sentinel-url) llm_sentinel_url="$2"; shift 2 ;;
+            --minimum-llm-sentinel-bytes) minimum_llm_sentinel_bytes="$2"; shift 2 ;;
+            --llm-sentinel-required-text) llm_sentinel_required_fragments+=("$2"); shift 2 ;;
+            --sitemap-index-url) sitemap_index_url="$2"; shift 2 ;;
             *) echo "Unknown documentation fetch option: $1" >&2; return 1 ;;
         esac
     done
@@ -426,6 +446,43 @@ fetch_source() {
         echo "Archived documentation cannot use another fetch strategy: $name" >&2
         return 1
     fi
+    if [[ ! "$minimum_plain_text_bytes" =~ ^[0-9]+$ ]] \
+        || [[ ! "$minimum_llm_sentinel_bytes" =~ ^[0-9]+$ ]]; then
+        echo "Documentation text byte minimums must be nonnegative integers: $name" >&2
+        return 1
+    fi
+    if [ -n "$plain_text_document_url" ] \
+        && { [ -n "$java_release" ] || [ "$javadoc_seed" = "true" ] || [ -n "$seed_discovery_url" ] \
+            || [ -n "$archive_format" ] || [ "$single_page_only" = "true" ]; }; then
+        echo "Plain-text documentation cannot use another fetch strategy: $name" >&2
+        return 1
+    fi
+    if [ -n "$plain_text_document_url" ] \
+        && { [ -z "$plain_text_document_title" ] || [ "$minimum_plain_text_bytes" -le 0 ]; }; then
+        echo "Plain-text documentation requires a title and positive byte minimum: $name" >&2
+        return 1
+    fi
+    if [ -z "$plain_text_document_url" ] \
+        && { [ -n "$plain_text_document_title" ] || [ "$minimum_plain_text_bytes" -gt 0 ] \
+            || [ "${#plain_text_required_fragments[@]}" -gt 0 ]; }; then
+        echo "Plain-text documentation validation requires its source URL: $name" >&2
+        return 1
+    fi
+    if [ -n "$llm_sentinel_url" ] && [ "$minimum_llm_sentinel_bytes" -le 0 ]; then
+        echo "Documentation LLM sentinels require a positive byte minimum: $name" >&2
+        return 1
+    fi
+    if [ -z "$llm_sentinel_url" ] \
+        && { [ "$minimum_llm_sentinel_bytes" -gt 0 ] \
+            || [ "${#llm_sentinel_required_fragments[@]}" -gt 0 ]; }; then
+        echo "Documentation LLM-sentinel validation requires its URL: $name" >&2
+        return 1
+    fi
+    if [ -n "$sitemap_index_url" ] \
+        && { [ "$seed_document_type" != "xml-sitemap" ] || [ -z "$seed_discovery_url" ]; }; then
+        echo "Sitemap-index validation requires one configured XML sitemap shard: $name" >&2
+        return 1
+    fi
     if [ -n "$seed_reject_regex" ] && [ -z "$seed_discovery_url" ]; then
         echo "A discovery-only rejection requires structured discovery: $name" >&2
         return 1
@@ -436,6 +493,17 @@ fetch_source() {
     fi
     if [ -n "$seed_additional_discovery_url" ] && [ "$seed_document_type" != "html-links" ]; then
         echo "Additional documentation discovery requires HTML link discovery: $name" >&2
+        return 1
+    fi
+    if [ "$require_stable_seed_discovery" = "true" ] \
+        && [ -z "$seed_discovery_url" ]; then
+        echo "Stable seed validation requires structured discovery: $name" >&2
+        return 1
+    fi
+    if [ "$require_stable_seed_discovery" = "true" ] \
+        && { [ "${#supplemental_seed_urls[@]}" -gt 0 ] \
+            || [ -n "$seed_additional_discovery_url" ]; }; then
+        echo "Stable seed validation requires one complete discovery document: $name" >&2
         return 1
     fi
     if [[ ! "$request_delay_seconds" =~ ^[0-9]+$ ]]; then
@@ -459,6 +527,7 @@ fetch_source() {
     local target_dir="$DOCS_ROOT/$relative_mirror_path"
     local fetch_target_directory=""
     local staging_directory=""
+    local staging_seeded_from_published_mirror="false"
 
     if [ -n "$superseded_relative_mirror_path" ] \
         && [ -e "$DOCS_ROOT/$superseded_relative_mirror_path" ] \
@@ -477,10 +546,43 @@ fetch_source() {
             || [ -n "$java_release" ] || [ "$javadoc_seed" = "true" ]; } \
         && [ "$FORCE_REFRESH" != "true" ] \
         && [ -d "$target_dir" ] \
-        && [ "$(count_html_files "$staging_directory")" -eq 0 ] \
-        && ! copy_documentation_mirror_to_staging "$target_dir" "$staging_directory"; then
-        discard_documentation_fetch_staging_directory "$staging_directory"
-        log "${RED}✗ Could not seed validation staging from the published $name mirror${NC}"
+        && [ "$(count_html_files "$staging_directory")" -eq 0 ]; then
+        if ! copy_documentation_mirror_to_staging "$target_dir" "$staging_directory"; then
+            discard_documentation_fetch_staging_directory "$staging_directory"
+            log "${RED}✗ Could not seed validation staging from the published $name mirror${NC}"
+            return 1
+        fi
+        staging_seeded_from_published_mirror="true"
+    fi
+
+    if [ -n "$llm_sentinel_url" ] \
+        && ! validate_documentation_llm_sentinel \
+            "$llm_sentinel_url" \
+            "$staging_directory" \
+            "$name" \
+            "$minimum_llm_sentinel_bytes" \
+            "${llm_sentinel_required_fragments[@]}"; then
+        if [ "$staging_seeded_from_published_mirror" = "true" ]; then
+            discard_documentation_fetch_staging_directory "$staging_directory"
+        else
+            log "${YELLOW}⚠ Preserving source-matched staging after LLM-sentinel failure: $staging_directory${NC}"
+        fi
+        log "${RED}✗ $name failed independent LLM-sentinel validation${NC}"
+        return 1
+    fi
+
+    if [ -n "$sitemap_index_url" ] \
+        && ! validate_documentation_sitemap_index \
+            "$sitemap_index_url" \
+            "$seed_discovery_url" \
+            "$staging_directory" \
+            "$name"; then
+        if [ "$staging_seeded_from_published_mirror" = "true" ]; then
+            discard_documentation_fetch_staging_directory "$staging_directory"
+        else
+            log "${YELLOW}⚠ Preserving source-matched staging after sitemap-index failure: $staging_directory${NC}"
+        fi
+        log "${RED}✗ $name failed sitemap-index topology validation${NC}"
         return 1
     fi
 
@@ -536,6 +638,16 @@ fetch_source() {
             "$cut_dirs" \
             "$min_files" \
             "$partial_mirror_allowed" || documentation_fetch_status=$?
+    elif [ -n "$plain_text_document_url" ]; then
+        fetch_plain_text_documentation \
+            "$plain_text_document_url" \
+            "$fetch_target_directory" \
+            "$name" \
+            "$plain_text_document_title" \
+            "$minimum_plain_text_bytes" \
+            "$min_files" \
+            "$partial_mirror_allowed" \
+            "${plain_text_required_fragments[@]}" || documentation_fetch_status=$?
     elif [ -n "$archive_format" ]; then
         fetch_documentation_archive \
             "$url" \
@@ -597,6 +709,15 @@ fetch_source() {
             --request-delay-seconds "$request_delay_seconds"
             --seed-additional-discovery-url "$seed_additional_discovery_url"
         )
+        if [ -n "$sitemap_index_url" ]; then
+            discovered_documentation_arguments+=(--sitemap-index-url "$sitemap_index_url")
+        fi
+        if [ "$require_stable_seed_discovery" = "true" ]; then
+            discovered_documentation_arguments+=(--require-stable-seed-discovery)
+        fi
+        if [ "$validate_cloudflare_aliases" = "true" ]; then
+            discovered_documentation_arguments+=(--validate-cloudflare-seed-aliases)
+        fi
         local supplemental_seed_url
         for supplemental_seed_url in "${supplemental_seed_urls[@]}"; do
             discovered_documentation_arguments+=(--supplemental-seed-url "$supplemental_seed_url")
@@ -624,7 +745,9 @@ fetch_source() {
         return "$documentation_fetch_status"
     fi
 
-    if [ "$DOCUMENTATION_SOURCE_ALREADY_COMPLETE" = "true" ]; then
+    if [ "$DOCUMENTATION_SOURCE_ALREADY_COMPLETE" = "true" ] \
+        && [ "$staging_seeded_from_published_mirror" = "true" ] \
+        && [ "$(count_html_files "$staging_directory")" -eq "$existing_count" ]; then
         if ! discard_documentation_fetch_staging_directory "$staging_directory"; then
             log "${RED}✗ Could not discard validated staging copy for $name${NC}"
             return 1
@@ -707,6 +830,10 @@ fetch_named_official_source() {
         amp-code) "$source_dispatch" fetch_source --url "https://ampcode.com/" --mirror-path "amp-code" --name "Amp Code CLI Manual" --source-version "current" --identity-regex "Amp" --cut-directories 0 --minimum-html-files 8 --seed-document-type html-links --seed-discovery-url "https://ampcode.com/manual" --seed-source-prefix "https://ampcode.com/" --seed-reject-regex '^https://ampcode\.com/(?:manual/appendix/legacy-permissions-rules\.txt$|(?!manual(?:/|$)).*)' --seed-url "https://ampcode.com/manual/orbs/oidc" --seed-url "https://ampcode.com/manual/sdk/python" --seed-url "https://ampcode.com/manual/sdk/typescript" ;;
         tinker) "$source_dispatch" fetch_source --url "https://tinker-docs.thinkingmachines.ai/" --mirror-path "tinker" --name "Tinker Documentation" --source-version "current" --identity-regex "Tinker" --cut-directories 0 --minimum-html-files 320 --seed-document-type xml-sitemap --seed-discovery-url "https://tinker-docs.thinkingmachines.ai/sitemap.xml" --seed-source-prefix "https://tinker-docs.thinkingmachines.ai/" ;;
         docker) "$source_dispatch" fetch_source --url "https://docs.docker.com/" --mirror-path "docker" --name "Docker Documentation" --source-version "current" --identity-regex "Docker" --cut-directories 0 --minimum-html-files 1600 --seed-document-type xml-sitemap --seed-discovery-url "https://docs.docker.com/sitemap.xml" --seed-source-prefix "https://docs.docker.com/" --seed-reject-regex '^https://docs\.docker\.com/(build/(buildkit/dockerfile-release-notes|release-notes)|enterprise/security/provisioning/scim|reference/cli/docker/(build|builder/build|exec|images|info|mcp/(feature|tools)/list|ps|pull|push|run)|scout/release-notes/cli)/$' ;;
+        traefik) "$source_dispatch" fetch_source --url "https://doc.traefik.io/traefik/" --mirror-path "traefik" --name "Traefik Proxy Documentation" --source-version "current" --identity-regex "Traefik Proxy" --cut-directories 1 --minimum-html-files 280 --seed-document-type xml-sitemap --seed-discovery-url "https://doc.traefik.io/sitemap.xml" --seed-source-prefix "https://doc.traefik.io/traefik/" ;;
+        porkbun) "$source_dispatch" fetch_source --url "https://porkbun.com/api/json/v3/documentation" --mirror-path "porkbun" --name "Porkbun API v3.15 Documentation" --source-version "3.15" --identity-regex 'Porkbun API v3.*v3\.15|v3\.15.*Porkbun API' --required-identity-page "index.html" --required-identity-text "Porkbun API v3 — v3.15" --cut-directories 0 --minimum-html-files 1 --plain-text-document-url "https://porkbun.com/llms-full.txt" --plain-text-document-title "Porkbun API v3.15 Documentation" --minimum-plain-text-bytes 125000 --plain-text-required-text "# Porkbun API v3 — v3.15" --plain-text-required-text "## AI agents (MCP)" --plain-text-required-text "npx -y @porkbunllc/mcp-server" --plain-text-required-text "Retrieve all DNS records" --llm-sentinel-url "https://porkbun.com/llms.txt" --minimum-llm-sentinel-bytes 18000 --llm-sentinel-required-text "# Porkbun" --llm-sentinel-required-text "## Official MCP server" --llm-sentinel-required-text "https://porkbun.com/llms/agent-setup" ;;
+        porkbun-mcp) "$source_dispatch" fetch_source --url "https://github.com/oborseth/Porkbun-MCP/blob/64e8b4f4caad75e99333733bca5f2987afee3c75/README.md" --mirror-path "porkbun-mcp" --name "Porkbun MCP Server" --source-version "0.17.1-64e8b4f4caad" --identity-regex "Porkbun MCP Server" --required-identity-page "index.html" --required-identity-text "# Porkbun MCP Server" --cut-directories 0 --minimum-html-files 1 --plain-text-document-url "https://raw.githubusercontent.com/oborseth/Porkbun-MCP/64e8b4f4caad75e99333733bca5f2987afee3c75/README.md" --plain-text-document-title "Porkbun MCP Server" --minimum-plain-text-bytes 15000 --plain-text-required-text "# Porkbun MCP Server" --plain-text-required-text "npx -y @porkbunllc/mcp-server" --plain-text-required-text "list_doc_topics" ;;
+        cloudflare) "$source_dispatch" fetch_source --url "https://developers.cloudflare.com/" --mirror-path "cloudflare" --name "Cloudflare Developer Documentation" --source-version "current" --identity-regex "Cloudflare" --cut-directories 0 --minimum-html-files 8199 --seed-document-type xml-sitemap --seed-discovery-url "https://developers.cloudflare.com/sitemap-0.xml" --seed-source-prefix "https://developers.cloudflare.com/" --seed-reject-regex '^https://developers\.cloudflare\.com/(?:ai/models/(?:@|%40)(?:cf|hf)/.*|ai-gateway/models/|ai-search/configuration/indexing/|cloudflare-one/networks/routes/|containers/platform-details/|images/get-started/|images/optimization/transformations/draw-overlays/|magic-transit/(?:how-to|reference)/|queues/configuration/|workers/runtime-apis/bindings/worker-loader/)$' --validate-cloudflare-seed-aliases --require-stable-seed-discovery --sitemap-index-url "https://developers.cloudflare.com/sitemap-index.xml" --llm-sentinel-url "https://developers.cloudflare.com/llms-full.txt" --minimum-llm-sentinel-bytes 57000000 --llm-sentinel-required-text "# Cloudflare DNS" --llm-sentinel-required-text "# R2 Object Storage" --llm-sentinel-required-text "## Wrangler usage" --llm-sentinel-required-text "# AI Gateway" --llm-sentinel-required-text "## Workers AI" --llm-sentinel-required-text "Model Context Protocol (MCP)" ;;
         dokploy) "$source_dispatch" fetch_source --url "https://docs.dokploy.com/" --mirror-path "dokploy" --name "Dokploy Documentation" --source-version "current" --identity-regex "Dokploy" --cut-directories 0 --minimum-html-files 200 --seed-document-type xml-sitemap --seed-discovery-url "https://docs.dokploy.com/sitemap.xml" --seed-source-prefix "https://docs.dokploy.com/" ;;
         infisical) "$source_dispatch" fetch_source --url "https://infisical.com/docs/" --mirror-path "infisical" --name "Infisical Documentation" --source-version "current" --identity-regex "Infisical" --cut-directories 1 --minimum-html-files 2200 --seed-document-type xml-sitemap --seed-discovery-url "https://infisical.com/docs/sitemap.xml" --seed-source-prefix "https://infisical.com/docs/" ;;
         doppler-guides) "$source_dispatch" fetch_source --url "https://docs.doppler.com/docs/" --mirror-path "doppler/docs" --name "Doppler Guides" --source-version "current" --identity-regex "Doppler" --cut-directories 1 --minimum-html-files 200 --seed-document-type html-links --seed-discovery-url "https://docs.doppler.com/docs/start" --seed-source-prefix "https://docs.doppler.com/docs/" --seed-reject-regex '^https://docs\.doppler\.com/docs/(enclave-installation(-docker|-serverless)?|enclave-service-tokens)$' --request-delay-seconds 1 ;;
@@ -775,7 +902,8 @@ fetch_all_official_sources() {
         jackson-2.22.2-api jackson-spring-2.21.2-api \
         jackson-3.2.2-api jackson-spring-3.1.2-api \
         lombok-1.18.46-api lombok-1.18.46-reference anthropic-api claude-code amp-code tinker \
-        docker dokploy infisical doppler-guides doppler-reference doppler-changelog \
+        docker traefik dokploy infisical doppler-guides doppler-reference doppler-changelog \
+        porkbun porkbun-mcp cloudflare \
         spring-boot quarkus \
         java/java21-complete java/java24-complete java/java25-complete \
         spring-ai-reference spring-ai-api-stable spring-framework-reference spring-framework-api \
