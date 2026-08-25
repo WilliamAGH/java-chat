@@ -183,6 +183,19 @@ class EmbeddingBatchEmbedderTest {
     }
 
     @Test
+    void isolatesBlockingProviderRequestsOnVirtualThreads() {
+        RecordingEmbeddingClient embeddingClient =
+                new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
+                    assertTrue(Thread.currentThread().isVirtual());
+                    return repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR);
+                });
+
+        EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1));
+
+        assertEquals(1, embeddingClient.requestedTextBatches.size());
+    }
+
+    @Test
     void boundsConcurrentProviderRequests() {
         int documentCount = EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE
                 * (EmbeddingBatchEmbedder.MAX_CONCURRENT_EMBEDDING_REQUESTS + 1);
@@ -261,8 +274,7 @@ class EmbeddingBatchEmbedderTest {
                     () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1)));
 
             assertTrue(Thread.currentThread().isInterrupted());
-            assertTrue(batchFailure.getCause().getCause() instanceof InterruptedException);
-            assertSame(providerFailure, batchFailure.getCause().getSuppressed()[0]);
+            assertTrue(batchFailure.getCause() instanceof InterruptedException);
         } finally {
             Thread.interrupted();
         }

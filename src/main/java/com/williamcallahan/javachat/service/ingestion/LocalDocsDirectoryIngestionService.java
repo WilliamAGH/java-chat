@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -123,6 +124,11 @@ public final class LocalDocsDirectoryIngestionService implements LocalDocumentat
             }
             backlogStatus = backlogStatus.finish();
             ingestionRunStore.write(realSelectedRoot, backlogStatus, eligibleFileInventory.inventoryFingerprint());
+            if (failures.isEmpty() && selectedFileEndIndex == eligibleFiles.size()) {
+                DocsSourceRegistry.citationBaseForRelativeMirrorPath(selectedDirectoryLabel)
+                        .ifPresent(citationBase -> fileProcessor.pruneRemovedSourceUrls(
+                                citationBase, Set.copyOf(ingestionIdentities.values())));
+            }
         }
 
         return IngestionLocalOutcome.fromBacklog(backlogStatus, rootDirectory, failures);

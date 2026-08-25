@@ -235,8 +235,21 @@ setup_pid_and_cleanup() {
 
     COMMON_PID_FILE="$pid_file"
     if ! (set -o noclobber; : > "$COMMON_PID_FILE") 2>/dev/null; then
-        echo -e "${RED}Ingestion PID file already exists; refusing to signal or replace another run: $COMMON_PID_FILE${NC}" >&2
-        return 1
+        local recorded_process_identifier
+        recorded_process_identifier="$(sed -n '1p' "$COMMON_PID_FILE" 2>/dev/null || true)"
+        if [ "${QDRANT_WRITER_LEASE_DESCRIPTOR:-}" = "9" ] \
+            && { true >&9; } 2>/dev/null \
+            && { ! [[ "$recorded_process_identifier" =~ ^[1-9][0-9]*$ ]] \
+                || ! ps -p "$recorded_process_identifier" -o pid= >/dev/null 2>&1; }; then
+            rm -f -- "$COMMON_PID_FILE"
+            if ! (set -o noclobber; : > "$COMMON_PID_FILE") 2>/dev/null; then
+                echo -e "${RED}Ingestion PID file changed while retiring stale state: $COMMON_PID_FILE${NC}" >&2
+                return 1
+            fi
+        else
+            echo -e "${RED}Ingestion PID file already exists; refusing to signal or replace another run: $COMMON_PID_FILE${NC}" >&2
+            return 1
+        fi
     fi
 
     APP_PID=""

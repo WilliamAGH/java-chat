@@ -167,6 +167,15 @@ class DocsSourceRegistryTest {
                 DocsSourceRegistry.resolveMirroredPath(mirrorRoot, singletonTypePage)
                         .orElseThrow(),
                 singletonStorageUrl);
+
+        String nestedSingletonIdentity = DocsSourceRegistry.resolveMirroredIngestionIdentities(
+                        mirrorRoot, List.of(nestedTypePage))
+                .get(nestedTypePage.toAbsolutePath().normalize());
+        String nestedSubdirectoryIdentity = DocsSourceRegistry.resolveMirroredIngestionIdentities(
+                        nestedTypePage.getParent(), List.of(nestedTypePage))
+                .get(nestedTypePage.toAbsolutePath().normalize());
+        assertEquals(nestedStorageUrl, nestedSingletonIdentity);
+        assertEquals(nestedStorageUrl, nestedSubdirectoryIdentity);
     }
 
     @Test

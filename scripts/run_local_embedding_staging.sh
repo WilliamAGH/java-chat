@@ -17,8 +17,6 @@ source "$SCRIPT_DIRECTORY/lib/common_qdrant.sh"
 
 export SPRING_PROFILE=local
 export APP_LOCAL_EMBEDDING_ENABLED=false
-export APP_EMBEDDINGS_BATCH_MAX_CONCURRENT_REQUESTS=8
-export APP_EMBEDDINGS_BATCH_REQUESTS_PER_SECOND=8.0
 export QDRANT_HOST=127.0.0.1
 export QDRANT_PORT=8086
 export QDRANT_REST_PORT=8087
@@ -32,11 +30,6 @@ export DOCS_DIR="$PROJECT_ROOT/data/docs"
 export DOCS_SNAPSHOT_DIR="$PROJECT_ROOT/data/qwen3-embedding-4b-2560/local/snapshots"
 export DOCS_PARSED_DIR="$PROJECT_ROOT/data/qwen3-embedding-4b-2560/local/parsed"
 export DOCS_INDEX_DIR="$PROJECT_ROOT/data/qwen3-embedding-4b-2560/local/index"
-
-if [ -e process_qdrant.pid ]; then
-    echo "Documentation ingestion already owns process_qdrant.pid" >&2
-    exit 1
-fi
 
 shopt -s nullglob
 repository_git_directories=(data/repos/github/*/*/.git)

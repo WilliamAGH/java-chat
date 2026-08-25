@@ -14,7 +14,14 @@ fail_local_staging_contract_test() {
 }
 
 launcher_path="$TEST_SCRIPT_DIRECTORY/run_local_embedding_staging.sh"
+local_profile_path="$TEST_SCRIPT_DIRECTORY/../src/main/resources/application-local.properties"
 bash -n "$launcher_path"
+
+if grep -Fq 'APP_EMBEDDINGS_BATCH_' "$launcher_path" \
+    || ! grep -Fxq 'app.embeddings.batch-max-concurrent-requests=8' "$local_profile_path" \
+    || ! grep -Fxq 'app.embeddings.batch-requests-per-second=8.0' "$local_profile_path"; then
+    fail_local_staging_contract_test "local batch capacity is not owned by the Spring profile"
+fi
 
 if ! grep -Fxq 'export QDRANT_HOST=127.0.0.1' "$launcher_path" \
     || ! grep -Fxq 'export QDRANT_PORT=8086' "$launcher_path" \

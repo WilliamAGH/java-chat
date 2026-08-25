@@ -154,8 +154,9 @@ Canonical framework doc sets include:
 ### What "incremental" means for ingestion
 
 - Per-chunk SHA-256 hash markers in the configured generation-specific index root track what has been processed.
-- A file is skipped only when its file-level marker has the same size, mtime, content SHA-256,
-  extractor-semantics version, and provenance-aware ingestion fingerprint as the current ingestion contract.
+- A file is skipped only when its file-level marker has the same provenance-aware ingestion fingerprint,
+  extractor-semantics version, collection identity, and exact Qdrant point IDs as the current ingestion contract.
+  Size and mtime remain diagnostic marker fields.
 - File-level markers (`DOCS_INDEX_DIR/file_*.marker`) include those values plus the ingested chunk hashes.
   A source-content, provenance, or extractor-semantics change triggers strict stale-vector and parsed-chunk
   same-collection replacement after the complete successor has been embedded and upserted. A marker owned by

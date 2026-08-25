@@ -1294,7 +1294,10 @@ if ! (
         printf '%s\n' "$RESUMED_STAGING_DIRECTORY"
     }
     fetch_discovered_documentation_seed() {
-        DOCUMENTATION_SOURCE_ALREADY_COMPLETE="true"
+        exit 1
+    }
+    fetch_documentation_archive() {
+        exit 1
     }
     publish_staged_documentation_mirror() {
         printf '%s\n' "$@" > "$RESUMED_PUBLICATION_CAPTURE"
@@ -1307,12 +1310,10 @@ if ! (
         --identity-regex "Resumed Reference stable" \
         --cut-directories 0 \
         --minimum-html-files 1 \
-        --seed-document-type xml-sitemap \
-        --seed-discovery-url "https://docs.example.invalid/sitemap.xml" \
-        --seed-source-prefix "https://docs.example.invalid/reference/" > /dev/null
+        --archive-format zip > /dev/null
     [ -s "$RESUMED_PUBLICATION_CAPTURE" ]
 ); then
-    fail_documentation_fetch_test "complete resumed staging was discarded instead of published"
+    fail_documentation_fetch_test "complete resumed archive staging was discarded instead of published"
 fi
 
 if ! (

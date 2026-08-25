@@ -274,7 +274,7 @@ if ! app_jar="$(stage_app_jar "$source_app_jar" "$staged_app_jar_directory")"; t
 fi
 
 log "${YELLOW}Starting document processor...${NC}"
-java -Dspring.profiles.active=cli \
+java -Dspring.profiles.active="cli,$SPRING_PROFILE" \
      -jar "$app_jar" \
      --app.qdrant.ensure-collections=true \
      --spring.main.web-application-type=none \

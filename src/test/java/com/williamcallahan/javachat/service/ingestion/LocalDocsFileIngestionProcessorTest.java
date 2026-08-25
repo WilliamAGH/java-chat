@@ -47,6 +47,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
@@ -1231,6 +1232,32 @@ class LocalDocsFileIngestionProcessorTest {
         verify(ingestionFixture.fileIngestionMarkerStore, never()).markFileIngested(anyString(), any());
         verify(ingestionFixture.chunkProcessingService, never())
                 .processAndStoreChunksForce(anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void prunesRemovedDocumentationUrlsAfterCompleteInventory() throws IOException {
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        String activeUrl = "https://docs.example.com/reference/active";
+        String removedUrl = "https://docs.example.com/reference/removed";
+        FileIngestionRecord removedRecord =
+                new FileIngestionRecord(10, 20, "fingerprint", "extractor", "docs-collection", List.of("removed-hash"));
+        for (QdrantCollectionKind collectionKind : QdrantCollectionKind.values()) {
+            when(ingestionFixture.hybridVectorService.resolveCollectionName(collectionKind))
+                    .thenReturn(testCollectionName(collectionKind));
+            when(ingestionFixture.hybridVectorService.scrollAllUrlsInCollection(testCollectionName(collectionKind)))
+                    .thenReturn(collectionKind == QdrantCollectionKind.DOCS ? Set.of(activeUrl, removedUrl) : Set.of());
+        }
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(removedUrl))
+                .thenReturn(Optional.of(removedRecord));
+
+        ingestionFixture
+                .ingestionProcessor()
+                .pruneRemovedSourceUrls("https://docs.example.com/reference/", Set.of(activeUrl));
+
+        verify(ingestionFixture.ingestedFilePruneService)
+                .pruneCollectionFileStrict("docs-collection", removedUrl, removedRecord);
+        verify(ingestionFixture.ingestedFilePruneService, never())
+                .pruneCollectionFileStrict(anyString(), eq(activeUrl), any());
     }
 
     /** Owns the collaborator graph shared by local documentation ingestion scenarios. */

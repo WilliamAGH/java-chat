@@ -41,6 +41,18 @@ if [[ -s "$signal_attempt_log" ]]; then
     fail_ingestion_pid_safety_test "The existing PID triggered a signal attempt."
 fi
 
+stale_pid_file="$TEST_WORK_DIRECTORY/stale-process_qdrant.pid"
+printf '%s\n' '999999999' > "$stale_pid_file"
+exec 9> "$TEST_WORK_DIRECTORY/writer-lease"
+export QDRANT_WRITER_LEASE_DESCRIPTOR=9
+setup_pid_and_cleanup "$stale_pid_file"
+if [[ ! -f "$stale_pid_file" ]] || [[ -s "$stale_pid_file" ]]; then
+    fail_ingestion_pid_safety_test "The lease owner did not atomically retire stale PID state."
+fi
+rm -f -- "$stale_pid_file"
+exec 9>&-
+unset QDRANT_WRITER_LEASE_DESCRIPTOR
+
 new_pid_file="$TEST_WORK_DIRECTORY/new-process_qdrant.pid"
 setup_pid_and_cleanup "$new_pid_file"
 if [[ "${COMMON_PID_FILE:-}" != "$new_pid_file" ]]; then

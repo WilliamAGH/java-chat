@@ -616,6 +616,16 @@ public final class DocsSourceRegistry {
                 .findFirst();
     }
 
+    /** Returns the canonical citation base for an exact registered mirror root. */
+    public static Optional<String> citationBaseForRelativeMirrorPath(String relativeMirrorPath) {
+        Optional<String> documentationBase =
+                documentationSourceForRelativeMirrorPath(relativeMirrorPath).map(DocumentationSource::citationBaseUrl);
+        return documentationBase.or(() -> JAVA_API_DOCUMENTATION_SOURCES.stream()
+                .filter(source -> source.relativeMirrorPath().equals(relativeMirrorPath))
+                .map(JavaApiDocumentationSource::remoteBaseUrl)
+                .findFirst());
+    }
+
     /** Finds the longest documentation mirror root containing a relative document path. */
     public static Optional<DocumentationSource> documentationSourceForRelativeDocumentPath(
             String relativeDocumentPath) {
@@ -754,44 +764,56 @@ public final class DocsSourceRegistry {
                 .map(DocsSourceRegistry::canonicalizeHttpDocUrl);
     }
 
-    /**
-     * Resolves per-file storage identities, disambiguating only canonical URLs shared by multiple mirror files.
-     */
+    /** Resolves stable per-file storage identities independently from canonical citation projection. */
     public static Map<Path, String> resolveMirroredIngestionIdentities(Path mirrorRoot, List<Path> documentFiles) {
         Objects.requireNonNull(mirrorRoot, "mirrorRoot");
         List<Path> requiredDocumentFiles = List.copyOf(Objects.requireNonNull(documentFiles, "documentFiles"));
         Path absoluteMirrorRoot = mirrorRoot.toAbsolutePath().normalize();
-        Map<Path, String> canonicalUrlsByFile = new LinkedHashMap<>();
-        Map<String, Integer> canonicalUrlCounts = new LinkedHashMap<>();
+        Map<Path, String> ingestionIdentities = new LinkedHashMap<>();
         for (Path documentFile : requiredDocumentFiles) {
             Path absoluteDocumentFile = documentFile.toAbsolutePath().normalize();
-            resolveMirroredPath(absoluteMirrorRoot, absoluteDocumentFile).ifPresent(canonicalUrl -> {
-                canonicalUrlsByFile.put(absoluteDocumentFile, canonicalUrl);
-                canonicalUrlCounts.merge(canonicalUrl, 1, Integer::sum);
-            });
+            String normalizedDocumentPath =
+                    absoluteDocumentFile.toString().replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR);
+            Optional<DocumentationSource> documentationSource = DOCUMENTATION_SOURCES.stream()
+                    .filter(source -> normalizedDocumentPath.contains(
+                            PATH_SEPARATOR_TEXT + source.relativeMirrorPath() + PATH_SEPARATOR_TEXT))
+                    .max(Comparator.comparingInt(
+                            source -> source.relativeMirrorPath().length()));
+            resolveMirroredPath(absoluteMirrorRoot, absoluteDocumentFile)
+                    .or(() -> documentationSource.flatMap(
+                            source -> new CitationRoute(source.citationBaseUrl(), source.citationPathStyle())
+                                    .resolveCitationUrl(relativePathWithinSource(normalizedDocumentPath, source))
+                                    .map(DocsSourceRegistry::canonicalizeHttpDocUrl)))
+                    .or(() -> resolveLocalPath(normalizedDocumentPath))
+                    .ifPresent(canonicalUrl -> ingestionIdentities.put(
+                            absoluteDocumentFile,
+                            documentationSource
+                                    .filter(source ->
+                                            source.citationPathStyle() == DocumentationCitationPathStyle.JAVA_SOURCE)
+                                    .map(source ->
+                                            stableJavaSourceIdentity(normalizedDocumentPath, source, canonicalUrl))
+                                    .orElse(canonicalUrl)));
         }
-
-        Map<String, Path> canonicalIdentityOwners = new LinkedHashMap<>();
-        Map<Path, String> ingestionIdentities = new LinkedHashMap<>();
-        canonicalUrlsByFile.forEach((documentFile, canonicalUrl) -> {
-            boolean citationCollision = canonicalUrlCounts.getOrDefault(canonicalUrl, 0) > 1;
-            if (!citationCollision) {
-                ingestionIdentities.put(documentFile, canonicalUrl);
-                return;
-            }
-            Path canonicalIdentityOwner =
-                    canonicalIdentityOwners.computeIfAbsent(canonicalUrl, ignoredUrl -> documentFile);
-            if (canonicalIdentityOwner.equals(documentFile)) {
-                ingestionIdentities.put(documentFile, canonicalUrl);
-                return;
-            }
-            String mirroredRelativePath = absoluteMirrorRoot
-                    .relativize(documentFile)
-                    .toString()
-                    .replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR);
-            ingestionIdentities.put(documentFile, canonicalUrl + ingestionIdentityQuery(mirroredRelativePath));
-        });
         return Map.copyOf(ingestionIdentities);
+    }
+
+    private static String relativePathWithinSource(
+            String normalizedDocumentPath, DocumentationSource documentationSource) {
+        String mirrorMarker = PATH_SEPARATOR_TEXT + documentationSource.relativeMirrorPath() + PATH_SEPARATOR_TEXT;
+        return normalizedDocumentPath.substring(normalizedDocumentPath.indexOf(mirrorMarker) + mirrorMarker.length());
+    }
+
+    private static String stableJavaSourceIdentity(
+            String normalizedDocumentPath, DocumentationSource documentationSource, String canonicalUrl) {
+        String mirroredRelativePath = relativePathWithinSource(normalizedDocumentPath, documentationSource);
+        int fileNameStart = mirroredRelativePath.lastIndexOf(UNIX_PATH_SEPARATOR) + 1;
+        String fileName = mirroredRelativePath.substring(fileNameStart);
+        boolean canonicalOwner = fileName.equals("package-summary.html")
+                || (fileName.endsWith(HTML_EXTENSION)
+                        && Character.isUpperCase(fileName.charAt(0))
+                        && !fileName.substring(0, fileName.length() - HTML_EXTENSION.length())
+                                .contains("."));
+        return canonicalOwner ? canonicalUrl : canonicalUrl + ingestionIdentityQuery(mirroredRelativePath);
     }
 
     private static boolean pathEndsWith(String normalizedRoot, String relativeMirrorPath) {

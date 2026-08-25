@@ -14,6 +14,16 @@ fail_queued_platform_test() {
     exit 1
 }
 
+queued_launcher_line() {
+    local expected_text="$1"
+    local matching_lines
+    matching_lines="$(grep -Fn "$expected_text" "$queued_launcher" || true)"
+    if [ "$(printf '%s\n' "$matching_lines" | sed '/^$/d' | wc -l | tr -d ' ')" -ne 1 ]; then
+        fail_queued_platform_test "queued launcher must contain exactly one: $expected_text"
+    fi
+    printf '%s\n' "${matching_lines%%:*}"
+}
+
 bash -n "$queued_launcher"
 grep -Fq 'ConditionPathExists=!%h/.local/state/java-chat/local-embedding-staging.complete' "$local_unit" \
     || fail_queued_platform_test "completed local backlog can restart on a later login"
@@ -36,11 +46,15 @@ grep -Fq 'ConditionPathExists=!%h/.local/state/java-chat/queued-platform-documen
     || fail_queued_platform_test "completed documentation queue can restart on a later login"
 grep -Fq 'ConditionPathExists=%h/.local/state/java-chat/local-embedding-staging.invocation' "$queued_unit" \
     || fail_queued_platform_test "documentation queue can start without durable predecessor proof"
-grep -Fq 'invocation_id=$(<%h/.local/state/java-chat/local-embedding-staging.invocation)' "$queued_unit" \
+grep -Fq 'invocation_id=$(systemctl --user show java-chat-local-embedding-staging.service --property=InvocationID --value)' "$queued_unit" \
+    && grep -Fq 'if [ -z "$invocation_id" ]; then invocation_id=$(<%h/.local/state/java-chat/local-embedding-staging.invocation); fi' "$queued_unit" \
     && grep -Fq -- '--after-invocation=$invocation_id' "$queued_unit" \
-    || fail_queued_platform_test "documentation queue does not restore its predecessor invocation"
+    || fail_queued_platform_test "documentation queue does not select its live or completed predecessor invocation"
 grep -Fq 'ExecStartPost=/usr/bin/touch %h/.local/state/java-chat/queued-platform-documentation-staging.complete' "$queued_unit" \
     || fail_queued_platform_test "successful documentation queue does not record terminal completion"
+if grep -Fq '[Install]' "$queued_unit" || grep -Fq 'WantedBy=' "$queued_unit"; then
+    fail_queued_platform_test "documentation queue can start independently of its predecessor"
+fi
 if grep -Fq 'date -Ins' "$queued_launcher" \
     || ! grep -Fq "date -u '+%Y-%m-%dT%H:%M:%SZ'" "$queued_launcher"; then
     fail_queued_platform_test "queued job does not use portable UTC timestamps"
@@ -74,11 +88,11 @@ grep -Fq './scripts/fetch_all_docs.sh --doc-sets="$QUEUED_DOCUMENTATION_SOURCES"
 grep -Fq './scripts/process_all_to_qdrant.sh --doc-sets=all' "$queued_launcher" \
     || fail_queued_platform_test "queued job does not invoke the canonical documentation registry"
 
-completion_gate_line="$(grep -n "expected_staging_invocation_journal | grep -Fq 'LOCAL_STAGING_COMPLETE'" "$queued_launcher" | tail -1 | cut -d: -f1)"
-invocation_receipt_line="$(grep -n '^mv -- "$STAGING_INVOCATION_RECEIPT.next"' "$queued_launcher" | cut -d: -f1)"
-writer_lease_line="$(grep -n '^acquire_qdrant_writer_lease$' "$queued_launcher" | cut -d: -f1)"
-source_refresh_line="$(grep -n './scripts/fetch_all_docs.sh --doc-sets=' "$queued_launcher" | cut -d: -f1)"
-ingestion_start_line="$(grep -n './scripts/process_all_to_qdrant.sh --doc-sets=' "$queued_launcher" | cut -d: -f1)"
+completion_gate_line="$(queued_launcher_line "expected_staging_invocation_journal | grep -Fq 'LOCAL_STAGING_COMPLETE'")"
+invocation_receipt_line="$(queued_launcher_line 'mv -- "$STAGING_INVOCATION_RECEIPT.next" "$STAGING_INVOCATION_RECEIPT"')"
+writer_lease_line="$(queued_launcher_line 'acquire_qdrant_writer_lease')"
+source_refresh_line="$(queued_launcher_line './scripts/fetch_all_docs.sh --doc-sets="$QUEUED_DOCUMENTATION_SOURCES"')"
+ingestion_start_line="$(queued_launcher_line './scripts/process_all_to_qdrant.sh --doc-sets=all')"
 if [ "$completion_gate_line" -ge "$invocation_receipt_line" ] \
     || [ "$invocation_receipt_line" -ge "$source_refresh_line" ] \
     || [ "$source_refresh_line" -ge "$writer_lease_line" ] \

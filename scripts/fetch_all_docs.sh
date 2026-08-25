@@ -543,6 +543,7 @@ fetch_source() {
     local fetch_target_directory=""
     local staging_directory=""
     local staging_seeded_from_published_mirror="false"
+    DOCUMENTATION_SOURCE_ALREADY_COMPLETE="false"
 
     if [ -n "$superseded_relative_mirror_path" ] \
         && [ -e "$DOCS_ROOT/$superseded_relative_mirror_path" ] \
@@ -614,12 +615,16 @@ fetch_source() {
             "$staging_directory" "$name" "$min_files" "$identity_regex" "$forbidden_identity_regex" \
         && validate_staged_documentation_identity \
             "$staging_directory" "$name" "$required_identity_page" "$required_identity_text" "$expected_meta_version"; then
-        log "${GREEN}✓ $name already fetched: $existing_count HTML files (validated pinned archive)${NC}"
-        if ! discard_documentation_fetch_staging_directory "$staging_directory"; then
-            log "${RED}✗ Could not discard validated archive staging for $name${NC}"
-            return 1
+        if [ "$staging_seeded_from_published_mirror" = "true" ]; then
+            log "${GREEN}✓ $name already fetched: $existing_count HTML files (validated pinned archive)${NC}"
+            if ! discard_documentation_fetch_staging_directory "$staging_directory"; then
+                log "${RED}✗ Could not discard validated archive staging for $name${NC}"
+                return 1
+            fi
+            return 0
         fi
-        return 0
+        log "${GREEN}✓ $name archive staging is complete; publishing resumed download${NC}"
+        DOCUMENTATION_SOURCE_ALREADY_COMPLETE="true"
     fi
     # Proactive cleanup for known legacy Spring mirror layouts that otherwise mask incomplete fetches.
     if [[ "$name" == *"Spring Framework Javadoc"* ]]; then
@@ -644,8 +649,9 @@ fetch_source() {
 
     # ── Dispatch to strategy ──
     local documentation_fetch_status=0
-    DOCUMENTATION_SOURCE_ALREADY_COMPLETE="false"
-    if [ "$single_page_only" = "true" ]; then
+    if [ "$DOCUMENTATION_SOURCE_ALREADY_COMPLETE" = "true" ]; then
+        :
+    elif [ "$single_page_only" = "true" ]; then
         fetch_single_documentation_page \
             "$url" \
             "$fetch_target_directory" \

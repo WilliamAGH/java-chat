@@ -23,6 +23,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 import org.jsoup.Jsoup;
 import org.slf4j.Logger;
@@ -858,5 +859,32 @@ public class LocalDocsFileIngestionProcessor {
         Objects.requireNonNull(fileContentFingerprint, "fileContentFingerprint");
         Objects.requireNonNull(provenance, "provenance");
         return storage.hasher().sha256(provenance.fingerprintInput(fileContentFingerprint));
+    }
+
+    void pruneRemovedSourceUrls(String citationBase, Set<String> activeStorageUrls) {
+        String normalizedCitationBase = DocsSourceRegistry.normalizeDocUrl(citationBase);
+        for (QdrantCollectionKind collectionKind : QdrantCollectionKind.values()) {
+            String collectionName = storage.hybridVector().resolveCollectionName(collectionKind);
+            for (String storedUrl : storage.hybridVector().scrollAllUrlsInCollection(collectionName)) {
+                if (activeStorageUrls.contains(storedUrl)
+                        || !DocsSourceRegistry.normalizeDocUrl(storedUrl).startsWith(normalizedCitationBase)) {
+                    continue;
+                }
+                Optional<FileIngestionRecord> ingestionRecord =
+                        storage.fileMarkers().readFileIngestionRecord(storedUrl);
+                if (ingestionRecord.isPresent()
+                        && ingestionRecord.orElseThrow().hasCollectionIdentity()
+                        && !collectionName.equals(ingestionRecord.orElseThrow().collectionName())) {
+                    continue;
+                }
+                try {
+                    ingestedFilePruneService.pruneCollectionFileStrict(
+                            collectionName, storedUrl, ingestionRecord.orElse(null));
+                } catch (IOException cleanupFailure) {
+                    throw new IllegalStateException(
+                            "Failed to prune removed documentation URL: " + storedUrl, cleanupFailure);
+                }
+            }
+        }
     }
 }

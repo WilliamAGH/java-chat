@@ -79,6 +79,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends jq python3 \
     && useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash appuser
 
 COPY scripts/process_all_to_qdrant.sh scripts/
+COPY scripts/qdrant_writer_lease.py scripts/
 COPY scripts/with_build_state_lock.sh scripts/BuildStateLock.java scripts/
 COPY scripts/lib/common_qdrant.sh scripts/lib/shell_bootstrap.sh \
     scripts/lib/env_loader.sh scripts/lib/embedding_preflight.sh scripts/lib/

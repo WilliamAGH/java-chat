@@ -40,7 +40,7 @@ This runs `scripts/process_all_to_qdrant.sh`, which:
 - Loads `.env`
 - Requires `SPRING_PROFILE` to be exactly `local`, `dev`, or `prod`
 - Requires readable `DOCS_DIR` and writable generation-specific `DOCS_SNAPSHOT_DIR`, `DOCS_PARSED_DIR`, and `DOCS_INDEX_DIR`
-- Validates Qdrant connectivity and probes gateway embedding batches of 1 and 4 with `X-Tier: batch`
+- Validates Qdrant connectivity and probes gateway embedding batches of 1 and 8 with `X-Tier: batch`
 - Builds the app JAR (`./gradlew buildForScripts`)
 - Runs the `cli` Spring profile (`DocumentProcessor`)
 - Routes each doc set to the appropriate Qdrant collection (`QdrantCollectionRouter`)
@@ -78,8 +78,8 @@ Deduplication is based on per-chunk SHA-256 markers in the configured environmen
 - `DOCS_INDEX_DIR/file_*.marker` records the file size, modification time, content SHA-256,
   extractor-semantics version, and chunk hashes.
 
-A file is skipped only when every file-level marker value, including the extractor-semantics version and
-the provenance-aware ingestion fingerprint, matches the current ingestion contract.
+A file is skipped only when its provenance-aware ingestion fingerprint, extractor-semantics version,
+collection identity, and exact Qdrant point IDs match the current ingestion contract. Size and mtime remain diagnostic marker fields.
 Changing extraction behavior or source provenance therefore invalidates otherwise
 identical HTML: a same-generation replacement is fully embedded and upserted before stale point IDs and local chunks are removed. A marker owned by another collection generation fails closed.
 Older markers with a missing or prior extractor-semantics version are intentionally reindexed once.

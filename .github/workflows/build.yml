@@ -169,6 +169,9 @@ jobs:
 
           docker run --rm --entrypoint /bin/bash java-chat-ingestion:ci \
             -c 'curl --version >/dev/null && jq --version >/dev/null && python3 --version >/dev/null'
+          docker run --rm --entrypoint /bin/bash \
+            java-chat-ingestion:ci \
+            -c 'set -euo pipefail; source /app/scripts/lib/common_qdrant.sh; acquire_qdrant_writer_lease; test "$QDRANT_WRITER_LEASE_DESCRIPTOR" = 9'
           docker run --rm java-chat-ingestion:ci --help | grep --fixed-strings 'Usage:'
 
       - name: Start pinned Qdrant dependency
