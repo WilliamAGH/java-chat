@@ -229,11 +229,7 @@ public class HybridVectorService {
     }
 
     /**
-     * Returns whether one URL owns exactly the expected deterministic document point UUIDs.
-     *
-     * <p>Count equality is insufficient because two page revisions can produce the same number of chunks
-     * while owning disjoint point identities. This read compares the complete URL-filtered Qdrant identity
-     * set with the point UUIDs derived from the expected chunk hashes.</p>
+     * Checks exact deterministic point ownership in the configured collection kind.
      *
      * @param collectionKind target collection kind
      * @param sourceUrl URL payload value that scopes the Qdrant scroll
@@ -243,12 +239,31 @@ public class HybridVectorService {
     public boolean hasExactPointIdsForUrl(
             QdrantCollectionKind collectionKind, String sourceUrl, List<String> expectedDocumentPointUuids) {
         Objects.requireNonNull(collectionKind, NULL_MESSAGE_COLLECTION_KIND);
+        return hasExactPointIdsForUrl(resolveCollectionName(collectionKind), sourceUrl, expectedDocumentPointUuids);
+    }
+
+    /**
+     * Returns whether one URL owns exactly the expected deterministic document point UUIDs.
+     *
+     * <p>Count equality is insufficient because two page revisions can produce the same number of chunks
+     * while owning disjoint point identities. This read compares the complete URL-filtered Qdrant identity
+     * set with the point UUIDs derived from the expected chunk hashes.</p>
+     *
+     * @param collectionName target Qdrant collection name
+     * @param sourceUrl URL payload value that scopes the Qdrant scroll
+     * @param expectedDocumentPointUuids deterministic document UUID strings expected for the URL
+     * @return true only when Qdrant contains every expected UUID and no other UUID for the URL
+     */
+    public boolean hasExactPointIdsForUrl(
+            String collectionName, String sourceUrl, List<String> expectedDocumentPointUuids) {
+        Objects.requireNonNull(collectionName, NULL_MESSAGE_COLLECTION_NAME);
+        if (collectionName.isBlank()) {
+            throw new IllegalArgumentException("collectionName must not be blank");
+        }
         String requiredSourceUrl = Objects.requireNonNull(sourceUrl, "sourceUrl");
         if (requiredSourceUrl.isBlank()) {
             throw new IllegalArgumentException("sourceUrl must not be blank");
         }
-        String collectionName =
-                Objects.requireNonNull(resolveCollectionName(collectionKind), NULL_MESSAGE_COLLECTION_NAME);
         Set<PointId> expectedPointIds = documentPointIds(expectedDocumentPointUuids);
         return scrollPointIdsForUrl(collectionName, requiredSourceUrl).equals(expectedPointIds);
     }

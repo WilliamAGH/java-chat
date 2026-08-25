@@ -50,6 +50,7 @@ beforeEach(() => {
 afterEach(() => {
   restoreSiteStorageAccess();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -64,7 +65,7 @@ describe("loadClerkAuthentication", () => {
 
     await expect(loadClerkAuthentication()).resolves.toBeUndefined();
 
-    expect(clerkAuthentication.isLoaded).toBe(false);
+    expect(clerkAuthentication.phase).toBe("disabled");
     expect(get(toasts)).toEqual([]);
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       expect.stringContaining("denies site storage access"),
@@ -81,10 +82,39 @@ describe("loadClerkAuthentication", () => {
 
     await expect(loadClerkAuthentication()).resolves.toBeUndefined();
 
-    expect(clerkAuthentication.isLoaded).toBe(false);
+    expect(clerkAuthentication.phase).toBe("disabled");
     expect(get(toasts)).toEqual([]);
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       expect.stringContaining("no VITE_CLERK_PUBLISHABLE_KEY"),
     );
+  });
+
+  it("rejects malformed Clerk API-key secrets without logging the returned value", async () => {
+    const malformedSecret = "malformed-sensitive-key-value";
+    const apiKeyCreateMock = vi.fn().mockResolvedValue({ secret: malformedSecret });
+    vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test_api-key-validation");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+    vi.doMock("@clerk/clerk-js", () => ({
+      Clerk: class {
+        user = { id: "user_cli" };
+        apiKeys = { create: apiKeyCreateMock };
+
+        async load(): Promise<void> {}
+
+        addListener(): void {}
+      },
+    }));
+    vi.doMock("@clerk/ui", () => ({ ui: {} }));
+    vi.doMock("@clerk/ui/themes", () => ({ dark: {} }));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { createCliApiKey, loadClerkAuthentication } = await importClerkAuthenticationModule();
+
+    await loadClerkAuthentication();
+
+    await expect(createCliApiKey("workstation")).rejects.toThrow(
+      "Clerk created an API key without returning its one-time secret.",
+    );
+    expect(apiKeyCreateMock).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(consoleErrorSpy.mock.calls)).not.toContain(malformedSecret);
   });
 });

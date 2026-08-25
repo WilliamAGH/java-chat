@@ -7,7 +7,7 @@
   }
 </script>
 
-<div class="toast-container" aria-live="polite" aria-label="Notifications">
+<div class="toast-container">
   {#each $toasts as notice (notice.id)}
     <div class="toast toast--{notice.severity}" role="status">
       <div class="toast__content">

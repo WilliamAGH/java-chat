@@ -265,7 +265,7 @@ resolve_repository_metadata_from_path() {
     local resolved_branch
     resolved_branch="$(git -C "$resolved_path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
     if [ -z "$resolved_branch" ] || [ "$resolved_branch" = "HEAD" ]; then
-        resolved_branch="$(git -C "$resolved_path" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')"
+        resolved_branch="$(git -C "$resolved_path" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || echo "")"
     fi
     REPOSITORY_BRANCH="$resolved_branch"
     REPOSITORY_COMMIT="$(git -C "$resolved_path" rev-parse HEAD 2>/dev/null || echo "")"

@@ -154,8 +154,7 @@ class HybridVectorServiceTest {
 
         assertTrue(hybridVectorService.hasExactPointIdsForUrl(
                 QdrantCollectionKind.DOCS, DOCUMENT_URL, List.of(DOCUMENT_ID)));
-        assertFalse(hybridVectorService.hasExactPointIdsForUrl(
-                QdrantCollectionKind.DOCS, DOCUMENT_URL, List.of(DOCUMENT_ID)));
+        assertFalse(hybridVectorService.hasExactPointIdsForUrl(COLLECTION_NAME, DOCUMENT_URL, List.of(DOCUMENT_ID)));
     }
 
     @Test

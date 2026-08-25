@@ -11,13 +11,15 @@
 import type { Clerk } from "@clerk/clerk-js";
 import type { Appearance } from "@clerk/ui";
 import { pushToast } from "../stores/toastStore";
+import { CliApiKeyCreationSchema } from "../validation/schemas";
+import { isRecord, logZodFailure } from "../validation/validate";
 
 /** Signed-in Clerk user, derived from the SDK's own typing ([TY1]: no transitive `@clerk/shared` import). */
 export type ClerkSignedInUser = NonNullable<Clerk["user"]>;
 
 class ClerkAuthenticationState {
-  /** True once `Clerk.load()` resolved; auth controls stay hidden until then to avoid flicker. */
-  isLoaded = $state(false);
+  /** Authentication lifecycle phase; auth controls stay hidden until Clerk is ready. */
+  phase = $state<"loading" | "disabled" | "ready" | "failed">("loading");
   /**
    * Current signed-in user or null. `$state.raw` because the SDK replaces the
    * resource wholesale on every emission; deep proxying a class instance
@@ -73,6 +75,7 @@ export async function loadClerkAuthentication(): Promise<void> {
     // VITE_CLERK_PUBLISHABLE_KEY until Clerk launches there, so auth controls
     // stay hidden. Dev deployments and local .env.local provide the key.
     console.info("Clerk authentication disabled: no VITE_CLERK_PUBLISHABLE_KEY in this build.");
+    clerkAuthentication.phase = "disabled";
     return;
   }
   const siteStorageAccess = probeSiteStorageAccess();
@@ -85,6 +88,7 @@ export async function loadClerkAuthentication(): Promise<void> {
       "Clerk authentication disabled: this browser denies site storage access.",
       siteStorageAccess.denial,
     );
+    clerkAuthentication.phase = "disabled";
     return;
   }
   // Dynamic imports keep the ~700 kB Clerk SDK out of the first-paint chunk;
@@ -107,6 +111,7 @@ export async function loadClerkAuthentication(): Promise<void> {
         : undefined,
     });
   } catch (loadFailure) {
+    clerkAuthentication.phase = "failed";
     pushToast("Sign-in is unavailable: Clerk failed to load.", {
       detail: loadFailure instanceof Error ? loadFailure.message : String(loadFailure),
     });
@@ -117,7 +122,7 @@ export async function loadClerkAuthentication(): Promise<void> {
     clerkAuthentication.signedInUser = clerkResources.user ?? null;
   });
   clerkAuthentication.signedInUser = clerkClient.user ?? null;
-  clerkAuthentication.isLoaded = true;
+  clerkAuthentication.phase = "ready";
 }
 
 /** Opens Clerk's hosted sign-in modal. */
@@ -128,6 +133,44 @@ export function openSignIn(): void {
 /** Opens Clerk's hosted sign-up modal. */
 export function openSignUp(): void {
   requireLoadedClerkClient().openSignUp();
+}
+
+/**
+ * Creates a personal CLI key for the currently signed-in user.
+ *
+ * The explicit subject prevents an active organization from silently becoming
+ * the key owner. Clerk returns the secret only from this creation call.
+ */
+export async function createCliApiKey(clientLabel: string): Promise<string> {
+  const availabilityResponse = await fetch("/api/security/api-key-availability");
+  if (!availabilityResponse.ok) {
+    throw new Error("This JavaChat deployment cannot verify CLI API keys.");
+  }
+  const loadedClient = requireLoadedClerkClient();
+  const signedInUser = loadedClient.user;
+  if (!signedInUser) {
+    throw new Error("Sign in before authorizing the JavaChat CLI.");
+  }
+  const createdApiKey = await loadedClient.apiKeys.create({
+    name: clientLabel,
+    subject: signedInUser.id,
+    description: "JavaChat command-line client",
+    secondsUntilExpiration: 60 * 60 * 24 * 30,
+  });
+  const apiKeyCreationValidation = CliApiKeyCreationSchema.safeParse(createdApiKey);
+  if (!apiKeyCreationValidation.success) {
+    const untrustedSecret = isRecord(createdApiKey) ? createdApiKey.secret : undefined;
+    const redactedFailure = CliApiKeyCreationSchema.safeParse({ secret: null });
+    if (!redactedFailure.success) {
+      logZodFailure(`Clerk API key creation for ${signedInUser.id}`, redactedFailure.error, {
+        responseType: Array.isArray(createdApiKey) ? "array" : typeof createdApiKey,
+        secretType: typeof untrustedSecret,
+        secretLength: typeof untrustedSecret === "string" ? untrustedSecret.length : 0,
+      });
+    }
+    throw new Error("Clerk created an API key without returning its one-time secret.");
+  }
+  return apiKeyCreationValidation.data.secret;
 }
 
 /**

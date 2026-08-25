@@ -57,6 +57,7 @@ public final class QdrantIndexInitializer {
     private static final String EMPTY_TEXT = "";
     private static final List<PayloadIndexSpec> REQUIRED_PAYLOAD_INDEXES = List.of(
             new PayloadIndexSpec(QdrantPayloadFieldSchema.URL_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.CITATION_URL_FIELD, SCHEMA_TYPE_KEYWORD),
             new PayloadIndexSpec(QdrantPayloadFieldSchema.HASH_FIELD, SCHEMA_TYPE_KEYWORD),
             new PayloadIndexSpec(QdrantPayloadFieldSchema.CHUNK_INDEX_FIELD, SCHEMA_TYPE_INTEGER),
             new PayloadIndexSpec(QdrantPayloadFieldSchema.PACKAGE_FIELD, SCHEMA_TYPE_KEYWORD),
@@ -115,6 +116,18 @@ public final class QdrantIndexInitializer {
     @EventListener(ApplicationReadyEvent.class)
     public void ensureCollectionsAndIndexes() {
         attemptInitialization(true);
+    }
+
+    /**
+     * Requires collection initialization to reach readiness before a fail-closed batch ingestion starts.
+     *
+     * @throws IllegalStateException when Qdrant remains unavailable or initialization has failed
+     */
+    public void requireCollectionsAndIndexesReady() {
+        ensureCollectionsAndIndexes();
+        if (initializationState != QdrantInitializationState.READY) {
+            throw new IllegalStateException("Qdrant collection initialization is not ready: " + initializationState);
+        }
     }
 
     /** Retries initialization after transient Qdrant transport failures without restarting the JVM. */

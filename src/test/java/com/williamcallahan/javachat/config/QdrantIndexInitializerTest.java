@@ -203,7 +203,7 @@ class QdrantIndexInitializerTest {
     }
 
     @Test
-    void unavailableCreationDefersAtConfiguredRestEndpoint() {
+    void unavailableCreationFailsClosedForBatchInitialization() {
         InitializerHarness initializerHarness = newInitializer(true, 6334);
         String firstCollectionUrl =
                 collectionUrl(initializerHarness.collectionName().get(0));
@@ -218,7 +218,7 @@ class QdrantIndexInitializerTest {
                 .andExpect(method(HttpMethod.PUT))
                 .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
 
-        initializerHarness.initializer().ensureCollectionsAndIndexes();
+        assertThrows(IllegalStateException.class, initializerHarness.initializer()::requireCollectionsAndIndexesReady);
 
         assertEquals(
                 Status.DOWN,
@@ -557,6 +557,7 @@ class QdrantIndexInitializerTest {
                     },
                     "payload_schema": {
                       "url": {"data_type": "keyword"},
+                      "citationUrl": {"data_type": "keyword"},
                       "hash": {"data_type": "keyword"},
                       "chunkIndex": {"data_type": "integer"},
                       "package": {"data_type": "keyword"},

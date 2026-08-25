@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Consolidated document processor for hybrid Qdrant ingestion.
-# Usage: ./process_all_to_qdrant.sh [--doc-sets=docset1,docset2]
+# Usage: ./process_all_to_qdrant.sh [--doc-sets=docset1,docset2] [--app-jar=/absolute/path]
 
 set -euo pipefail
 
@@ -11,6 +11,8 @@ DOCS_ROOT=""
 LOG_FILE="$PROJECT_ROOT/process_qdrant.log"
 PID_FILE="$PROJECT_ROOT/process_qdrant.pid"
 DOCS_SETS_FILTER=""
+PREBUILT_APP_JAR=""
+PROCESSING_LOG_ARCHIVE_SEQUENCE=0
 
 # shellcheck source=lib/common_qdrant.sh
 source "$SCRIPT_DIR/lib/common_qdrant.sh"
@@ -30,6 +32,26 @@ corpus_indexed_summary() {
     fi
 
     echo "${indexed_count} indexed / ${parsed_count} parsed"
+}
+
+archive_prior_processing_log() {
+    if [ ! -s "$LOG_FILE" ]; then
+        return 0
+    fi
+
+    PROCESSING_LOG_ARCHIVE_SEQUENCE=$((PROCESSING_LOG_ARCHIVE_SEQUENCE + 1))
+    local archive_timestamp
+    archive_timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    local prior_attempt_log="${LOG_FILE%.log}_attempt_${archive_timestamp}_$$_${PROCESSING_LOG_ARCHIVE_SEQUENCE}.log"
+    if [ -e "$prior_attempt_log" ] || [ -L "$prior_attempt_log" ]; then
+        echo "Refusing to overwrite prior document-processing log archive: $prior_attempt_log" >&2
+        return 1
+    fi
+    if ! mv "$LOG_FILE" "$prior_attempt_log"; then
+        echo "Failed to archive prior document-processing log: $LOG_FILE" >&2
+        return 1
+    fi
+    echo "Archived prior document-processing log: $prior_attempt_log"
 }
 
 verify_doc_set_postconditions() {
@@ -123,13 +145,21 @@ validate_generation_and_state_contract() {
 
 run_documentation_ingestion() {
 DOCS_SETS_FILTER=""
+PREBUILT_APP_JAR=""
 for ingestion_argument in "$@"; do
     case $ingestion_argument in
         --doc-sets=*)
             DOCS_SETS_FILTER="${ingestion_argument#*=}"
+            if [[ "$DOCS_SETS_FILTER" =~ ^[[:space:]]*$ ]]; then
+                echo "--doc-sets requires at least one documentation set" >&2
+                return 1
+            fi
+            ;;
+        --app-jar=*)
+            PREBUILT_APP_JAR="${ingestion_argument#*=}"
             ;;
         --help|-h)
-            echo "Usage: $0 [--doc-sets=docset1,docset2]"
+            echo "Usage: $0 [--doc-sets=docset1,docset2] [--app-jar=/absolute/path]"
             exit 0
             ;;
         *)
@@ -152,6 +182,10 @@ esac
 if ! validate_generation_and_state_contract; then
     return 1
 fi
+if [ -n "$PREBUILT_APP_JAR" ] && { [ ! -f "$PREBUILT_APP_JAR" ] || [ ! -r "$PREBUILT_APP_JAR" ]; }; then
+    echo "Prebuilt application JAR must be a readable file: $PREBUILT_APP_JAR" >&2
+    return 1
+fi
 DOCS_ROOT="${DOCS_DIR:-$PROJECT_ROOT/data/docs}"
 export DOCS_DIR="$DOCS_ROOT"
 
@@ -170,9 +204,18 @@ for writable_state_directory in "$DOCS_SNAPSHOT_DIR" "$DOCS_PARSED_DIR" "$DOCS_I
     fi
 done
 
+acquire_qdrant_writer_lease
 setup_pid_and_cleanup "$PID_FILE"
+if ! archive_prior_processing_log; then
+    rm -f "$PID_FILE"
+    return 1
+fi
 
-echo "[$(date)] Starting document processing" > "$LOG_FILE"
+if ! printf '[%s] Starting document processing\n' "$(date)" > "$LOG_FILE"; then
+    echo "Failed to initialize document-processing log: $LOG_FILE" >&2
+    rm -f "$PID_FILE"
+    return 1
+fi
 echo "=============================================="
 echo "Document Processor"
 echo "=============================================="
@@ -194,14 +237,17 @@ if ! check_embedding_server "log"; then
     exit 1
 fi
 
-log "${YELLOW}Building application...${NC}"
-build_application "$LOG_FILE"
-
 if [ -n "$DOCS_SETS_FILTER" ]; then
     export DOCS_SETS="$DOCS_SETS_FILTER"
 fi
 
-source_app_jar="$(locate_app_jar)"
+if [ -n "$PREBUILT_APP_JAR" ]; then
+    source_app_jar="$PREBUILT_APP_JAR"
+else
+    log "${YELLOW}Building application...${NC}"
+    build_application "$LOG_FILE"
+    source_app_jar="$(locate_app_jar)"
+fi
 staged_app_jar_directory=""
 cleanup_document_ingestion_resources() {
     if [ -n "$staged_app_jar_directory" ]; then
@@ -228,7 +274,7 @@ if ! app_jar="$(stage_app_jar "$source_app_jar" "$staged_app_jar_directory")"; t
 fi
 
 log "${YELLOW}Starting document processor...${NC}"
-java -Dspring.profiles.active=cli \
+java -Dspring.profiles.active="cli,$SPRING_PROFILE" \
      -jar "$app_jar" \
      --app.qdrant.ensure-collections=true \
      --spring.main.web-application-type=none \

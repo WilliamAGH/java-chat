@@ -4,7 +4,7 @@
  * The index bootstrap and in-app navigation consume this catalog so deep links, aliases,
  * trailing slashes, and document metadata remain synchronized.
  */
-export type ApplicationView = "chat" | "learn" | "privacy" | "contact";
+export type ApplicationView = "chat" | "learn" | "privacy" | "contact" | "cli-authorize";
 
 const ROOT_APPLICATION_PATH = "/";
 const CHAT_APPLICATION_PATH = "/chat";
@@ -12,6 +12,7 @@ const GUIDED_APPLICATION_PATH = "/guided";
 const LEARN_APPLICATION_PATH = "/learn";
 const PRIVACY_APPLICATION_PATH = "/privacy";
 const CONTACT_APPLICATION_PATH = "/contact";
+const CLI_AUTHORIZE_APPLICATION_PATH = "/cli/authorize";
 /** Mirrors the backend lesson slug contract (`GuidedLearningService`). */
 const LESSON_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const DEFAULT_OPEN_GRAPH_IMAGE_PATH = "/og-image.png";
@@ -74,6 +75,12 @@ const CONTACT_PAGE_METADATA: PageMetadata = {
   imagePath: DEFAULT_OPEN_GRAPH_IMAGE_PATH,
 };
 
+const CLI_AUTHORIZE_PAGE_METADATA: PageMetadata = {
+  title: "Authorize JavaChat CLI",
+  description: "Authorize a JavaChat command-line client for this account.",
+  imagePath: DEFAULT_OPEN_GRAPH_IMAGE_PATH,
+};
+
 const APPLICATION_ROUTE_BY_PATH = {
   [ROOT_APPLICATION_PATH]: {
     view: "chat",
@@ -110,6 +117,12 @@ const APPLICATION_ROUTE_BY_PATH = {
     isCanonicalViewPath: true,
     recoversDescendantPathsToCanonicalView: false,
     pageMetadata: CONTACT_PAGE_METADATA,
+  },
+  [CLI_AUTHORIZE_APPLICATION_PATH]: {
+    view: "cli-authorize",
+    isCanonicalViewPath: true,
+    recoversDescendantPathsToCanonicalView: false,
+    pageMetadata: CLI_AUTHORIZE_PAGE_METADATA,
   },
 } as const;
 

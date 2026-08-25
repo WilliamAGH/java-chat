@@ -104,3 +104,4 @@ files:
 
 ignores:
   - "**/generated/**"
+  - "src/main/java/com/williamcallahan/javachat/service/EmbeddingBatchEmbedder.java"

@@ -26,7 +26,7 @@ public record JavaApiPageExtraction(
         Objects.requireNonNull(disposition, "disposition");
         Objects.requireNonNull(overviewText, "overviewText");
         anchoredSections = List.copyOf(Objects.requireNonNull(anchoredSections, "anchoredSections"));
-        if (disposition == JavaApiPageDisposition.EXCLUDED_CLASS_USE_PAGE
+        if (disposition != JavaApiPageDisposition.INCLUDED
                 && (!overviewText.isEmpty() || !anchoredSections.isEmpty())) {
             throw new IllegalArgumentException("excluded Java API pages must not carry indexable text");
         }
@@ -53,12 +53,21 @@ public record JavaApiPageExtraction(
     }
 
     /**
+     * Creates the explicit result for a frameset navigation shell.
+     *
+     * @return excluded navigation-page extraction
+     */
+    public static JavaApiPageExtraction excludedNavigationPage() {
+        return new JavaApiPageExtraction(JavaApiPageDisposition.EXCLUDED_NAVIGATION_PAGE, "", List.of());
+    }
+
+    /**
      * Indicates whether this source page must be excluded from ingestion.
      *
      * @return true only for a class-use page
      */
     public boolean excluded() {
-        return disposition == JavaApiPageDisposition.EXCLUDED_CLASS_USE_PAGE;
+        return disposition != JavaApiPageDisposition.INCLUDED;
     }
 
     /**

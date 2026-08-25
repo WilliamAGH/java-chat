@@ -39,10 +39,10 @@
   --color-text-muted: rgba(255, 252, 247, 0.32);
 
   /* Accent - Terracotta/Sienna */
-  --color-accent: #c45d3a;
-  --color-accent-hover: #d4694a;
-  --color-accent-muted: rgba(196, 93, 58, 0.16);
-  --color-accent-subtle: rgba(196, 93, 58, 0.08);
+  --color-accent: #b04a26;
+  --color-accent-hover: #c45d3a;
+  --color-accent-muted: rgba(176, 74, 38, 0.16);
+  --color-accent-subtle: rgba(176, 74, 38, 0.08);
   /* Text/icons sitting directly on --color-accent backgrounds */
   --color-accent-foreground: #ffffff;
 
@@ -174,7 +174,6 @@
   --color-text-muted: rgba(31, 30, 28, 0.36);
 
   /* Accent - Deepened terracotta (5.2:1 on --color-bg-primary) */
-  --color-accent: #b04a26;
   --color-accent-hover: #9c3f1e;
   --color-accent-muted: rgba(176, 74, 38, 0.14);
   --color-accent-subtle: rgba(176, 74, 38, 0.07);
@@ -409,7 +408,7 @@ code:not(pre code) {
   background: var(--color-surface-muted);
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-sm);
-  color: var(--color-accent);
+  color: var(--color-text-primary);
   overflow-wrap: break-word;
   word-break: break-word;
 }

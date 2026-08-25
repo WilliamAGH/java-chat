@@ -1,12 +1,15 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationCitationPathStyle;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSource;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -103,7 +106,18 @@ class DocsSourceRegistryTest {
         documentationSources.forEach(documentationSource -> {
             String localDocumentationFileUrl =
                     "file:///data/docs/" + documentationSource.relativeMirrorPath() + "/index.html";
-            String expectedOfficialDocumentationUrl = documentationSource.citationBaseUrl() + "index.html";
+            String expectedOfficialDocumentationUrl;
+            if (documentationSource.citationPathStyle() == DocumentationCitationPathStyle.JAVA_SOURCE) {
+                expectedOfficialDocumentationUrl =
+                        documentationSource.citationBaseUrl().replace("/blob/", "/tree/");
+            } else {
+                expectedOfficialDocumentationUrl = documentationSource
+                                .citationBaseUrl()
+                                .endsWith("/")
+                        ? documentationSource.citationBaseUrl()
+                                + documentationSource.citationPathStyle().citationRelativePath("index.html")
+                        : documentationSource.citationBaseUrl();
+            }
             assertEquals(
                     expectedOfficialDocumentationUrl, DocsSourceRegistry.normalizeDocUrl(localDocumentationFileUrl));
             assertEquals(
@@ -126,6 +140,125 @@ class DocsSourceRegistryTest {
     }
 
     @Test
+    void assignsDistinctStorageUrlsToJavaPagesThatShareOneCanonicalSourceFile(@TempDir Path temporaryDirectory) {
+        Path mirrorRoot = temporaryDirectory.resolve("jackson/2.22.2/api");
+        Path outerTypePage = mirrorRoot.resolve("com/fasterxml/jackson/databind/ObjectMapper.html");
+        Path nestedTypePage = mirrorRoot.resolve("com/fasterxml/jackson/databind/ObjectMapper.DefaultTyping.html");
+        Path singletonTypePage = mirrorRoot.resolve("com/fasterxml/jackson/databind/JsonNode.html");
+
+        Map<Path, String> ingestionIdentities = DocsSourceRegistry.resolveMirroredIngestionIdentities(
+                mirrorRoot, List.of(outerTypePage, nestedTypePage, singletonTypePage));
+        String outerStorageUrl =
+                ingestionIdentities.get(outerTypePage.toAbsolutePath().normalize());
+        String nestedStorageUrl =
+                ingestionIdentities.get(nestedTypePage.toAbsolutePath().normalize());
+        String singletonStorageUrl =
+                ingestionIdentities.get(singletonTypePage.toAbsolutePath().normalize());
+
+        assertNotEquals(outerStorageUrl, nestedStorageUrl);
+        assertEquals(
+                DocsSourceRegistry.normalizeDocUrl(outerStorageUrl),
+                DocsSourceRegistry.normalizeDocUrl(nestedStorageUrl));
+        assertEquals(
+                DocsSourceRegistry.resolveMirroredPath(mirrorRoot, outerTypePage)
+                        .orElseThrow(),
+                DocsSourceRegistry.normalizeDocUrl(outerStorageUrl));
+        assertEquals(
+                DocsSourceRegistry.resolveMirroredPath(mirrorRoot, singletonTypePage)
+                        .orElseThrow(),
+                singletonStorageUrl);
+
+        String nestedSingletonIdentity = DocsSourceRegistry.resolveMirroredIngestionIdentities(
+                        mirrorRoot, List.of(nestedTypePage))
+                .get(nestedTypePage.toAbsolutePath().normalize());
+        String nestedSubdirectoryIdentity = DocsSourceRegistry.resolveMirroredIngestionIdentities(
+                        nestedTypePage.getParent(), List.of(nestedTypePage))
+                .get(nestedTypePage.toAbsolutePath().normalize());
+        assertEquals(nestedStorageUrl, nestedSingletonIdentity);
+        assertEquals(nestedStorageUrl, nestedSubdirectoryIdentity);
+    }
+
+    @Test
+    void restoresExtensionlessCanonicalRoutesForMirroredPlatformDocumentation() {
+        assertEquals(
+                "https://docs.docker.com/engine/swarm/",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/docker/engine/swarm/index.html"));
+        assertEquals(
+                "https://doc.traefik.io/traefik/reference/install-configuration/providers/swarm/",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/traefik/reference/install-configuration/providers/swarm/index.html"));
+        assertEquals(
+                "https://developers.cloudflare.com/r2/objects/workers/workers-api-usage/",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/cloudflare/r2/objects/workers/workers-api-usage/index.html"));
+        assertEquals(
+                "https://quarkus.io/guides/aesh/",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/quarkus/aesh/index.html"));
+        assertEquals(
+                "https://docs.dokploy.com/docs/core/backups",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/dokploy/docs/core/backups.html"));
+        assertEquals(
+                "https://infisical.com/docs/integrations/platforms/infisical-agent",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/infisical/integrations/platforms/infisical-agent.html"));
+        assertEquals(
+                "https://docs.doppler.com/docs/mcp",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/doppler/docs/mcp.html"));
+        assertEquals(
+                "https://docs.doppler.com/reference/projects-list",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/doppler/reference/projects-list.html"));
+        assertEquals(
+                "https://docs.doppler.com/changelog/june-2026",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/doppler/changelog/june-2026.html"));
+        assertEquals(
+                DocumentationCitationPathStyle.EXTENSIONLESS_HTML,
+                DocsSourceRegistry.documentationSourceForRelativeMirrorPath("docker")
+                        .orElseThrow()
+                        .citationPathStyle());
+    }
+
+    @Test
+    void preservesCanonicalUrlsForSingleDocumentMirrors() {
+        assertEquals(
+                "https://porkbun.com/api/json/v3/documentation",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/porkbun/index.html"));
+        assertEquals(
+                "https://github.com/oborseth/Porkbun-MCP/blob/64e8b4f4caad75e99333733bca5f2987afee3c75/README.md",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/porkbun-mcp/index.html"));
+    }
+
+    @Test
+    void mapsArchiveBackedJavadocsToReadableHostedPages() {
+        assertEquals(
+                "https://github.com/FasterXML/jackson-databind/blob/jackson-databind-2.22.2/src/main/java/com/fasterxml/jackson/databind/ObjectMapper.java",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/jackson/2.22.2/api/com/fasterxml/jackson/databind/ObjectMapper.html"));
+        assertEquals(
+                "https://github.com/FasterXML/jackson-databind/blob/jackson-databind-2.22.2/src/main/java/com/fasterxml/jackson/databind/ObjectMapper.java",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/jackson/2.22.2/api/com/fasterxml/jackson/databind/ObjectMapper.DefaultTyping.html"));
+        assertEquals(
+                "https://github.com/FasterXML/jackson-databind/tree/jackson-databind-2.22.2/src/main/java/com/fasterxml/jackson/databind/",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/jackson/2.22.2/api/com/fasterxml/jackson/databind/package-summary.html"));
+        assertEquals(
+                "https://github.com/FasterXML/jackson-databind/blob/jackson-databind-3.2.2/src/main/java/tools/jackson/databind/ObjectMapper.java",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/jackson/3.2.2/api/tools/jackson/databind/ObjectMapper.html"));
+        assertEquals(
+                "https://javadoc.io/doc/org.projectlombok/lombok/1.18.46/lombok/Builder.html",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/lombok/1.18.46/api/lombok/Builder.html"));
+    }
+
+    @Test
+    void restoresCanonicalDirectoryRoutesForTheJooqManual() {
+        assertEquals(
+                "https://www.jooq.org/doc/3.21.7/manual/sql-building/sql-statements/select-statement/",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/jooq/3.21/manual/sql-building/sql-statements/select-statement/index.html"));
+    }
+
+    @Test
     void resolvesCanonicalCitationFromArbitraryDocumentationRoot(@TempDir Path temporaryDirectory) {
         DocumentationSource documentationSource = DocsSourceRegistry.documentationSources().stream()
                 .filter(source -> "spring-ai-reference".equals(source.relativeMirrorPath()))
@@ -138,6 +271,22 @@ class DocsSourceRegistryTest {
         assertEquals(
                 documentationSource.citationBaseUrl() + "api/chat-client.html",
                 DocsSourceRegistry.resolveMirroredPath(arbitraryMirrorRoot, arbitraryDocumentFile)
+                        .orElseThrow());
+    }
+
+    @Test
+    void resolvesExtensionlessDocumentationCitationRoutes(@TempDir Path temporaryDirectory) {
+        DocumentationSource anthropicApiDocumentation = DocsSourceRegistry.documentationSources().stream()
+                .filter(documentationSource -> "anthropic/api".equals(documentationSource.relativeMirrorPath()))
+                .findFirst()
+                .orElseThrow();
+        Path anthropicApiMirrorRoot = temporaryDirectory.resolve(anthropicApiDocumentation.relativeMirrorPath());
+
+        assertEquals(
+                "https://platform.claude.com/docs/en/build-with-claude/overview",
+                DocsSourceRegistry.resolveMirroredPath(
+                                anthropicApiMirrorRoot,
+                                anthropicApiMirrorRoot.resolve("build-with-claude/overview.html"))
                         .orElseThrow());
     }
 
@@ -172,9 +321,24 @@ class DocsSourceRegistryTest {
     }
 
     @Test
+    void resolvesLegacySpringBootReferenceMirrorToCanonicalSqlDocumentation(@TempDir Path temporaryDirectory) {
+        Path springBootReferenceRoot = temporaryDirectory.resolve("spring-boot");
+
+        assertEquals(
+                "https://docs.spring.io/spring-boot/reference/data/sql.html",
+                DocsSourceRegistry.resolveMirroredPath(
+                                springBootReferenceRoot, springBootReferenceRoot.resolve("reference/data/sql.html"))
+                        .orElseThrow());
+        assertEquals(
+                "https://docs.spring.io/spring-boot/reference/data/sql.html",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "https://docs.spring.io/spring-boot/reference/reference/data/sql.html"));
+    }
+
+    @Test
     void normalizesEmbeddedSpringFrameworkCurrentReferenceLayout() {
         assertEquals(
-                SPRING_DOCS_URL_PREFIX + "spring-framework/reference/current/web/webflux.html",
+                SPRING_DOCS_URL_PREFIX + "spring-framework/reference/web/webflux.html",
                 DocsSourceRegistry.normalizeDocUrl(EMBEDDED_SPRING_DOCS_LOCAL_URL_PREFIX
                         + "spring-framework/docs/current/reference/6.2.5/web/webflux.html"));
     }
@@ -182,7 +346,7 @@ class DocsSourceRegistryTest {
     @Test
     void normalizesEmbeddedSpringFrameworkReferenceRootLayout() {
         assertEquals(
-                SPRING_DOCS_URL_PREFIX + "spring-framework/reference/current/core/beans.html",
+                SPRING_DOCS_URL_PREFIX + "spring-framework/reference/core/beans.html",
                 DocsSourceRegistry.normalizeDocUrl(
                         EMBEDDED_SPRING_DOCS_LOCAL_URL_PREFIX + "spring-framework/reference/6.2.5/core/beans.html"));
     }
@@ -210,7 +374,7 @@ class DocsSourceRegistryTest {
     @Test
     void normalizesEmbeddedSpringBootCurrentReferenceLayout() {
         assertEquals(
-                SPRING_DOCS_URL_PREFIX + "spring-boot/reference/current/web/servlet.html",
+                SPRING_DOCS_URL_PREFIX + "spring-boot/reference/web/servlet.html",
                 DocsSourceRegistry.normalizeDocUrl(EMBEDDED_SPRING_DOCS_LOCAL_URL_PREFIX
                         + "spring-boot/docs/current/reference/3.5.0/web/servlet.html"));
     }
@@ -218,7 +382,7 @@ class DocsSourceRegistryTest {
     @Test
     void normalizesEmbeddedSpringBootReferenceRootLayout() {
         assertEquals(
-                SPRING_DOCS_URL_PREFIX + "spring-boot/reference/current/using/structuring-your-code.html",
+                SPRING_DOCS_URL_PREFIX + "spring-boot/reference/using/structuring-your-code.html",
                 DocsSourceRegistry.normalizeDocUrl(EMBEDDED_SPRING_DOCS_LOCAL_URL_PREFIX
                         + "spring-boot/reference/3.5.0/using/structuring-your-code.html"));
     }

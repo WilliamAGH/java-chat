@@ -11,5 +11,8 @@ public enum JavaApiPageDisposition {
     INCLUDED,
 
     /** The page is a class-use index and must not be indexed as type documentation. */
-    EXCLUDED_CLASS_USE_PAGE
+    EXCLUDED_CLASS_USE_PAGE,
+
+    /** The page is a frameset navigation shell whose linked content pages are indexed separately. */
+    EXCLUDED_NAVIGATION_PAGE
 }

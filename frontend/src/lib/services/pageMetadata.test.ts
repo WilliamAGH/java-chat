@@ -72,3 +72,12 @@ describe("contact route resolution", () => {
     expect(canonicalRecoveryPathForPath("/contact")).toBeNull();
   });
 });
+
+describe("CLI authorization route resolution", () => {
+  it("keeps the exact callback approval path out of the chat view", () => {
+    expect(applicationViewForPath("/cli/authorize")).toBe("cli-authorize");
+    expect(applicationViewForPath("/cli/authorize/")).toBe("cli-authorize");
+    expect(applicationViewForPath("/cli/authorize/extra")).toBe("chat");
+    expect(canonicalRecoveryPathForPath("/cli/authorize")).toBeNull();
+  });
+});

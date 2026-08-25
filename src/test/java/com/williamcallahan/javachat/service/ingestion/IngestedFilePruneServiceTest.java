@@ -184,6 +184,34 @@ class IngestedFilePruneServiceTest {
     }
 
     @Test
+    void deletesMarkerAndAdditionalParsedHashesForCollidedLegacyUrl(@TempDir Path parsedChunkDirectory)
+            throws IOException {
+        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
+        LocalStoreService localStoreService = mock(LocalStoreService.class);
+        FileIngestionMarkerStore fileIngestionMarkerStore = mock(FileIngestionMarkerStore.class);
+        IngestedFilePruneService pruneService = new IngestedFilePruneService(
+                hybridVectorService, localStoreService, fileIngestionMarkerStore, new ContentHasher());
+        FileIngestionRecord legacyRecord = new FileIngestionRecord(
+                123L,
+                456L,
+                "legacy-fingerprint",
+                "legacy-extraction",
+                DOCS_COLLECTION_NAME,
+                List.of(ANCHORED_CHUNK_HASH));
+        Path additionalParsedChunk = parsedChunkDirectory.resolve("source_1_" + MARKERLESS_STALE_CHUNK_HASH + ".txt");
+        Files.writeString(additionalParsedChunk, "additional collided page text", StandardCharsets.UTF_8);
+        when(localStoreService.getParsedDir()).thenReturn(parsedChunkDirectory);
+        when(localStoreService.toSafeName(SOURCE_URL)).thenReturn("source");
+
+        pruneService.pruneCollectionFileStrict(DOCS_COLLECTION_NAME, SOURCE_URL, legacyRecord);
+
+        verify(localStoreService)
+                .deleteChunkIngestionMarkers(List.of(ANCHORED_CHUNK_HASH, MARKERLESS_STALE_CHUNK_HASH));
+        verify(localStoreService).deleteParsedChunksForUrl(SOURCE_URL);
+        verify(fileIngestionMarkerStore).deleteFileIngestionRecord(SOURCE_URL);
+    }
+
+    @Test
     void deletesParsedChunkWithMalformedIndexTokenWithoutDeletingAnUnverifiedMarker(@TempDir Path parsedChunkDirectory)
             throws IOException {
         assertUnverifiedParsedChunkIsDeletedWithoutDeletingItsMarker(

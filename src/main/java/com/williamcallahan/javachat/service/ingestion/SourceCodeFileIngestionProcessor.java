@@ -148,16 +148,16 @@ public class SourceCodeFileIngestionProcessor {
         }
 
         boolean unchangedByFingerprint =
-                isUnchangedByFingerprint(previousFileRecord, fileContext, fileContent, canonicalCollectionName);
-        boolean hasSufficientPointCoverage = unchangedByFingerprint
-                && hasSufficientStoredPointCoverage(previousFileRecord, canonicalCollectionName, fileContext);
-        if (hasSufficientPointCoverage) {
+                isUnchangedByFingerprint(previousFileRecord, fileContent, canonicalCollectionName);
+        boolean hasExactPointCoverage = unchangedByFingerprint
+                && hasExactStoredPointCoverage(previousFileRecord, canonicalCollectionName, fileContext);
+        if (hasExactPointCoverage) {
             log.debug("Skipping unchanged file (already ingested): {}", fileContext.relativePath());
             return new SourceFileProcessingResult(LocalDocsFileOutcome.skippedFile(), fileUrl);
         }
         if (unchangedByFingerprint) {
             log.info(
-                    "File marker exists but collection has missing points for URL; forcing reindex: {}",
+                    "File marker exists but stored point identities differ; forcing reindex: {}",
                     fileContext.relativePath());
         }
 
@@ -278,30 +278,24 @@ public class SourceCodeFileIngestionProcessor {
     }
 
     private boolean isUnchangedByFingerprint(
-            FileIngestionRecord previousFileRecord,
-            ValidatedFileContext fileContext,
-            ReadableFileContent fileContent,
-            String collectionName) {
+            FileIngestionRecord previousFileRecord, ReadableFileContent fileContent, String collectionName) {
         if (previousFileRecord == null) {
             return false;
         }
-        return previousFileRecord.fileSizeBytes() == fileContext.fileSizeBytes()
-                && previousFileRecord.lastModifiedMillis() == fileContext.lastModifiedMillis()
-                && fileContent.contentFingerprint().equals(previousFileRecord.ingestionFingerprint())
+        return fileContent.contentFingerprint().equals(previousFileRecord.ingestionFingerprint())
                 && collectionName.equals(previousFileRecord.collectionName());
     }
 
-    private boolean hasSufficientStoredPointCoverage(
+    private boolean hasExactStoredPointCoverage(
             FileIngestionRecord previousFileRecord, String collectionName, ValidatedFileContext fileContext) {
-        long storedPointCount = storage.hybridVector().countPointsForUrl(collectionName, fileContext.sourceUrl());
-        int expectedChunkCount = 0;
-        if (previousFileRecord != null && previousFileRecord.chunkHashes() != null) {
-            expectedChunkCount = previousFileRecord.chunkHashes().size();
-        }
-        if (storedPointCount <= 0) {
+        List<String> expectedChunkHashes = previousFileRecord.chunkHashes();
+        if (expectedChunkHashes == null || expectedChunkHashes.isEmpty()) {
             return false;
         }
-        return expectedChunkCount <= 0 || storedPointCount >= expectedChunkCount;
+        List<String> expectedPointUuids =
+                expectedChunkHashes.stream().map(storage.hasher()::uuidFromHash).toList();
+        return storage.hybridVector()
+                .hasExactPointIdsForUrl(collectionName, fileContext.sourceUrl(), expectedPointUuids);
     }
 
     private LocalDocsFileOutcome chunkAndUpsert(

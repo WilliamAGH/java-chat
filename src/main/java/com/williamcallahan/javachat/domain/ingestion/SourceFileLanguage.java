@@ -31,6 +31,7 @@ public final class SourceFileLanguage {
             Map.entry(".gradle", "groovy"),
             Map.entry(".properties", "properties"),
             Map.entry(".md", "markdown"),
+            Map.entry(".mdx", "markdown"),
             Map.entry(".txt", "text"),
             Map.entry(".rst", "restructuredtext"),
             Map.entry(".sh", "shell"),
@@ -69,7 +70,7 @@ public final class SourceFileLanguage {
             "gemfile", "ruby",
             "cmakelists.txt", "cmake");
 
-    private static final Set<String> DOCUMENTATION_EXTENSIONS = Set.of(".md", ".txt", ".rst", ".html", ".htm");
+    private static final Set<String> DOCUMENTATION_EXTENSIONS = Set.of(".md", ".mdx", ".txt", ".rst", ".html", ".htm");
 
     private static final Set<String> CONFIGURATION_EXTENSIONS =
             Set.of(".xml", ".yml", ".yaml", ".json", ".toml", ".gradle", ".kts", ".properties", ".css", ".scss");

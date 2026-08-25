@@ -1,8 +1,14 @@
 package com.williamcallahan.javachat.service;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.stream.IntStream;
 import org.springframework.ai.document.Document;
 
 /**
@@ -13,7 +19,10 @@ import org.springframework.ai.document.Document;
  */
 final class EmbeddingBatchEmbedder {
 
-    static final int EMBEDDING_REQUEST_BATCH_SIZE = 4;
+    static final int EMBEDDING_REQUEST_BATCH_SIZE = 8;
+    static final int MAX_CONCURRENT_EMBEDDING_REQUESTS = 8;
+    static final int MAX_EMBEDDING_ATTEMPTS = 3;
+    private static final Duration EMBEDDING_RETRY_BASE_DELAY = Duration.ofSeconds(5);
 
     private EmbeddingBatchEmbedder() {}
 
@@ -31,17 +40,57 @@ final class EmbeddingBatchEmbedder {
                     "Embedding dimensions must be positive but were " + expectedEmbeddingDimensions);
         }
 
+        int embeddingRequestCount = Math.ceilDiv(documents.size(), EMBEDDING_REQUEST_BATCH_SIZE);
         List<float[]> allEmbeddings = new ArrayList<>(documents.size());
-        for (int batchStartIndex = 0;
-                batchStartIndex < documents.size();
-                batchStartIndex += EMBEDDING_REQUEST_BATCH_SIZE) {
-            int batchEndIndex = Math.min(batchStartIndex + EMBEDDING_REQUEST_BATCH_SIZE, documents.size());
-            List<Document> documentBatch = documents.subList(batchStartIndex, batchEndIndex);
-            List<float[]> batchEmbeddings = embedSingleBatch(
-                    embeddingClient, documentBatch, batchStartIndex, batchEndIndex, expectedEmbeddingDimensions);
-            allEmbeddings.addAll(batchEmbeddings);
+        try (ExecutorService embeddingExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (int requestWaveStartIndex = 0;
+                    requestWaveStartIndex < embeddingRequestCount;
+                    requestWaveStartIndex += MAX_CONCURRENT_EMBEDDING_REQUESTS) {
+                int currentWaveStartIndex = requestWaveStartIndex;
+                int requestWaveEndIndex =
+                        Math.min(requestWaveStartIndex + MAX_CONCURRENT_EMBEDDING_REQUESTS, embeddingRequestCount);
+                List<Future<List<float[]>>> embeddingWave = IntStream.range(currentWaveStartIndex, requestWaveEndIndex)
+                        .mapToObj(requestIndex -> embeddingExecutor.submit(() ->
+                                embedRequest(embeddingClient, documents, requestIndex, expectedEmbeddingDimensions)))
+                        .toList();
+                for (Future<List<float[]>> embeddingRequest : embeddingWave) {
+                    try {
+                        allEmbeddings.addAll(embeddingRequest.get());
+                    } catch (InterruptedException interruptedEmbeddingWave) {
+                        embeddingWave.forEach(remainingRequest -> remainingRequest.cancel(true));
+                        embeddingExecutor.shutdownNow();
+                        Thread.currentThread().interrupt();
+                        throw new EmbeddingServiceUnavailableException(
+                                "Embedding request wave was interrupted", interruptedEmbeddingWave);
+                    } catch (ExecutionException embeddingCompletionFailure) {
+                        embeddingWave.forEach(remainingRequest -> remainingRequest.cancel(true));
+                        embeddingExecutor.shutdownNow();
+                        if (embeddingCompletionFailure.getCause()
+                                instanceof EmbeddingServiceUnavailableException embeddingFailure) {
+                            throw embeddingFailure;
+                        }
+                        throw new EmbeddingServiceUnavailableException(
+                                "Embedding request wave failed", embeddingCompletionFailure.getCause());
+                    }
+                }
+            }
         }
         return List.copyOf(allEmbeddings);
+    }
+
+    private static List<float[]> embedRequest(
+            EmbeddingClient embeddingClient,
+            List<Document> documents,
+            int requestIndex,
+            int expectedEmbeddingDimensions) {
+        int batchStartIndex = requestIndex * EMBEDDING_REQUEST_BATCH_SIZE;
+        int batchEndIndex = Math.min(batchStartIndex + EMBEDDING_REQUEST_BATCH_SIZE, documents.size());
+        return embedSingleBatch(
+                embeddingClient,
+                documents.subList(batchStartIndex, batchEndIndex),
+                batchStartIndex,
+                batchEndIndex,
+                expectedEmbeddingDimensions);
     }
 
     /**
@@ -66,7 +115,7 @@ final class EmbeddingBatchEmbedder {
 
         List<float[]> batchEmbeddings;
         try {
-            batchEmbeddings = embeddingClient.embed(textBatch, LlmGatewayTier.BATCH);
+            batchEmbeddings = embedWithRetry(embeddingClient, textBatch);
         } catch (EmbeddingServiceUnavailableException embeddingFailure) {
             String firstBatchUrl = extractDocumentUrl(documentBatch.getFirst(), batchStartIndex);
             String lastBatchUrl = extractDocumentUrl(documentBatch.getLast(), batchEndIndex - 1);
@@ -100,6 +149,34 @@ final class EmbeddingBatchEmbedder {
         }
         validateEmbeddingDimensions(batchEmbeddings, batchStartIndex, batchEndIndex, expectedEmbeddingDimensions);
         return batchEmbeddings;
+    }
+
+    private static List<float[]> embedWithRetry(EmbeddingClient embeddingClient, List<String> textBatch) {
+        for (int embeddingAttempt = 1; embeddingAttempt <= MAX_EMBEDDING_ATTEMPTS; embeddingAttempt++) {
+            try {
+                return embeddingClient.embed(textBatch, LlmGatewayTier.BATCH);
+            } catch (EmbeddingServiceTemporarilyUnavailableException temporaryFailure) {
+                if (embeddingAttempt == MAX_EMBEDDING_ATTEMPTS) {
+                    throw temporaryFailure;
+                }
+                awaitRetryDelay(embeddingAttempt, temporaryFailure);
+            }
+        }
+        throw new IllegalStateException("Embedding retry loop exhausted without a terminal outcome");
+    }
+
+    private static void awaitRetryDelay(
+            int completedAttemptCount, EmbeddingServiceTemporarilyUnavailableException temporaryFailure) {
+        try {
+            Thread.sleep(EMBEDDING_RETRY_BASE_DELAY.multipliedBy(completedAttemptCount));
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            EmbeddingServiceTemporarilyUnavailableException interruptionFailure =
+                    new EmbeddingServiceTemporarilyUnavailableException(
+                            "Interrupted while waiting to retry embedding batch", interruptedException);
+            interruptionFailure.addSuppressed(temporaryFailure);
+            throw interruptionFailure;
+        }
     }
 
     private static void validateEmbeddingDimensions(

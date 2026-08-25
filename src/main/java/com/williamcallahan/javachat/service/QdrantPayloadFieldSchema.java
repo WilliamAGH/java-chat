@@ -21,6 +21,9 @@ public final class QdrantPayloadFieldSchema {
     /** Payload metadata key for a canonical source URL. */
     public static final String URL_FIELD = "url";
 
+    /** Payload metadata key for the public citation URL when storage uses a distinct identity. */
+    public static final String CITATION_URL_FIELD = "citationUrl";
+
     /** Payload metadata key for a human-readable document title. */
     public static final String TITLE_FIELD = "title";
 
@@ -96,6 +99,7 @@ public final class QdrantPayloadFieldSchema {
     /** Metadata fields stored and retrieved as Qdrant string values. */
     static final Set<String> STRING_METADATA_FIELDS = Set.of(
             URL_FIELD,
+            CITATION_URL_FIELD,
             TITLE_FIELD,
             PACKAGE_FIELD,
             ANCHOR_FIELD,

@@ -20,8 +20,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 import org.jsoup.Jsoup;
 import org.slf4j.Logger;
@@ -41,8 +43,13 @@ public class LocalDocsFileIngestionProcessor {
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
 
     private static final String FILE_URL_PREFIX = "file://";
-    static final int MAX_EMBEDDING_BATCH_DOCUMENTS = 32;
-    static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v4";
+    private static final String NAVIGATION_FRAMESET_SELECTOR = "frameset";
+    private static final String NAVIGATION_NOFRAMES_SELECTOR = "noframes";
+    private static final String INTERACTIVE_API_REFERENCE_SELECTOR = "main > article.redoc-container > redoc[spec-url]";
+    private static final String INTERACTIVE_API_ALTERNATE_SELECTOR =
+            "head > link[rel=alternate][type=\"text/markdown\"], head > link[rel=alternate][type=\"application/yaml\"]";
+    static final int MAX_EMBEDDING_BATCH_DOCUMENTS = 256;
+    static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v5";
 
     private final FileContentServices fileContentServices;
     private final IngestionStorageServices storage;
@@ -84,7 +91,9 @@ public class LocalDocsFileIngestionProcessor {
      * @return processing outcome indicating processed/failed/skipped
      */
     public LocalDocsFileOutcome process(Path root, Path file) {
-        return completePreparation(prepare(root, file));
+        Map<Path, String> ingestionIdentities =
+                DocsSourceRegistry.resolveMirroredIngestionIdentities(root, List.of(file));
+        return completePreparation(prepare(root, file, ingestionIdentities));
     }
 
     /**
@@ -99,14 +108,20 @@ public class LocalDocsFileIngestionProcessor {
      * @return ordered outcomes through the first failure
      */
     public List<LocalDocsFileOutcome> processBatch(Path root, List<Path> files) {
+        return processBatch(root, files, DocsSourceRegistry.resolveMirroredIngestionIdentities(root, files));
+    }
+
+    List<LocalDocsFileOutcome> processBatch(Path root, List<Path> files, Map<Path, String> ingestionIdentities) {
         Objects.requireNonNull(root, "root");
         List<Path> requiredFiles = List.copyOf(Objects.requireNonNull(files, "files"));
+        Map<Path, String> requiredIngestionIdentities =
+                Map.copyOf(Objects.requireNonNull(ingestionIdentities, "ingestionIdentities"));
         List<LocalDocsFileOutcome> outcomes = new ArrayList<>(requiredFiles.size());
         List<DocumentProcessingRequest> pendingNewFiles = new ArrayList<>();
         int pendingDocumentCount = 0;
 
         for (Path file : requiredFiles) {
-            FilePreparation preparation = prepare(root, file);
+            FilePreparation preparation = prepare(root, file, requiredIngestionIdentities);
             if (preparation instanceof DeferredFilePreparation deferredPreparation) {
                 if (!flushNewFileBatch(pendingNewFiles, outcomes)) {
                     return List.copyOf(outcomes);
@@ -161,7 +176,7 @@ public class LocalDocsFileIngestionProcessor {
         return List.copyOf(outcomes);
     }
 
-    private FilePreparation prepare(Path root, Path file) {
+    private FilePreparation prepare(Path root, Path file, Map<Path, String> ingestionIdentities) {
         long fileStartMillis = System.currentTimeMillis();
         Path fileNamePath = file.getFileName();
         if (fileNamePath == null) {
@@ -170,7 +185,9 @@ public class LocalDocsFileIngestionProcessor {
         }
 
         String fileName = fileNamePath.toString().toLowerCase(Locale.ROOT);
-        String url = mapLocalPathToUrl(root, file);
+        String url = Optional.ofNullable(
+                        ingestionIdentities.get(file.toAbsolutePath().normalize()))
+                .orElseGet(() -> fallbackIngestionUrl(root, file));
 
         final long fileSizeBytes;
         final long lastModifiedMillis;
@@ -230,6 +247,7 @@ public class LocalDocsFileIngestionProcessor {
         String packageName;
         boolean isJavaApiPage = JavaPackageExtractor.isJavaApiUrl(url);
         boolean excludedJavaApiPage = false;
+        boolean excludedNavigationPage = false;
         List<ChunkProcessingService.JavaApiPageSegment> javaApiPageSegments = List.of();
 
         if (fileName.endsWith(".pdf")) {
@@ -254,7 +272,8 @@ public class LocalDocsFileIngestionProcessor {
                 String html = fileOps.readTextFile(file);
                 parsedDocument = Jsoup.parse(html);
                 title = Optional.ofNullable(parsedDocument.title()).orElse("");
-                if (isJavaApiPage) {
+                excludedNavigationPage = isNavigationOnlyDocument(parsedDocument);
+                if (!excludedNavigationPage && isJavaApiPage) {
                     JavaApiPageExtraction javaApiPageExtraction = htmlExtractor.extractJavaApiPage(parsedDocument);
                     excludedJavaApiPage = javaApiPageExtraction.excluded();
                     bodyText = javaApiPageExtraction.combinedText();
@@ -273,7 +292,7 @@ public class LocalDocsFileIngestionProcessor {
                         LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "html-read", htmlReadException)));
             }
 
-            if (!excludedJavaApiPage) {
+            if (!excludedJavaApiPage && !excludedNavigationPage) {
                 var contentGuard = fileContentServices.contentGuard();
                 GuardDecision guardDecision = contentGuard.evaluate(new GuardInput(bodyText, parsedDocument));
                 if (!guardDecision.acceptable()) {
@@ -291,9 +310,9 @@ public class LocalDocsFileIngestionProcessor {
             requiresFullReindex = unmarkedVectorDecision.requiresFullReindex();
         }
 
-        if (excludedJavaApiPage) {
+        if (excludedJavaApiPage || excludedNavigationPage) {
             boolean replacementRequired = requiresFullReindex;
-            return deferred(() -> processExcludedJavaApiPage(markerContext, replacementRequired));
+            return deferred(() -> processExcludedPage(markerContext, replacementRequired));
         }
 
         ChunkProcessingService.ChunkProcessingOutcome chunkingOutcome;
@@ -396,11 +415,11 @@ public class LocalDocsFileIngestionProcessor {
     private ReindexDecision inspectExistingMarker(MarkerContext markerContext) {
         Optional<FileIngestionRecord> priorIngestionRecord = markerContext.priorIngestionRecord();
         boolean unchangedByFingerprint = priorIngestionRecord
-                .map(ingestionRecord -> ingestionRecord.fileSizeBytes() == markerContext.fileSizeBytes()
-                        && ingestionRecord.lastModifiedMillis() == markerContext.lastModifiedMillis()
-                        && markerContext.ingestionFingerprint().equals(ingestionRecord.ingestionFingerprint())
-                        && LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION.equals(ingestionRecord.extractionSemanticsVersion())
-                        && markerContext.collectionName().equals(ingestionRecord.collectionName()))
+                .map(ingestionRecord ->
+                        markerContext.ingestionFingerprint().equals(ingestionRecord.ingestionFingerprint())
+                                && LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION.equals(
+                                        ingestionRecord.extractionSemanticsVersion())
+                                && markerContext.collectionName().equals(ingestionRecord.collectionName()))
                 .orElse(false);
         if (!unchangedByFingerprint) {
             return ReindexDecision.continueWith(priorIngestionRecord.isPresent());
@@ -670,7 +689,7 @@ public class LocalDocsFileIngestionProcessor {
                 formattedPercent);
     }
 
-    private LocalDocsFileOutcome processExcludedJavaApiPage(MarkerContext markerContext, boolean requiresFullReindex) {
+    private LocalDocsFileOutcome processExcludedPage(MarkerContext markerContext, boolean requiresFullReindex) {
         try {
             if (requiresFullReindex) {
                 storage.hybridVector().deleteByUrl(markerContext.collectionKind(), markerContext.url());
@@ -700,8 +719,16 @@ public class LocalDocsFileIngestionProcessor {
             return LocalDocsFileOutcome.failedFile(
                     failureFactory.failure(markerContext.file(), "marker-transition", markerTransitionException));
         }
-        INDEXING_LOG.info("[INDEXING] Excluded Java API class-use page");
+        INDEXING_LOG.info("[INDEXING] Excluded documentation page from indexing");
         return LocalDocsFileOutcome.skippedFile();
+    }
+
+    private static boolean isNavigationOnlyDocument(org.jsoup.nodes.Document parsedDocument) {
+        boolean navigationFrameset = parsedDocument.selectFirst(NAVIGATION_FRAMESET_SELECTOR) != null
+                && parsedDocument.selectFirst(NAVIGATION_NOFRAMES_SELECTOR) != null;
+        boolean interactiveApiReferenceShell = parsedDocument.selectFirst(INTERACTIVE_API_REFERENCE_SELECTOR) != null
+                && parsedDocument.selectFirst(INTERACTIVE_API_ALTERNATE_SELECTOR) != null;
+        return navigationFrameset || interactiveApiReferenceShell;
     }
 
     private LocalDocsFileOutcome quarantineRejectedFile(Path file, String rejectionReason) {
@@ -777,6 +804,7 @@ public class LocalDocsFileIngestionProcessor {
             return;
         }
         try {
+            storage.fileMarkers().registerStorageUrlForCanonicalCitation(url);
             storage.fileMarkers().markFileIngested(url, fileIngestionRecord);
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to mark file as ingested: " + url, exception);
@@ -800,6 +828,12 @@ public class LocalDocsFileIngestionProcessor {
         Objects.requireNonNull(documents, "documents");
         Objects.requireNonNull(provenance, "provenance");
         for (Document indexedDocument : documents) {
+            indexedDocument
+                    .getMetadata()
+                    .put(
+                            QdrantPayloadFieldSchema.CITATION_URL_FIELD,
+                            DocsSourceRegistry.normalizeDocUrl(
+                                    DocumentFactory.metadataText(indexedDocument, QdrantPayloadFieldSchema.URL_FIELD)));
             if (!provenance.docSet().isBlank()) {
                 indexedDocument.getMetadata().put(QdrantPayloadFieldSchema.DOC_SET_FIELD, provenance.docSet());
             }
@@ -821,7 +855,7 @@ public class LocalDocsFileIngestionProcessor {
         }
     }
 
-    private String mapLocalPathToUrl(final Path root, final Path file) {
+    private String fallbackIngestionUrl(final Path root, final Path file) {
         final String absolutePath = file.toAbsolutePath().toString().replace('\\', '/');
         return DocsSourceRegistry.resolveMirroredPath(root, file)
                 .or(() -> DocsSourceRegistry.resolveLocalPath(absolutePath))
@@ -832,5 +866,35 @@ public class LocalDocsFileIngestionProcessor {
         Objects.requireNonNull(fileContentFingerprint, "fileContentFingerprint");
         Objects.requireNonNull(provenance, "provenance");
         return storage.hasher().sha256(provenance.fingerprintInput(fileContentFingerprint));
+    }
+
+    void pruneRemovedSourceUrls(String citationBase, Set<String> activeStorageUrls) {
+        String normalizedCitationBase = DocsSourceRegistry.normalizeDocUrl(citationBase);
+        String normalizedCitationTreeBase = normalizedCitationBase.replace("/blob/", "/tree/");
+        for (QdrantCollectionKind collectionKind : QdrantCollectionKind.values()) {
+            String collectionName = storage.hybridVector().resolveCollectionName(collectionKind);
+            for (String storedUrl : storage.hybridVector().scrollAllUrlsInCollection(collectionName)) {
+                String normalizedStoredUrl = DocsSourceRegistry.normalizeDocUrl(storedUrl);
+                if (activeStorageUrls.contains(storedUrl)
+                        || (!normalizedStoredUrl.startsWith(normalizedCitationBase)
+                                && !normalizedStoredUrl.startsWith(normalizedCitationTreeBase))) {
+                    continue;
+                }
+                Optional<FileIngestionRecord> ingestionRecord =
+                        storage.fileMarkers().readFileIngestionRecord(storedUrl);
+                if (ingestionRecord.isPresent()
+                        && ingestionRecord.orElseThrow().hasCollectionIdentity()
+                        && !collectionName.equals(ingestionRecord.orElseThrow().collectionName())) {
+                    continue;
+                }
+                try {
+                    ingestedFilePruneService.pruneCollectionFileStrict(
+                            collectionName, storedUrl, ingestionRecord.orElse(null));
+                } catch (IOException cleanupFailure) {
+                    throw new IllegalStateException(
+                            "Failed to prune removed documentation URL: " + storedUrl, cleanupFailure);
+                }
+            }
+        }
     }
 }

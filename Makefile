@@ -3,7 +3,7 @@
 
 include config/make/common.mk
 
-.PHONY: all help clean build test test-shell test-qdrant-integration lint lint-ast lint-frontend format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-doc-sets process-github-repo full-pipeline frontend-install frontend-build
+.PHONY: all help clean build test test-shell test-cli test-qdrant-integration lint lint-ast lint-frontend format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-doc-sets process-github-repo full-pipeline frontend-install frontend-build
 
 all: help ## Default target (alias)
 
@@ -24,16 +24,24 @@ test: test-shell ## Run tests (loads .env if present)
 	  $(LOCKED_GRADLEW) --no-daemon cleanTest test
 
 test-shell: ## Run deterministic ingestion and fetch shell contract tests
+	bash scripts/test_documentation_archives.sh
 	bash scripts/test_documentation_fetch_projection.sh
 	bash scripts/test_documentation_fetch_publication.sh
 	bash scripts/test_embedding_preflight.sh
+	bash scripts/test_github_repository_metadata_contract.sh
 	bash scripts/test_github_sync_failure_contract.sh
 	bash scripts/test_ingestion_pid_safety.sh
+	bash scripts/test_qdrant_writer_lease.sh
+	bash scripts/test_local_embedding_staging_contract.sh
 	bash scripts/test_make_local_qdrant_bootstrap.sh
 	bash scripts/test_make_port_safety.sh
 	bash scripts/test_process_all_to_qdrant_environment.sh
 	bash scripts/test_process_all_to_qdrant_postconditions.sh
 	bash scripts/test_prune_retired_java_api_vectors.sh
+	bash scripts/test_queued_platform_documentation_staging_contract.sh
+
+test-cli: ## Run command-line client tests
+	cd cli && npm test
 
 test-qdrant-integration: ## Run synthetic hybrid-contract checks against local Qdrant 1.18.3
 	bash scripts/test_qdrant_1_18_integration.sh

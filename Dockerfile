@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.npm \
 
 # Copy source files, validate, test, and build
 COPY frontend/ .
-COPY .gitignore /app/.ignore
+COPY .gitignore /app/.gitignore
 COPY Dockerfile /app/Dockerfile
 COPY docs/getting-started.md /app/docs/getting-started.md
 
@@ -67,6 +67,38 @@ COPY --from=frontend-builder /app/src/main/resources/static ./src/main/resources
 RUN --mount=type=cache,target=/root/.gradle \
     SOURCE_COMMIT="${SOURCE_COMMIT}" ./gradlew clean build -x test --no-daemon && \
     cp $(ls build/libs/*.jar | grep -v '\-plain\.jar' | head -n 1) build/app.jar
+
+# ================================
+# ONE-SHOT INGESTION STAGE
+# ================================
+FROM builder AS ingestion
+
+RUN apt-get update && apt-get install -y --no-install-recommends jq python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 1001 appuser \
+    && useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash appuser
+
+COPY scripts/process_all_to_qdrant.sh scripts/
+COPY scripts/qdrant_writer_lease.py scripts/
+COPY scripts/with_build_state_lock.sh scripts/BuildStateLock.java scripts/
+COPY scripts/lib/common_qdrant.sh scripts/lib/shell_bootstrap.sh \
+    scripts/lib/env_loader.sh scripts/lib/embedding_preflight.sh scripts/lib/
+
+ENV DOCS_DIR=/app/corpus \
+    SPRING_PROFILE=prod \
+    APP_LOCAL_EMBEDDING_ENABLED=false \
+    DOCS_SNAPSHOT_DIR=/app/data/qwen3-embedding-4b-2560/prod/snapshots \
+    DOCS_PARSED_DIR=/app/data/qwen3-embedding-4b-2560/prod/parsed \
+    DOCS_INDEX_DIR=/app/data/qwen3-embedding-4b-2560/prod/index
+
+RUN mkdir -p /app/corpus /app/data/qwen3-embedding-4b-2560/prod/snapshots \
+        /app/data/qwen3-embedding-4b-2560/prod/parsed \
+        /app/data/qwen3-embedding-4b-2560/prod/index \
+    && chown -R appuser:appuser /app /home/appuser
+
+USER 1001:1001
+HEALTHCHECK NONE
+ENTRYPOINT ["/app/scripts/process_all_to_qdrant.sh", "--app-jar=/app/build/app.jar"]
 
 # ================================
 # RUNTIME STAGE
@@ -114,7 +146,7 @@ USER appuser
 
 EXPOSE 8085
 
-# Gate Coolify's rolling cutover on the JVM accepting traffic with a valid Qdrant generation.
+# Gate Dokploy's Swarm update on the JVM accepting traffic with a valid Qdrant generation.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
     CMD curl --fail --silent --show-error http://localhost:${PORT:-8085}/actuator/health/readiness || exit 1
 
