@@ -6,6 +6,7 @@ set -euo pipefail
 
 TEST_SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 queued_launcher="$TEST_SCRIPT_DIRECTORY/run_queued_platform_documentation_staging.sh"
+local_unit="$TEST_SCRIPT_DIRECTORY/../infra/systemd/user/java-chat-local-embedding-staging.service"
 
 fail_queued_platform_test() {
     printf 'FAIL: %s\n' "$1" >&2
@@ -13,6 +14,16 @@ fail_queued_platform_test() {
 }
 
 bash -n "$queued_launcher"
+grep -Fq 'ConditionPathExists=!%h/.local/state/java-chat/local-embedding-staging.complete' "$local_unit" \
+    || fail_queued_platform_test "completed local backlog can restart on a later login"
+grep -Fq 'ExecStartPre=/usr/bin/mkdir -p %h/.local/state/java-chat' "$local_unit" \
+    || fail_queued_platform_test "local backlog does not create its completion-marker parent"
+grep -Fq 'ExecStartPost=/usr/bin/touch %h/.local/state/java-chat/local-embedding-staging.complete' "$local_unit" \
+    || fail_queued_platform_test "successful local backlog does not record terminal completion"
+if grep -Fq 'date -Ins' "$queued_launcher" \
+    || ! grep -Fq "date -u '+%Y-%m-%dT%H:%M:%SZ'" "$queued_launcher"; then
+    fail_queued_platform_test "queued job does not use portable UTC timestamps"
+fi
 
 grep -Fxq 'readonly QUEUED_DOCUMENTATION_SETS="porkbun,porkbun-mcp,cloudflare"' "$queued_launcher" \
     || fail_queued_platform_test "queued documentation set order changed"

@@ -1,11 +1,14 @@
 [Unit]
 Description=Process the local JavaChat embedding backlog
 OnSuccess=java-chat-queued-platform-documentation-staging.service
+ConditionPathExists=!%h/.local/state/java-chat/local-embedding-staging.complete
 
 [Service]
 Type=exec
 WorkingDirectory=%h/Developer/git/java-chat
+ExecStartPre=/usr/bin/mkdir -p %h/.local/state/java-chat
 ExecStart=/bin/bash -lc 'exec infisical run --projectId b92b6dcd-4ecf-4fe4-9f62-7580a5610d47 --env dev -- %h/Developer/git/java-chat/scripts/run_local_embedding_staging.sh'
+ExecStartPost=/usr/bin/touch %h/.local/state/java-chat/local-embedding-staging.complete
 Restart=on-failure
 RestartSec=15s
 TimeoutStopSec=20s

@@ -104,6 +104,6 @@ acquire_qdrant_writer_lease
 
 ./scripts/fetch_all_docs.sh --doc-sets="$QUEUED_DOCUMENTATION_SETS"
 
-echo "QUEUED_PLATFORM_STAGING_START $(date -Ins) DOCS=3 SETS=$QUEUED_DOCUMENTATION_SETS"
+echo "QUEUED_PLATFORM_STAGING_START $(date -u '+%Y-%m-%dT%H:%M:%SZ') DOCS=3 SETS=$QUEUED_DOCUMENTATION_SETS"
 ./scripts/process_all_to_qdrant.sh --doc-sets="$QUEUED_DOCUMENTATION_SETS"
-echo "QUEUED_PLATFORM_STAGING_COMPLETE $(date -Ins)"
+echo "QUEUED_PLATFORM_STAGING_COMPLETE $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
