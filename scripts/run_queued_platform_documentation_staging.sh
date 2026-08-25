@@ -11,7 +11,6 @@ readonly ACTIVE_STAGING_SERVICE="java-chat-local-embedding-staging.service"
 readonly QUEUE_POLL_INTERVAL_SECONDS=60
 readonly STAGING_INVOCATION_RECEIPT="$HOME/.local/state/java-chat/local-embedding-staging.invocation"
 readonly QUEUED_DOCUMENTATION_SOURCES="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,scala,groovy,clojure,spring-boot,quarkus,java/java21-complete,java/java24-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle-java25-release-notes,ibm-java25-overview,jetbrains-java25-article"
-readonly QUEUED_DOCUMENTATION_SETS="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,scala,groovy/5.0.7,clojure,spring-boot,quarkus,java/java21-complete,java/java24-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle/javase,ibm/articles,jetbrains/idea/2025/09"
 
 if [ "$#" -ne 1 ] || [[ "$1" != --after-invocation=* ]]; then
     echo "Usage: $0 --after-invocation=SYSTEMD_INVOCATION_ID" >&2
@@ -100,6 +99,6 @@ source "$SCRIPT_DIRECTORY/lib/common_qdrant.sh"
 ./scripts/fetch_all_docs.sh --doc-sets="$QUEUED_DOCUMENTATION_SOURCES"
 
 acquire_qdrant_writer_lease
-echo "QUEUED_PLATFORM_STAGING_START $(date -u '+%Y-%m-%dT%H:%M:%SZ') SETS=$QUEUED_DOCUMENTATION_SETS"
-./scripts/process_all_to_qdrant.sh --doc-sets="$QUEUED_DOCUMENTATION_SETS"
+echo "QUEUED_PLATFORM_STAGING_START $(date -u '+%Y-%m-%dT%H:%M:%SZ') SETS=all"
+./scripts/process_all_to_qdrant.sh --doc-sets=all
 echo "QUEUED_PLATFORM_STAGING_COMPLETE $(date -u '+%Y-%m-%dT%H:%M:%SZ')"

@@ -48,8 +48,9 @@ fi
 
 grep -Fxq 'readonly QUEUED_DOCUMENTATION_SOURCES="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,scala,groovy,clojure,spring-boot,quarkus,java/java21-complete,java/java24-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle-java25-release-notes,ibm-java25-overview,jetbrains-java25-article"' "$queued_launcher" \
     || fail_queued_platform_test "remaining documentation fetch inventory or order changed"
-grep -Fxq 'readonly QUEUED_DOCUMENTATION_SETS="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,scala,groovy/5.0.7,clojure,spring-boot,quarkus,java/java21-complete,java/java24-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle/javase,ibm/articles,jetbrains/idea/2025/09"' "$queued_launcher" \
-    || fail_queued_platform_test "remaining documentation ingestion inventory or order changed"
+if grep -Fq 'QUEUED_DOCUMENTATION_SETS' "$queued_launcher"; then
+    fail_queued_platform_test "documentation queue duplicates the canonical ingestion registry"
+fi
 grep -Fxq 'export QDRANT_HOST=127.0.0.1' "$queued_launcher" \
     || fail_queued_platform_test "queued job does not force loopback Qdrant"
 grep -Fxq 'export QDRANT_API_KEY=' "$queued_launcher" \
@@ -70,8 +71,8 @@ grep -Fq 'acquire_qdrant_writer_lease' "$queued_launcher" \
     || fail_queued_platform_test "queued job does not claim the shared Qdrant writer lease"
 grep -Fq './scripts/fetch_all_docs.sh --doc-sets="$QUEUED_DOCUMENTATION_SOURCES"' "$queued_launcher" \
     || fail_queued_platform_test "queued job does not refresh and validate its exact source inventory"
-grep -Fq './scripts/process_all_to_qdrant.sh --doc-sets="$QUEUED_DOCUMENTATION_SETS"' "$queued_launcher" \
-    || fail_queued_platform_test "queued job does not invoke the targeted sole-writer entrypoint"
+grep -Fq './scripts/process_all_to_qdrant.sh --doc-sets=all' "$queued_launcher" \
+    || fail_queued_platform_test "queued job does not invoke the canonical documentation registry"
 
 completion_gate_line="$(grep -n "expected_staging_invocation_journal | grep -Fq 'LOCAL_STAGING_COMPLETE'" "$queued_launcher" | tail -1 | cut -d: -f1)"
 invocation_receipt_line="$(grep -n '^mv -- "$STAGING_INVOCATION_RECEIPT.next"' "$queued_launcher" | cut -d: -f1)"
