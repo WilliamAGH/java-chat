@@ -115,6 +115,13 @@ class LocalDocsFileIngestionProcessorTest {
                 .replaceUrlDocuments(any(QdrantCollectionKind.class), anyString(), any());
         verify(ingestionFixture.fileIngestionMarkerStore, times(DOCUMENT_COUNT_SPANNING_TWO_EMBEDDING_BATCHES))
                 .markFileIngested(anyString(), any(FileIngestionRecord.class));
+        InOrder markerOrder = inOrder(ingestionFixture.fileIngestionMarkerStore);
+        markerOrder
+                .verify(ingestionFixture.fileIngestionMarkerStore)
+                .registerStorageUrlForCanonicalCitation(anyString());
+        markerOrder
+                .verify(ingestionFixture.fileIngestionMarkerStore)
+                .markFileIngested(anyString(), any(FileIngestionRecord.class));
     }
 
     @Test
@@ -1258,6 +1265,28 @@ class LocalDocsFileIngestionProcessorTest {
                 .pruneCollectionFileStrict("docs-collection", removedUrl, removedRecord);
         verify(ingestionFixture.ingestedFilePruneService, never())
                 .pruneCollectionFileStrict(anyString(), eq(activeUrl), any());
+    }
+
+    @Test
+    void prunesRemovedJavaSourceTreeUrls() throws IOException {
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        String citationBase = "https://github.com/example/project/blob/release/src/main/java/";
+        String removedTreeUrl = "https://github.com/example/project/tree/release/src/main/java/example/package/";
+        FileIngestionRecord removedRecord =
+                new FileIngestionRecord(10, 20, "fingerprint", "extractor", "docs-collection", List.of("removed-hash"));
+        for (QdrantCollectionKind collectionKind : QdrantCollectionKind.values()) {
+            when(ingestionFixture.hybridVectorService.resolveCollectionName(collectionKind))
+                    .thenReturn(testCollectionName(collectionKind));
+            when(ingestionFixture.hybridVectorService.scrollAllUrlsInCollection(testCollectionName(collectionKind)))
+                    .thenReturn(collectionKind == QdrantCollectionKind.DOCS ? Set.of(removedTreeUrl) : Set.of());
+        }
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(removedTreeUrl))
+                .thenReturn(Optional.of(removedRecord));
+
+        ingestionFixture.ingestionProcessor().pruneRemovedSourceUrls(citationBase, Set.of());
+
+        verify(ingestionFixture.ingestedFilePruneService)
+                .pruneCollectionFileStrict("docs-collection", removedTreeUrl, removedRecord);
     }
 
     /** Owns the collaborator graph shared by local documentation ingestion scenarios. */

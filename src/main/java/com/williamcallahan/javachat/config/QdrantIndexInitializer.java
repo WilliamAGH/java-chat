@@ -57,6 +57,7 @@ public final class QdrantIndexInitializer {
     private static final String EMPTY_TEXT = "";
     private static final List<PayloadIndexSpec> REQUIRED_PAYLOAD_INDEXES = List.of(
             new PayloadIndexSpec(QdrantPayloadFieldSchema.URL_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.CITATION_URL_FIELD, SCHEMA_TYPE_KEYWORD),
             new PayloadIndexSpec(QdrantPayloadFieldSchema.HASH_FIELD, SCHEMA_TYPE_KEYWORD),
             new PayloadIndexSpec(QdrantPayloadFieldSchema.CHUNK_INDEX_FIELD, SCHEMA_TYPE_INTEGER),
             new PayloadIndexSpec(QdrantPayloadFieldSchema.PACKAGE_FIELD, SCHEMA_TYPE_KEYWORD),

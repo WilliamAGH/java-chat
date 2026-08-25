@@ -9,6 +9,7 @@ import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.QdrantCollectionNames;
 import com.williamcallahan.javachat.config.QdrantRestConnection;
 import com.williamcallahan.javachat.model.AuditReport;
+import com.williamcallahan.javachat.service.ingestion.IngestionStorageServices;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -43,6 +44,7 @@ public class AuditService {
 
     private final QdrantRestConnection qdrantRestConnection;
     private final Function<String, String> safeNameResolver;
+    private final FileIngestionMarkerStore fileIngestionMarkerStore;
     private final Supplier<Path> parsedDirSupplier;
     private final RestTemplate restTemplate;
     private final List<String> collectionNames;
@@ -50,24 +52,34 @@ public class AuditService {
     /**
      * Creates an audit service that compares locally parsed chunks against the vector store state.
      *
-     * @param localStore local snapshot and chunk storage
+     * @param ingestionStorage local marker and chunk storage
      * @param restTemplateBuilder Spring-managed builder for creating RestTemplate instances
      * @param qdrantRestConnection shared Qdrant REST connection details
      * @param appProperties application configuration for collection names
      */
     public AuditService(
-            LocalStoreService localStore,
+            IngestionStorageServices ingestionStorage,
             RestTemplateBuilder restTemplateBuilder,
             QdrantRestConnection qdrantRestConnection,
             AppProperties appProperties) {
+        this(ingestionStorage, restTemplateBuilder.build(), qdrantRestConnection, appProperties);
+    }
+
+    AuditService(
+            IngestionStorageServices ingestionStorage,
+            RestTemplate restTemplate,
+            QdrantRestConnection qdrantRestConnection,
+            AppProperties appProperties) {
         this.qdrantRestConnection = Objects.requireNonNull(qdrantRestConnection, "qdrantRestConnection");
-        LocalStoreService requiredLocalStore = Objects.requireNonNull(localStore, "localStore");
+        IngestionStorageServices requiredStorage = Objects.requireNonNull(ingestionStorage, "ingestionStorage");
+        LocalStoreService requiredLocalStore = requiredStorage.localStore();
+        this.fileIngestionMarkerStore = requiredStorage.fileMarkers();
         AppProperties requiredAppProperties = Objects.requireNonNull(appProperties, "appProperties");
         QdrantCollectionNames configuredCollections =
                 requiredAppProperties.getQdrant().getCollections();
         this.safeNameResolver = requiredLocalStore::toSafeName;
         this.parsedDirSupplier = requiredLocalStore::getParsedDir;
-        this.restTemplate = restTemplateBuilder.build();
+        this.restTemplate = Objects.requireNonNull(restTemplate, "restTemplate");
         this.collectionNames = List.of(
                 configuredCollections.getBooks(),
                 configuredCollections.getDocs(),
@@ -87,6 +99,7 @@ public class AuditService {
         Set<String> storageUrls = qdrantPoints.stream()
                 .map(QdrantAuditPoint::storageUrl)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        storageUrls.addAll(fileIngestionMarkerStore.storageUrlsForCanonicalCitation(url));
         if (storageUrls.isEmpty()) {
             storageUrls.add(url);
         }
@@ -174,7 +187,10 @@ public class AuditService {
                 .map(Map.Entry::getKey)
                 .toList();
 
-        boolean auditOk = missingHashes.isEmpty() && extraHashes.isEmpty() && duplicateHashes.isEmpty();
+        boolean auditOk = (!expectedHashes.isEmpty() || !qdrantHashes.isEmpty())
+                && missingHashes.isEmpty()
+                && extraHashes.isEmpty()
+                && duplicateHashes.isEmpty();
         List<String> missingHashesSample = missingHashes.isEmpty()
                 ? List.of()
                 : missingHashes.stream().limit(20).toList();
@@ -223,7 +239,11 @@ public class AuditService {
         int pageSize = 1000; // Reduced from 2048 for more reliable pagination
 
         do {
-            QdrantScrollRequest requestBody = new QdrantScrollRequest(true, pageSize, nextOffset);
+            QdrantScrollFilter scrollFilter = new QdrantScrollFilter(List.of(
+                    new QdrantScrollCondition(QdrantPayloadFieldSchema.URL_FIELD, new QdrantScrollMatch(url)),
+                    new QdrantScrollCondition(
+                            QdrantPayloadFieldSchema.CITATION_URL_FIELD, new QdrantScrollMatch(canonicalAuditUrl))));
+            QdrantScrollRequest requestBody = new QdrantScrollRequest(scrollFilter, true, pageSize, nextOffset);
 
             try {
                 var response = restTemplate.exchange(
@@ -234,7 +254,7 @@ public class AuditService {
 
                 QdrantScrollResponse body = response.getBody();
                 if (body != null && body.scrollResult() != null) {
-                    auditPoints.addAll(body.scrollResult().pointsForCanonicalUrl(canonicalAuditUrl));
+                    auditPoints.addAll(body.scrollResult().auditPoints());
                     nextOffset = body.scrollResult().nextPageOffset();
                     if (nextOffset != null && nextOffset.isNull()) {
                         nextOffset = null;
@@ -255,8 +275,8 @@ public class AuditService {
             }
         } while (nextOffset != null && pageCount < maxPages);
 
-        if (pageCount >= maxPages) {
-            log.warn("Scroll pagination reached safety limit of {} pages; results may be incomplete", maxPages);
+        if (nextOffset != null) {
+            throw new IllegalStateException("Qdrant URL audit exceeded the pagination safety limit");
         }
 
         return auditPoints;
@@ -264,9 +284,19 @@ public class AuditService {
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private record QdrantScrollRequest(
+            @JsonProperty("filter") QdrantScrollFilter filter,
             @JsonProperty("with_payload") boolean withPayload,
             @JsonProperty("limit") int limit,
             @JsonProperty("offset") JsonNode offset) {}
+
+    private record QdrantScrollFilter(
+            @JsonProperty("should") List<QdrantScrollCondition> should) {}
+
+    private record QdrantScrollCondition(
+            @JsonProperty("key") String key,
+            @JsonProperty("match") QdrantScrollMatch match) {}
+
+    private record QdrantScrollMatch(@JsonProperty("value") String value) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record QdrantScrollResponse(
@@ -276,7 +306,7 @@ public class AuditService {
     private record QdrantScrollResult(
             @JsonProperty("points") List<QdrantScrollPoint> points,
             @JsonProperty("next_page_offset") JsonNode nextPageOffset) {
-        List<QdrantAuditPoint> pointsForCanonicalUrl(String canonicalAuditUrl) {
+        List<QdrantAuditPoint> auditPoints() {
             if (points == null || points.isEmpty()) {
                 return List.of();
             }
@@ -287,10 +317,7 @@ public class AuditService {
                 }
                 String hash = point.payload().hash();
                 String storageUrl = point.payload().url();
-                if (hash != null
-                        && !hash.isBlank()
-                        && storageUrl != null
-                        && canonicalAuditUrl.equals(DocsSourceRegistry.normalizeDocUrl(storageUrl))) {
+                if (hash != null && !hash.isBlank() && storageUrl != null && !storageUrl.isBlank()) {
                     auditPoints.add(new QdrantAuditPoint(storageUrl, hash));
                 }
             }

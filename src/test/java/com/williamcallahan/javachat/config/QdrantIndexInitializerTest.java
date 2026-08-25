@@ -557,6 +557,7 @@ class QdrantIndexInitializerTest {
                     },
                     "payload_schema": {
                       "url": {"data_type": "keyword"},
+                      "citationUrl": {"data_type": "keyword"},
                       "hash": {"data_type": "keyword"},
                       "chunkIndex": {"data_type": "integer"},
                       "package": {"data_type": "keyword"},

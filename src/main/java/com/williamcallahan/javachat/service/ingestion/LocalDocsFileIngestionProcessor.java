@@ -49,7 +49,7 @@ public class LocalDocsFileIngestionProcessor {
     private static final String INTERACTIVE_API_ALTERNATE_SELECTOR =
             "head > link[rel=alternate][type=\"text/markdown\"], head > link[rel=alternate][type=\"application/yaml\"]";
     static final int MAX_EMBEDDING_BATCH_DOCUMENTS = 256;
-    static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v4";
+    static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v5";
 
     private final FileContentServices fileContentServices;
     private final IngestionStorageServices storage;
@@ -804,6 +804,7 @@ public class LocalDocsFileIngestionProcessor {
             return;
         }
         try {
+            storage.fileMarkers().registerStorageUrlForCanonicalCitation(url);
             storage.fileMarkers().markFileIngested(url, fileIngestionRecord);
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to mark file as ingested: " + url, exception);
@@ -827,6 +828,12 @@ public class LocalDocsFileIngestionProcessor {
         Objects.requireNonNull(documents, "documents");
         Objects.requireNonNull(provenance, "provenance");
         for (Document indexedDocument : documents) {
+            indexedDocument
+                    .getMetadata()
+                    .put(
+                            QdrantPayloadFieldSchema.CITATION_URL_FIELD,
+                            DocsSourceRegistry.normalizeDocUrl(
+                                    DocumentFactory.metadataText(indexedDocument, QdrantPayloadFieldSchema.URL_FIELD)));
             if (!provenance.docSet().isBlank()) {
                 indexedDocument.getMetadata().put(QdrantPayloadFieldSchema.DOC_SET_FIELD, provenance.docSet());
             }
@@ -863,11 +870,14 @@ public class LocalDocsFileIngestionProcessor {
 
     void pruneRemovedSourceUrls(String citationBase, Set<String> activeStorageUrls) {
         String normalizedCitationBase = DocsSourceRegistry.normalizeDocUrl(citationBase);
+        String normalizedCitationTreeBase = normalizedCitationBase.replace("/blob/", "/tree/");
         for (QdrantCollectionKind collectionKind : QdrantCollectionKind.values()) {
             String collectionName = storage.hybridVector().resolveCollectionName(collectionKind);
             for (String storedUrl : storage.hybridVector().scrollAllUrlsInCollection(collectionName)) {
+                String normalizedStoredUrl = DocsSourceRegistry.normalizeDocUrl(storedUrl);
                 if (activeStorageUrls.contains(storedUrl)
-                        || !DocsSourceRegistry.normalizeDocUrl(storedUrl).startsWith(normalizedCitationBase)) {
+                        || (!normalizedStoredUrl.startsWith(normalizedCitationBase)
+                                && !normalizedStoredUrl.startsWith(normalizedCitationTreeBase))) {
                     continue;
                 }
                 Optional<FileIngestionRecord> ingestionRecord =
