@@ -289,6 +289,7 @@ prune_retired_java_api_vectors_in_collection() (
 
 # Performs the strict pre-ingestion cleanup and proves no selected vectors remain.
 prune_retired_java_api_vectors() {
+    acquire_qdrant_writer_lease
     local doc_set_filter="${1:-${DOCS_SETS:-}}"
     local selection_status
     if java_api_vector_prune_required "$doc_set_filter"; then

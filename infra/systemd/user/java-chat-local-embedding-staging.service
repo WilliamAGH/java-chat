@@ -1,0 +1,14 @@
+[Unit]
+Description=Process the local JavaChat embedding backlog
+OnSuccess=java-chat-queued-platform-documentation-staging.service
+
+[Service]
+Type=exec
+WorkingDirectory=%h/Developer/git/java-chat
+ExecStart=/bin/bash -lc 'exec infisical run --projectId b92b6dcd-4ecf-4fe4-9f62-7580a5610d47 --env dev -- %h/Developer/git/java-chat/scripts/run_local_embedding_staging.sh'
+Restart=on-failure
+RestartSec=15s
+TimeoutStopSec=20s
+
+[Install]
+WantedBy=default.target

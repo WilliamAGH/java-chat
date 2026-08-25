@@ -136,6 +136,10 @@ class DocsSourceRegistryTest {
                 "https://docs.docker.com/engine/swarm/",
                 DocsSourceRegistry.normalizeDocUrl("file:///data/docs/docker/engine/swarm/index.html"));
         assertEquals(
+                "https://developers.cloudflare.com/r2/objects/workers/workers-api-usage/",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/cloudflare/r2/objects/workers/workers-api-usage/index.html"));
+        assertEquals(
                 "https://docs.dokploy.com/docs/core/backups",
                 DocsSourceRegistry.normalizeDocUrl("file:///data/docs/dokploy/docs/core/backups.html"));
         assertEquals(

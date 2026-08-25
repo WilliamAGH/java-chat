@@ -154,6 +154,96 @@ class DocumentationSeedSecurityTest(unittest.TestCase):
                 mirror_path.read_text(encoding="utf-8"),
             )
 
+    def test_wraps_plain_text_as_escaped_html_without_parsing_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory_name:
+            temporary_directory = pathlib.Path(temporary_directory_name)
+            source_path = temporary_directory / "source.txt"
+            wrapped_path = temporary_directory / "index.html"
+            source_path.write_text("# API\n<script>alert('unsafe')</script>\n", encoding="utf-8")
+
+            exit_code = documentation_seed.wrap_plain_text_html_command(
+                [
+                    "--input",
+                    str(source_path),
+                    "--output",
+                    str(wrapped_path),
+                    "--title",
+                    "Porkbun API <v3.15>",
+                ]
+            )
+
+            wrapped_html = wrapped_path.read_text(encoding="utf-8")
+            self.assertEqual(0, exit_code)
+            self.assertIn("<title>Porkbun API &lt;v3.15&gt;</title>", wrapped_html)
+            self.assertIn("# API", wrapped_html)
+            self.assertIn("&lt;script&gt;alert(&#x27;unsafe&#x27;)&lt;/script&gt;", wrapped_html)
+            self.assertNotIn("<script>alert", wrapped_html)
+
+    def test_rejects_oversized_plain_text_transport(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory_name:
+            temporary_directory = pathlib.Path(temporary_directory_name)
+            oversized_source_path = temporary_directory / "oversized.txt"
+            wrapped_path = temporary_directory / "index.html"
+            with oversized_source_path.open("wb") as oversized_source_stream:
+                oversized_source_stream.truncate(
+                    documentation_seed.MAXIMUM_PLAIN_TEXT_DOCUMENT_BYTES + 1
+                )
+
+            with self.assertRaisesRegex(ValueError, "transport limit"):
+                documentation_seed.wrap_plain_text_html_command(
+                    [
+                        "--input",
+                        str(oversized_source_path),
+                        "--output",
+                        str(wrapped_path),
+                        "--title",
+                        "Oversized",
+                    ]
+                )
+
+    def test_accepts_expected_single_shard_sitemap_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory_name:
+            sitemap_index_path = pathlib.Path(temporary_directory_name) / "sitemap-index.xml"
+            expected_sitemap_url = "https://docs.example.invalid/sitemap-0.xml"
+            sitemap_index_path.write_text(
+                '<?xml version="1.0"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                f"<sitemap><loc>{expected_sitemap_url}</loc></sitemap></sitemapindex>",
+                encoding="utf-8",
+            )
+
+            exit_code = documentation_seed.validate_sitemap_index_command(
+                [
+                    "--input",
+                    str(sitemap_index_path),
+                    "--expected-sitemap-url",
+                    expected_sitemap_url,
+                ]
+            )
+
+            self.assertEqual(0, exit_code)
+
+    def test_rejects_changed_sitemap_index_topology(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory_name:
+            sitemap_index_path = pathlib.Path(temporary_directory_name) / "sitemap-index.xml"
+            expected_sitemap_url = "https://docs.example.invalid/sitemap-0.xml"
+            sitemap_index_path.write_text(
+                '<?xml version="1.0"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                f"<sitemap><loc>{expected_sitemap_url}</loc></sitemap>"
+                '<sitemap><loc>https://docs.example.invalid/sitemap-1.xml</loc></sitemap>'
+                "</sitemapindex>",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "topology changed"):
+                documentation_seed.validate_sitemap_index_command(
+                    [
+                        "--input",
+                        str(sitemap_index_path),
+                        "--expected-sitemap-url",
+                        expected_sitemap_url,
+                    ]
+                )
+
 
 class JavadocSeedTest(unittest.TestCase):
     """Verifies Javadoc seed generation includes only canonical type pages."""
