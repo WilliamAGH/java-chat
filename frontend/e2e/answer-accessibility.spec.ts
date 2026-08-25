@@ -84,3 +84,25 @@ for (const theme of ["dark", "light"] as const) {
     expect(pageErrors).toEqual([]);
   });
 }
+
+test("multi-turn chat exposes uniquely named message landmarks", async ({ page }) => {
+  await openAnswerScreen(page, "dark");
+  await page.getByLabel("Message input").fill("Summarize that comparison in one sentence.");
+  await page.getByLabel("Message input").press("Enter");
+  await expect(page.locator(".message.user")).toHaveCount(2);
+
+  const accessibilityScan = await new AxeBuilder({ page }).withRules(["landmark-unique"]).analyze();
+  expect(accessibilityScan.violations).toEqual([]);
+});
+
+test("CLI authorization keeps one top-level main landmark", async ({ page }) => {
+  await page.goto(
+    "/cli/authorize?port=49152&state=0123456789abcdefghijklmnopqrstuvwxyz_AB&label=workstation",
+  );
+  await expect(page.getByRole("heading", { name: "Authorize JavaChat CLI" })).toBeVisible();
+
+  const accessibilityScan = await new AxeBuilder({ page })
+    .withRules(["landmark-main-is-top-level", "landmark-no-duplicate-main"])
+    .analyze();
+  expect(accessibilityScan.violations).toEqual([]);
+});

@@ -22,6 +22,7 @@ const CREDENTIALS_MODE = 0o600;
 const CREDENTIALS_DIRECTORY_MODE = 0o700;
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 const CITATION_DISPLAY_LIMIT = 5;
+const CLIENT_LABEL_MAX_LENGTH = 64;
 
 // The assistant is instructed to emit enrichment markers (SystemPromptConfig's
 // MARKER_USAGE_PROMPT); the web client renders each as a titled callout. Titles
@@ -150,7 +151,7 @@ fetch("/complete", {
  */
 async function authorizeThroughBrowser(host, shouldOpenBrowser) {
   const expectedState = randomBytes(24).toString("base64url");
-  const clientLabel = hostname().trim() || "javachat-cli";
+  const clientLabel = (hostname().trim() || "javachat-cli").slice(0, CLIENT_LABEL_MAX_LENGTH);
 
   return await new Promise((resolve, reject) => {
     const listener = createServer((request, response) => {
@@ -246,11 +247,10 @@ async function commandLogin(host, options) {
     return 0;
   }
   const apiKey = await authorizeThroughBrowser(host, !options.noBrowser);
-  const identity = await fetchIdentity(host, apiKey);
-
   const allHosts = await readCredentials();
   allHosts[host] = { apiKey, sessionId: `chat-${randomUUID()}` };
   await writeCredentials(allHosts);
+  const identity = await fetchIdentity(host, apiKey);
   stdout.write(
     `Signed in to ${host} as ${identity}.\nKey stored in ${credentialsPath()} (owner-only).\n`,
   );
@@ -390,7 +390,6 @@ async function commandAsk(host, question, options) {
   if (!apiKey) {
     throw new Error(`Not signed in to ${host}. Run "javachat login" first.`);
   }
-  await fetchIdentity(host, apiKey);
   const storedSessionId = allHosts[host]?.sessionId;
   const sessionId =
     options.newSession || environmentApiKey

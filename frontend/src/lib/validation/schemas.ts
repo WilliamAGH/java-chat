@@ -172,6 +172,11 @@ export const CliAuthorizationQuerySchema = z.object({
   label: z.string().trim().min(1).max(64),
 });
 
+/** Validates Clerk's one-time API-key creation response before the secret leaves the SDK boundary. */
+export const CliApiKeyCreationSchema = z.object({
+  secret: z.string().startsWith("ak_").max(512),
+});
+
 // =============================================================================
 // Local Storage Schemas
 // =============================================================================

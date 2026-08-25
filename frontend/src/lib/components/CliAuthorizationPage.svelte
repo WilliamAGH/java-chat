@@ -46,7 +46,7 @@
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
-<main class="authorization-page">
+<div class="authorization-page">
   <section class="authorization-card" aria-labelledby="cli-authorization-heading">
     <div class="authorization-kicker">Command line</div>
     <h1 id="cli-authorization-heading">Authorize JavaChat CLI</h1>
@@ -80,7 +80,7 @@
       <p role="alert">{authorizationFailure}</p>
     {/if}
   </section>
-</main>
+</div>
 
 <style>
   .authorization-page {

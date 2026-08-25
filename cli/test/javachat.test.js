@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -27,6 +27,46 @@ function runCli(argumentsList, environmentVariables = {}) {
     });
     child.once("error", reject);
     child.once("close", (exitCode) => resolve({ exitCode, standardOutput, standardError }));
+  });
+}
+
+async function startBrowserLogin(host, configurationHome) {
+  const child = spawn(
+    process.execPath,
+    [CLI_ENTRYPOINT, "login", "--host", host, "--no-browser"],
+    {
+      env: { ...process.env, XDG_CONFIG_HOME: configurationHome },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let standardOutput = "";
+  let standardError = "";
+  child.stdout.setEncoding("utf8").on("data", (outputChunk) => {
+    standardOutput += outputChunk;
+  });
+  child.stderr.setEncoding("utf8").on("data", (errorChunk) => {
+    standardError += errorChunk;
+  });
+  await waitForCliState(() => standardError.includes("Waiting for approval..."));
+  const approvalUrlMatch = standardError.match(/https?:\/\/[^\s]+\/cli\/authorize\?[^\s]+/);
+  assert.notEqual(approvalUrlMatch, null);
+  return {
+    child,
+    approvalUrl: new URL(approvalUrlMatch[0]),
+    standardOutput: () => standardOutput,
+    standardError: () => standardError,
+  };
+}
+
+async function completeBrowserLogin(approvalUrl, apiKey = TEST_API_KEY) {
+  const callbackPort = approvalUrl.searchParams.get("port");
+  const expectedState = approvalUrl.searchParams.get("state");
+  assert.notEqual(callbackPort, null);
+  assert.notEqual(expectedState, null);
+  return fetch(`http://127.0.0.1:${callbackPort}/complete`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ state: expectedState, key: apiKey }),
   });
 }
 
@@ -53,8 +93,10 @@ test("rejects cleartext remote deployment hosts", async () => {
 });
 
 test("streams text and citations through the public API", async (testContext) => {
+  let identityRequestCount = 0;
   const apiServer = createServer((request, response) => {
     if (request.url === "/api/me") {
+      identityRequestCount += 1;
       response.writeHead(200, { "content-type": "application/json" });
       response.end('{"userId":"user_cli"}');
       return;
@@ -85,6 +127,7 @@ test("streams text and citations through the public API", async (testContext) =>
   assert.match(cliExecution.standardOutput, /Record Classes/);
   assert.match(cliExecution.standardOutput, /https:\/\/docs\.example\/records/);
   assert.equal(cliExecution.standardError, "");
+  assert.equal(identityRequestCount, 0);
 });
 
 test("renders enrichment markers split across stream chunks", async (testContext) => {
@@ -177,19 +220,8 @@ test("rejects a successful non-SSE response", async (testContext) => {
 test("rejects a null browser callback without crashing", async (testContext) => {
   const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
   testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
-  const child = spawn(process.execPath, [CLI_ENTRYPOINT, "login", "--no-browser"], {
-    env: { ...process.env, XDG_CONFIG_HOME: configurationHome },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let standardError = "";
-  child.stderr.setEncoding("utf8").on("data", (errorChunk) => {
-    standardError += errorChunk;
-  });
-  await waitForCliState(() => standardError.includes("Waiting for approval..."));
-  const approvalUrlMatch = standardError.match(/https:\/\/javachat\.ai\/cli\/authorize\?[^\s]+/);
-  assert.notEqual(approvalUrlMatch, null);
-  const approvalUrl = new URL(approvalUrlMatch[0]);
-  const callbackPort = approvalUrl.searchParams.get("port");
+  const login = await startBrowserLogin("https://javachat.ai", configurationHome);
+  const callbackPort = login.approvalUrl.searchParams.get("port");
   assert.notEqual(callbackPort, null);
 
   const callbackResponse = await fetch(`http://127.0.0.1:${callbackPort}/complete`, {
@@ -198,10 +230,68 @@ test("rejects a null browser callback without crashing", async (testContext) => 
     body: "null",
   });
   assert.equal(callbackResponse.status, 400);
-  const [exitCode] = await once(child, "close");
+  const [exitCode] = await once(login.child, "close");
 
   assert.equal(exitCode, 1);
-  assert.match(standardError, /Authorization callback was malformed/);
+  assert.match(login.standardError(), /Authorization callback was malformed/);
+});
+
+test("stores and verifies a browser-created key on successful login", async (testContext) => {
+  const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
+  testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
+  const apiServer = createServer((request, response) => {
+    assert.equal(request.url, "/api/me");
+    assert.equal(request.headers.authorization, `Bearer ${TEST_API_KEY}`);
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end('{"userId":"user_cli"}');
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const apiAddress = apiServer.address();
+  assert.notEqual(apiAddress, null);
+  assert.equal(typeof apiAddress, "object");
+
+  const host = `http://127.0.0.1:${apiAddress.port}`;
+  const login = await startBrowserLogin(host, configurationHome);
+  const callbackResponse = await completeBrowserLogin(login.approvalUrl);
+  assert.equal(callbackResponse.status, 204);
+  const [exitCode] = await once(login.child, "close");
+
+  assert.equal(exitCode, 0);
+  assert.match(login.standardOutput(), new RegExp(`Signed in to ${host} as user_cli`));
+  const storedCredentials = JSON.parse(
+    await readFile(join(configurationHome, "javachat", "credentials.json"), "utf8"),
+  );
+  assert.equal(storedCredentials[host].apiKey, TEST_API_KEY);
+});
+
+test("preserves a browser-created key when identity verification is unavailable", async (testContext) => {
+  const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
+  testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
+  const apiServer = createServer((request, response) => {
+    assert.equal(request.url, "/api/me");
+    response.writeHead(503).end();
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const apiAddress = apiServer.address();
+  assert.notEqual(apiAddress, null);
+  assert.equal(typeof apiAddress, "object");
+
+  const host = `http://127.0.0.1:${apiAddress.port}`;
+  const login = await startBrowserLogin(host, configurationHome);
+  const callbackResponse = await completeBrowserLogin(login.approvalUrl);
+  assert.equal(callbackResponse.status, 204);
+  const [exitCode] = await once(login.child, "close");
+  assert.equal(exitCode, 1);
+  assert.match(login.standardError(), /Key verification failed: HTTP 503/);
+
+  const storedCredentials = JSON.parse(
+    await readFile(join(configurationHome, "javachat", "credentials.json"), "utf8"),
+  );
+  assert.equal(storedCredentials[host].apiKey, TEST_API_KEY);
 });
 
 async function waitForCliState(assertion, timeoutMilliseconds = 2000) {

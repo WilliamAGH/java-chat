@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Consolidated document processor for hybrid Qdrant ingestion.
-# Usage: ./process_all_to_qdrant.sh [--doc-sets=docset1,docset2]
+# Usage: ./process_all_to_qdrant.sh [--doc-sets=docset1,docset2] [--app-jar=/absolute/path]
 
 set -euo pipefail
 
@@ -11,6 +11,7 @@ DOCS_ROOT=""
 LOG_FILE="$PROJECT_ROOT/process_qdrant.log"
 PID_FILE="$PROJECT_ROOT/process_qdrant.pid"
 DOCS_SETS_FILTER=""
+PREBUILT_APP_JAR=""
 PROCESSING_LOG_ARCHIVE_SEQUENCE=0
 
 # shellcheck source=lib/common_qdrant.sh
@@ -145,13 +146,17 @@ validate_generation_and_state_contract() {
 run_documentation_ingestion() {
 acquire_qdrant_writer_lease
 DOCS_SETS_FILTER=""
+PREBUILT_APP_JAR=""
 for ingestion_argument in "$@"; do
     case $ingestion_argument in
         --doc-sets=*)
             DOCS_SETS_FILTER="${ingestion_argument#*=}"
             ;;
+        --app-jar=*)
+            PREBUILT_APP_JAR="${ingestion_argument#*=}"
+            ;;
         --help|-h)
-            echo "Usage: $0 [--doc-sets=docset1,docset2]"
+            echo "Usage: $0 [--doc-sets=docset1,docset2] [--app-jar=/absolute/path]"
             exit 0
             ;;
         *)
@@ -172,6 +177,10 @@ case "$SPRING_PROFILE" in
     *) echo "SPRING_PROFILE must be exactly local, dev, or prod" >&2; exit 1 ;;
 esac
 if ! validate_generation_and_state_contract; then
+    return 1
+fi
+if [ -n "$PREBUILT_APP_JAR" ] && { [ ! -f "$PREBUILT_APP_JAR" ] || [ ! -r "$PREBUILT_APP_JAR" ]; }; then
+    echo "Prebuilt application JAR must be a readable file: $PREBUILT_APP_JAR" >&2
     return 1
 fi
 DOCS_ROOT="${DOCS_DIR:-$PROJECT_ROOT/data/docs}"
@@ -224,14 +233,17 @@ if ! check_embedding_server "log"; then
     exit 1
 fi
 
-log "${YELLOW}Building application...${NC}"
-build_application "$LOG_FILE"
-
 if [ -n "$DOCS_SETS_FILTER" ]; then
     export DOCS_SETS="$DOCS_SETS_FILTER"
 fi
 
-source_app_jar="$(locate_app_jar)"
+if [ -n "$PREBUILT_APP_JAR" ]; then
+    source_app_jar="$PREBUILT_APP_JAR"
+else
+    log "${YELLOW}Building application...${NC}"
+    build_application "$LOG_FILE"
+    source_app_jar="$(locate_app_jar)"
+fi
 staged_app_jar_directory=""
 cleanup_document_ingestion_resources() {
     if [ -n "$staged_app_jar_directory" ]; then

@@ -98,9 +98,11 @@ alwaysApply: true
 - [EV1a] **No Secrets In Properties/YAML**: Secrets are PROHIBITED in `.properties` and `.yml/.yaml` (including examples). Do not add secret-looking keys with blank defaults to property files.
 - [EV1b] **Secrets Source Of Truth**: Secrets MUST be provided via `.env` locally and Infisical-backed Dokploy environment references in deployment; keep secrets out of tracked config.
 - [EV1c] **Non-Secret Defaults In Properties**: All non-secret defaults and environment-specific overrides MUST live in Spring property files (`src/main/resources/application*.properties`) and Spring profiles.
-- [EV1d] **Allowed `.env`/Env Vars For External Services**: Shared-gateway inference and Qdrant connectivity MUST come from `.env`/environment variables:
+- [EV1d] **Allowed `.env`/Env Vars For External Services and CLI Authentication**: Shared-gateway inference, Qdrant connectivity, Clerk authentication, and non-interactive CLI access MUST come from `.env`/environment variables:
   - LLM (model/base-url/api-key): `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`
   - Qdrant (host/ports/tls/api-key): `QDRANT_HOST`, `QDRANT_PORT`, `QDRANT_REST_PORT`, `QDRANT_SSL`, `QDRANT_API_KEY`
+  - Clerk (frontend publishable key/server credential): `VITE_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`
+  - JavaChat CLI (headless key/target deployment): `JAVACHAT_API_KEY`, `JAVACHAT_HOST`
 - [EV1e] **No New Env Var Settings**: Do not introduce any additional env-var-driven settings without explicit written approval.
 - [EV1f] **Dotenv Handling**: `.env` loading MUST remain supported for local development and scripts. Do not add dotenv libraries into the Java runtime; load env vars at the process level (Makefile/scripts/Dokploy).
 

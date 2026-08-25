@@ -53,5 +53,12 @@ fi
 if ! grep -Fxq 'readonly EXPECTED_REPOSITORY_COUNT=22' "$launcher_path"; then
     fail_local_staging_contract_test "launcher does not require exactly 22 pinned repositories"
 fi
+if grep -Eq 'GRADLE_USER_HOME=/|find .* -printf|sort -z|date -Ins|mapfile' "$launcher_path"; then
+    fail_local_staging_contract_test "launcher contains GNU-only or developer-specific commands"
+fi
+if ! grep -Fq 'repository_git_directories=(data/repos/github/*/*/.git)' "$launcher_path" \
+    || ! grep -Fq "date -u '+%Y-%m-%dT%H:%M:%SZ'" "$launcher_path"; then
+    fail_local_staging_contract_test "launcher does not use portable repository discovery and timestamps"
+fi
 
 printf 'PASS: durable staging forces local Qdrant and masks cloud credentials across .env loading.\n'

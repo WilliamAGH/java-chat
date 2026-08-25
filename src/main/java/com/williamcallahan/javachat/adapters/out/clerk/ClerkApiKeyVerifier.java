@@ -2,19 +2,15 @@ package com.williamcallahan.javachat.adapters.out.clerk;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import com.williamcallahan.javachat.application.auth.ApiKeyLifecycle;
 import com.williamcallahan.javachat.application.auth.ApiKeyOperationUnavailableException;
 import com.williamcallahan.javachat.application.auth.VerifiedApiKey;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
-import java.util.HexFormat;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Semaphore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
@@ -43,15 +39,16 @@ import org.springframework.web.client.RestClientException;
 @Component
 public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
 
+    private static final Logger log = LoggerFactory.getLogger(ClerkApiKeyVerifier.class);
     private static final String CLERK_VERIFY_ENDPOINT = "https://api.clerk.com/v1/api_keys/verify";
     private static final String CLERK_REVOKE_ENDPOINT = "https://api.clerk.com/v1/api_keys/{apiKeyId}/revoke";
     private static final String CLERK_API_VERSION_HEADER = "Clerk-API-Version";
     private static final String CLERK_API_VERSION = "2026-05-12";
     private static final Duration CLERK_CONNECT_TIMEOUT = Duration.ofSeconds(3);
     private static final Duration CLERK_READ_TIMEOUT = Duration.ofSeconds(5);
-    private static final Duration CLERK_VERIFICATION_CACHE_DURATION = Duration.ofSeconds(30);
-    private static final int CLERK_VERIFICATION_CACHE_MAXIMUM_ENTRIES = 10_000;
+    private static final Duration CLERK_AVAILABILITY_RETRY_DELAY = Duration.ofSeconds(30);
     private static final int CLERK_VERIFICATION_MAXIMUM_CONCURRENCY = 8;
+    private static final String CLERK_AVAILABILITY_PROBE_SECRET = "ak_secret_javachatavailabilityprobe0000000000000000";
     private static final String CLERK_SECRET_KEY_ENVIRONMENT_VARIABLE = "${CLERK_SECRET_KEY:}";
     private static final String SECRET_KEY_MISSING_MESSAGE =
             "Clerk API key verification requires CLERK_SECRET_KEY to be configured.";
@@ -62,16 +59,13 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
 
     private final RestClient clerkBackendApi;
     private final String clerkSecretKey;
-    private final Cache<String, VerifiedApiKey> verifiedApiKeys = Caffeine.newBuilder()
-            .expireAfterWrite(CLERK_VERIFICATION_CACHE_DURATION)
-            .maximumSize(CLERK_VERIFICATION_CACHE_MAXIMUM_ENTRIES)
-            .build();
     private final Semaphore verificationPermits = new Semaphore(CLERK_VERIFICATION_MAXIMUM_CONCURRENCY, true);
     // Latched the first time Clerk reports the API-keys feature off for this
     // instance. That state is operator-controlled and cannot clear itself within
     // a process, so continuing to advertise availability would invite clients
     // into a login that can never complete.
-    private volatile boolean apiKeyFeatureDisabled;
+    private volatile ApiKeyFeatureState apiKeyFeatureState = ApiKeyFeatureState.UNKNOWN;
+    private volatile long nextAvailabilityProbeNanos;
 
     /**
      * Builds the Clerk boundary with its own timeouts so a slow provider cannot
@@ -115,13 +109,37 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
      * API keys per instance, and a deployment whose instance has the feature off
      * can authenticate nothing. Reporting availability from the credential alone
      * told CLI clients to begin a login that Clerk then refused on every call.
+     * The first readiness request sends one provider-valid unknown key and latches
+     * Clerk's documented response, so anonymous polling cannot fan out upstream.
      *
-     * @return true when a Clerk server credential is configured and Clerk has not
-     *     reported the API-keys feature disabled for this instance
+     * @return true only after Clerk confirms the API-key verification feature
      */
     @Override
-    public boolean isAvailable() {
-        return !clerkSecretKey.isEmpty() && !apiKeyFeatureDisabled;
+    public synchronized boolean isAvailable() {
+        if (clerkSecretKey.isEmpty()) {
+            return false;
+        }
+        if (apiKeyFeatureState == ApiKeyFeatureState.UNAVAILABLE
+                && System.nanoTime() - nextAvailabilityProbeNanos >= 0) {
+            apiKeyFeatureState = ApiKeyFeatureState.UNKNOWN;
+        }
+        if (apiKeyFeatureState != ApiKeyFeatureState.UNKNOWN) {
+            return apiKeyFeatureState == ApiKeyFeatureState.ENABLED;
+        }
+        try {
+            verify(CLERK_AVAILABILITY_PROBE_SECRET);
+            if (apiKeyFeatureState != ApiKeyFeatureState.ENABLED) {
+                log.warn("Clerk API-key availability probe returned no documented readiness response");
+                apiKeyFeatureState = ApiKeyFeatureState.UNAVAILABLE;
+            }
+        } catch (ApiKeyOperationUnavailableException availabilityFailure) {
+            log.warn("Clerk API-key availability probe failed", availabilityFailure);
+            apiKeyFeatureState = apiKeyFeatureState == ApiKeyFeatureState.DISABLED
+                    ? ApiKeyFeatureState.DISABLED
+                    : ApiKeyFeatureState.UNAVAILABLE;
+            nextAvailabilityProbeNanos = System.nanoTime() + CLERK_AVAILABILITY_RETRY_DELAY.toNanos();
+        }
+        return apiKeyFeatureState == ApiKeyFeatureState.ENABLED;
     }
 
     /**
@@ -135,14 +153,7 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
      */
     @Override
     public Optional<VerifiedApiKey> verify(String presentedSecret) {
-        if (!isAvailable()) {
-            throw new ApiKeyOperationUnavailableException(SECRET_KEY_MISSING_MESSAGE);
-        }
-        String presentedSecretDigest = secretDigest(presentedSecret);
-        VerifiedApiKey cachedApiKey = verifiedApiKeys.getIfPresent(presentedSecretDigest);
-        if (cachedApiKey != null) {
-            return Optional.of(cachedApiKey);
-        }
+        requireConfiguredApiKeyFeature();
         if (!verificationPermits.tryAcquire()) {
             throw new ApiKeyOperationUnavailableException("Clerk API key verification capacity is exhausted");
         }
@@ -158,11 +169,13 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
                     .body(ClerkApiKeyVerification.class);
         } catch (HttpStatusCodeException clerkRejection) {
             if (isRejectedCredential(clerkRejection.getStatusCode())) {
+                if (isAvailabilityProbeRejection(presentedSecret, clerkRejection)) {
+                    markApiKeyFeatureEnabled();
+                }
                 return Optional.empty();
             }
             if (isFeatureDisabled(clerkRejection)) {
-                apiKeyFeatureDisabled = true;
-                throw new ApiKeyOperationUnavailableException(FEATURE_DISABLED_MESSAGE, clerkRejection);
+                throw disabledFeatureException(clerkRejection);
             }
             throw new ApiKeyOperationUnavailableException(
                     "Clerk returned HTTP " + clerkRejection.getStatusCode().value() + " while verifying an API key",
@@ -182,8 +195,8 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
         if (verification.revoked() || verification.expired()) {
             return Optional.empty();
         }
+        markApiKeyFeatureEnabled();
         VerifiedApiKey verifiedApiKey = new VerifiedApiKey(verification.id(), verification.subject());
-        verifiedApiKeys.put(presentedSecretDigest, verifiedApiKey);
         return Optional.of(verifiedApiKey);
     }
 
@@ -195,9 +208,7 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
      */
     @Override
     public void revoke(String apiKeyId) {
-        if (!isAvailable()) {
-            throw new ApiKeyOperationUnavailableException(SECRET_KEY_MISSING_MESSAGE);
-        }
+        requireConfiguredApiKeyFeature();
         try {
             clerkBackendApi
                     .post()
@@ -206,12 +217,17 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
                     .body(new ClerkApiKeyRevocationRequest("JavaChat CLI logout"))
                     .retrieve()
                     .toBodilessEntity();
-            verifiedApiKeys
-                    .asMap()
-                    .entrySet()
-                    .removeIf(cachedApiKey -> cachedApiKey.getValue().id().equals(apiKeyId));
         } catch (RestClientException revocationFailure) {
             throw new ApiKeyOperationUnavailableException("Clerk API key revocation failed", revocationFailure);
+        }
+    }
+
+    private void requireConfiguredApiKeyFeature() {
+        if (clerkSecretKey.isEmpty()) {
+            throw new ApiKeyOperationUnavailableException(SECRET_KEY_MISSING_MESSAGE);
+        }
+        if (apiKeyFeatureState == ApiKeyFeatureState.DISABLED) {
+            throw new ApiKeyOperationUnavailableException(FEATURE_DISABLED_MESSAGE);
         }
     }
 
@@ -236,6 +252,23 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
                 && clerkRejection.getResponseBodyAsString().contains(CLERK_FEATURE_DISABLED_CODE);
     }
 
+    private static boolean isAvailabilityProbeRejection(
+            String presentedSecret, HttpStatusCodeException clerkRejection) {
+        return CLERK_AVAILABILITY_PROBE_SECRET.equals(presentedSecret)
+                && (clerkRejection.getStatusCode().isSameCodeAs(HttpStatus.BAD_REQUEST)
+                        || clerkRejection.getStatusCode().isSameCodeAs(HttpStatus.NOT_FOUND));
+    }
+
+    private synchronized void markApiKeyFeatureEnabled() {
+        apiKeyFeatureState = ApiKeyFeatureState.ENABLED;
+    }
+
+    private synchronized ApiKeyOperationUnavailableException disabledFeatureException(
+            HttpStatusCodeException clerkRejection) {
+        apiKeyFeatureState = ApiKeyFeatureState.DISABLED;
+        return new ApiKeyOperationUnavailableException(FEATURE_DISABLED_MESSAGE, clerkRejection);
+    }
+
     private record ClerkApiKeyVerificationRequest(String secret) {}
 
     private record ClerkApiKeyRevocationRequest(
@@ -244,13 +277,11 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record ClerkApiKeyVerification(String id, String subject, Boolean revoked, Boolean expired) {}
 
-    private static String secretDigest(String presentedSecret) {
-        try {
-            byte[] digest =
-                    MessageDigest.getInstance("SHA-256").digest(presentedSecret.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException unavailableDigest) {
-            throw new IllegalStateException("SHA-256 is unavailable", unavailableDigest);
-        }
+    /** Provider-backed readiness state latched after the first authoritative outcome. */
+    private enum ApiKeyFeatureState {
+        UNKNOWN,
+        ENABLED,
+        DISABLED,
+        UNAVAILABLE
     }
 }

@@ -123,6 +123,22 @@ if [ "$(< "$checkpoint_sentinel")" != "checkpoint-preserved" ]; then
     fail_process_environment_test "processing log archival changed durable checkpoint state"
 fi
 
+if ! (
+    export LOG_FILE="$TEST_WORK_DIRECTORY/prebuilt-process.log"
+    export PID_FILE="$TEST_WORK_DIRECTORY/prebuilt-process.pid"
+    build_application() {
+        fail_process_environment_test "prebuilt ingestion invoked Gradle"
+    }
+    locate_app_jar() {
+        fail_process_environment_test "prebuilt ingestion searched build outputs"
+    }
+    run_documentation_ingestion \
+        --doc-sets=kotlin \
+        --app-jar="$TEST_WORK_DIRECTORY/application.jar" >/dev/null
+); then
+    fail_process_environment_test "prebuilt ingestion JAR did not bypass the build lane"
+fi
+
 collision_log="$TEST_WORK_DIRECTORY/collision.log"
 collision_archive="${collision_log%.log}_attempt_20260824T000000Z_$$_1.log"
 printf 'new failure evidence\n' > "$collision_log"
