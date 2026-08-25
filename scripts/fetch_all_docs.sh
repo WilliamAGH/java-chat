@@ -5,7 +5,7 @@
 # and ensures no redundant downloads by checking existing files
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$SCRIPT_DIR/.."
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # shellcheck source=lib/shell_bootstrap.sh
 source "$SCRIPT_DIR/lib/shell_bootstrap.sh"
@@ -706,6 +706,7 @@ fetch_named_official_source() {
         amp-code) "$source_dispatch" fetch_source --url "https://ampcode.com/" --mirror-path "amp-code" --name "Amp Code CLI Manual" --source-version "current" --identity-regex "Amp" --cut-directories 0 --minimum-html-files 8 --seed-document-type html-links --seed-discovery-url "https://ampcode.com/manual" --seed-source-prefix "https://ampcode.com/" --seed-reject-regex '^https://ampcode\.com/(?:manual/appendix/legacy-permissions-rules\.txt$|(?!manual(?:/|$)).*)' --seed-url "https://ampcode.com/manual/orbs/oidc" --seed-url "https://ampcode.com/manual/sdk/python" --seed-url "https://ampcode.com/manual/sdk/typescript" ;;
         tinker) "$source_dispatch" fetch_source --url "https://tinker-docs.thinkingmachines.ai/" --mirror-path "tinker" --name "Tinker Documentation" --source-version "current" --identity-regex "Tinker" --cut-directories 0 --minimum-html-files 320 --seed-document-type xml-sitemap --seed-discovery-url "https://tinker-docs.thinkingmachines.ai/sitemap.xml" --seed-source-prefix "https://tinker-docs.thinkingmachines.ai/" ;;
         docker) "$source_dispatch" fetch_source --url "https://docs.docker.com/" --mirror-path "docker" --name "Docker Documentation" --source-version "current" --identity-regex "Docker" --cut-directories 0 --minimum-html-files 1600 --seed-document-type xml-sitemap --seed-discovery-url "https://docs.docker.com/sitemap.xml" --seed-source-prefix "https://docs.docker.com/" --seed-reject-regex '^https://docs\.docker\.com/(build/(buildkit/dockerfile-release-notes|release-notes)|enterprise/security/provisioning/scim|reference/cli/docker/(build|builder/build|exec|images|info|mcp/(feature|tools)/list|ps|pull|push|run)|scout/release-notes/cli)/$' ;;
+        traefik) "$source_dispatch" fetch_source --url "https://doc.traefik.io/traefik/" --mirror-path "traefik" --name "Traefik Proxy Documentation" --source-version "current" --identity-regex "Traefik Proxy" --cut-directories 1 --minimum-html-files 280 --seed-document-type xml-sitemap --seed-discovery-url "https://doc.traefik.io/sitemap.xml" --seed-source-prefix "https://doc.traefik.io/traefik/" ;;
         dokploy) "$source_dispatch" fetch_source --url "https://docs.dokploy.com/" --mirror-path "dokploy" --name "Dokploy Documentation" --source-version "current" --identity-regex "Dokploy" --cut-directories 0 --minimum-html-files 200 --seed-document-type xml-sitemap --seed-discovery-url "https://docs.dokploy.com/sitemap.xml" --seed-source-prefix "https://docs.dokploy.com/" ;;
         infisical) "$source_dispatch" fetch_source --url "https://infisical.com/docs/" --mirror-path "infisical" --name "Infisical Documentation" --source-version "current" --identity-regex "Infisical" --cut-directories 1 --minimum-html-files 2200 --seed-document-type xml-sitemap --seed-discovery-url "https://infisical.com/docs/sitemap.xml" --seed-source-prefix "https://infisical.com/docs/" ;;
         doppler-guides) "$source_dispatch" fetch_source --url "https://docs.doppler.com/docs/" --mirror-path "doppler/docs" --name "Doppler Guides" --source-version "current" --identity-regex "Doppler" --cut-directories 1 --minimum-html-files 200 --seed-document-type html-links --seed-discovery-url "https://docs.doppler.com/docs/start" --seed-source-prefix "https://docs.doppler.com/docs/" --seed-reject-regex '^https://docs\.doppler\.com/docs/(enclave-installation(-docker|-serverless)?|enclave-service-tokens)$' --request-delay-seconds 1 ;;
@@ -774,7 +775,7 @@ fetch_all_official_sources() {
         jackson-2.22.2-api jackson-spring-2.21.2-api \
         jackson-3.2.2-api jackson-spring-3.1.2-api \
         lombok-1.18.46-api anthropic-api claude-code amp-code tinker \
-        docker dokploy infisical doppler-guides doppler-reference doppler-changelog \
+        docker traefik dokploy infisical doppler-guides doppler-reference doppler-changelog \
         spring-boot quarkus \
         java/java21-complete java/java24-complete java/java25-complete \
         spring-ai-reference spring-ai-api-stable spring-framework-reference spring-framework-api \

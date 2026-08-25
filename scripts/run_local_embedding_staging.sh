@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIRECTORY/.."
 readonly EXPECTED_REPOSITORY_COUNT=22
-readonly DOCUMENTATION_SETS="jooq/3.21/manual,jooq/3.21/api,python/3.14,postgresql/17,postgresql/18,hikaricp/7.1.0/api,hikaricp/7.0.2/api,jackson/2.22.2/api,jackson/2.21.2/api,jackson/3.2.2/api,jackson/3.1.2/api,lombok/1.18.46/api,lombok/1.18.46/reference,anthropic/api,anthropic/claude-code,amp-code,tinker,docker,dokploy,infisical,doppler/docs,doppler/reference,doppler/changelog,spring-framework/7.0.7/api"
+readonly DOCUMENTATION_SETS="jooq/3.21/manual,jooq/3.21/api,python/3.14,postgresql/17,postgresql/18,hikaricp/7.1.0/api,hikaricp/7.0.2/api,jackson/2.22.2/api,jackson/2.21.2/api,jackson/3.2.2/api,jackson/3.1.2/api,lombok/1.18.46/api,lombok/1.18.46/reference,anthropic/api,anthropic/claude-code,amp-code,tinker,docker,traefik,dokploy,infisical,doppler/docs,doppler/reference,doppler/changelog,spring-framework/7.0.7/api"
 
 cd "$PROJECT_ROOT"
 
@@ -51,7 +51,7 @@ for repository_path in "${repository_paths[@]}"; do
     fi
 done
 
-echo "LOCAL_STAGING_RESUME $(date -Ins) BATCH_SIZE=8 CONCURRENCY=8 DOCS=24 REPOS=$EXPECTED_REPOSITORY_COUNT"
+echo "LOCAL_STAGING_RESUME $(date -Ins) BATCH_SIZE=8 CONCURRENCY=8 DOCS=25 REPOS=$EXPECTED_REPOSITORY_COUNT"
 ./scripts/process_all_to_qdrant.sh --doc-sets="$DOCUMENTATION_SETS"
 
 for repository_path in "${repository_paths[@]}"; do

@@ -136,6 +136,10 @@ class DocsSourceRegistryTest {
                 "https://docs.docker.com/engine/swarm/",
                 DocsSourceRegistry.normalizeDocUrl("file:///data/docs/docker/engine/swarm/index.html"));
         assertEquals(
+                "https://doc.traefik.io/traefik/reference/install-configuration/providers/swarm/",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/traefik/reference/install-configuration/providers/swarm/index.html"));
+        assertEquals(
                 "https://docs.dokploy.com/docs/core/backups",
                 DocsSourceRegistry.normalizeDocUrl("file:///data/docs/dokploy/docs/core/backups.html"));
         assertEquals(

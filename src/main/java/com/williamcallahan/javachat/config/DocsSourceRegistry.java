@@ -286,6 +286,15 @@ public final class DocsSourceRegistry {
                     "current",
                     DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
             new DocumentationSource(
+                    "https://doc.traefik.io/traefik/",
+                    "traefik",
+                    "Traefik Proxy Documentation",
+                    "traefik",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
                     "https://docs.dokploy.com/",
                     "dokploy",
                     "Dokploy Documentation",

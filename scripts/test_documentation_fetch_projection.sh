@@ -450,6 +450,43 @@ if ! (
     record_documentation_fetch() {
         printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
     }
+    fetch_named_official_source traefik
+); then
+    fail_documentation_fetch_test "canonical Traefik documentation dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://doc.traefik.io/traefik/" \
+    --mirror-path \
+    traefik \
+    --name \
+    "Traefik Proxy Documentation" \
+    --source-version \
+    current \
+    --identity-regex \
+    "Traefik Proxy" \
+    --cut-directories \
+    1 \
+    --minimum-html-files \
+    280 \
+    --seed-document-type \
+    xml-sitemap \
+    --seed-discovery-url \
+    "https://doc.traefik.io/sitemap.xml" \
+    --seed-source-prefix \
+    "https://doc.traefik.io/traefik/"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
     fetch_named_official_source amp-code
 ); then
     fail_documentation_fetch_test "canonical Amp Code documentation dispatch did not complete"
