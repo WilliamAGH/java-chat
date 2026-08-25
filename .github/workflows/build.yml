@@ -16,6 +16,21 @@ permissions:
   contents: read
 
 jobs:
+  writer-lease-portability:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Verify system Bash and Python writer lease
+        run: |
+          /bin/bash --version | head -1
+          python3 --version
+          /bin/bash scripts/test_qdrant_writer_lease.sh
+
   frontend:
     runs-on: ubuntu-24.04
     defaults:

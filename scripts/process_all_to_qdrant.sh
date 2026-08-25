@@ -189,7 +189,6 @@ if [ ! -d "$DOCS_ROOT" ] || [ ! -r "$DOCS_ROOT" ]; then
     echo "DOCS_DIR must identify a readable documentation root: $DOCS_ROOT" >&2
     exit 1
 fi
-acquire_qdrant_writer_lease
 for writable_state_directory in "$DOCS_SNAPSHOT_DIR" "$DOCS_PARSED_DIR" "$DOCS_INDEX_DIR"; do
     if ! mkdir -p "$writable_state_directory" || [ ! -w "$writable_state_directory" ]; then
         echo "Ingestion state directory must be writable: $writable_state_directory" >&2
@@ -201,6 +200,7 @@ for writable_state_directory in "$DOCS_SNAPSHOT_DIR" "$DOCS_PARSED_DIR" "$DOCS_I
     fi
 done
 
+acquire_qdrant_writer_lease
 setup_pid_and_cleanup "$PID_FILE"
 if ! archive_prior_processing_log; then
     rm -f "$PID_FILE"

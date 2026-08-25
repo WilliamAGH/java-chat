@@ -81,8 +81,6 @@ for argument in "$@"; do
     esac
 done
 
-acquire_qdrant_writer_lease
-
 prepare_pipeline_environment "QDRANT_HOST" "QDRANT_PORT" "SPRING_PROFILE" "QDRANT_COLLECTION_DOCS" \
     "DOCS_SNAPSHOT_DIR" "DOCS_PARSED_DIR" "DOCS_INDEX_DIR"
 
@@ -347,6 +345,10 @@ else
     fi
 fi
 
+if [ -n "$REPO_URL" ]; then
+    extract_repository_identity "$REPO_URL"
+fi
+
 verify_pipeline_connections
 build_application "$LOG_FILE"
 SOURCE_APP_JAR="$(locate_app_jar)"
@@ -360,11 +362,13 @@ APP_JAR="$(stage_app_jar "$SOURCE_APP_JAR" "$STAGED_APP_JAR_DIRECTORY")"
 QDRANT_BASE_URL="$(qdrant_rest_base_url)"
 
 if [ "$SYNC_EXISTING" = "1" ]; then
+    acquire_qdrant_writer_lease
     sync_existing_collections "$QDRANT_BASE_URL" "$APP_JAR"
     exit 0
 fi
 
 if [ -n "$REPO_URL" ]; then
+    acquire_qdrant_writer_lease
     RESOLVED_REPOSITORY_PATH="$(ensure_repository_cache_clone "$REPO_URL" "$REPO_CACHE_PATH")"
 else
     RESOLVED_REPOSITORY_PATH="$(cd "$REPO_PATH" 2>/dev/null && pwd)" || {
@@ -380,4 +384,5 @@ fi
 
 resolve_repository_metadata_from_path "$RESOLVED_REPOSITORY_PATH"
 TARGET_COLLECTION_NAME="$CANONICAL_COLLECTION_NAME"
+acquire_qdrant_writer_lease
 run_single_ingestion "$RESOLVED_REPOSITORY_PATH" "$TARGET_COLLECTION_NAME" "$QDRANT_BASE_URL" "$APP_JAR"

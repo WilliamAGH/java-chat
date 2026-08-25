@@ -60,5 +60,16 @@ if ! grep -Fq 'repository_git_directories=(data/repos/github/*/*/.git)' "$launch
     || ! grep -Fq "date -u '+%Y-%m-%dT%H:%M:%SZ'" "$launcher_path"; then
     fail_local_staging_contract_test "launcher does not use portable repository discovery and timestamps"
 fi
+repository_validation_locations="$(grep -n 'Pinned repository is dirty:' "$launcher_path" || true)"
+writer_lease_locations="$(grep -n '^acquire_qdrant_writer_lease$' "$launcher_path" || true)"
+if [ "$(printf '%s\n' "$repository_validation_locations" | sed '/^$/d' | wc -l | tr -d ' ')" -ne 1 ] \
+    || [ "$(printf '%s\n' "$writer_lease_locations" | sed '/^$/d' | wc -l | tr -d ' ')" -ne 1 ]; then
+    fail_local_staging_contract_test "launcher does not contain exactly one repository validation and writer lease"
+fi
+repository_validation_line="${repository_validation_locations%%:*}"
+writer_lease_line="${writer_lease_locations%%:*}"
+if [ "$writer_lease_line" -le "$repository_validation_line" ]; then
+    fail_local_staging_contract_test "launcher contends on the writer lease before repository validation"
+fi
 
 printf 'PASS: durable staging forces local Qdrant and masks cloud credentials across .env loading.\n'

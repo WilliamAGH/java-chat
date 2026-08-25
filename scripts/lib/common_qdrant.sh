@@ -464,14 +464,6 @@ create_collection_from_reference() {
 
 # Acquires the user-wide writer lease shared by documentation and repository ingestion.
 acquire_qdrant_writer_lease() {
-    if [ "${QDRANT_WRITER_LEASE_HELD:-false}" = "true" ]; then
-        if [[ "${QDRANT_WRITER_LEASE_DESCRIPTOR:-}" =~ ^[0-9]+$ ]] \
-            && flock --nonblock "$QDRANT_WRITER_LEASE_DESCRIPTOR"; then
-            return 0
-        fi
-        echo "Inherited Qdrant writer lease is invalid" >&2
-        return 1
-    fi
     acquire_qdrant_writer_lease_at "$HOME/.local/state/java-chat"
 }
 
@@ -482,16 +474,55 @@ acquire_qdrant_writer_lease_at() {
         echo "Qdrant writer lease directory must be an absolute path" >&2
         return 1
     fi
-    if ! mkdir -p "$writer_state_directory"; then
+    if [ -L "$writer_state_directory" ] \
+        || ! mkdir -p "$writer_state_directory" \
+        || [ ! -d "$writer_state_directory" ] \
+        || ! chmod 700 "$writer_state_directory"; then
         echo "Could not create the Qdrant writer lease directory" >&2
         return 1
     fi
     local writer_lease_path="$writer_state_directory/qdrant-writer.lock"
-    exec {QDRANT_WRITER_LEASE_DESCRIPTOR}> "$writer_lease_path"
-    if ! flock --nonblock "$QDRANT_WRITER_LEASE_DESCRIPTOR"; then
+    if [ -L "$writer_lease_path" ]; then
+        echo "Qdrant writer lease file must not be a symbolic link" >&2
+        return 1
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "Qdrant writer lease requires Python 3" >&2
+        return 1
+    fi
+
+    if [ -n "${QDRANT_WRITER_LEASE_DESCRIPTOR:-}" ]; then
+        case "${QDRANT_WRITER_LEASE_DESCRIPTOR:-}" in
+            ''|*[!0-9]*)
+                echo "Inherited Qdrant writer lease is invalid" >&2
+                return 1
+                ;;
+        esac
+        python3 "$COMMON_QDRANT_LIB_DIR/../qdrant_writer_lease.py" \
+            --lock-path "$writer_lease_path" \
+            --descriptor "$QDRANT_WRITER_LEASE_DESCRIPTOR"
+        return
+    fi
+
+    if { true >&9; } 2>/dev/null; then
+        echo "Qdrant writer lease descriptor 9 is already in use" >&2
+        return 1
+    fi
+    local writer_lease_previous_umask
+    writer_lease_previous_umask="$(umask)"
+    umask 077
+    if ! exec 9>> "$writer_lease_path"; then
+        umask "$writer_lease_previous_umask"
+        echo "Could not open the Qdrant writer lease file" >&2
+        return 1
+    fi
+    umask "$writer_lease_previous_umask"
+    if ! python3 "$COMMON_QDRANT_LIB_DIR/../qdrant_writer_lease.py" \
+        --lock-path "$writer_lease_path" \
+        --descriptor 9; then
+        exec 9>&-
         echo "Another Qdrant ingestion writer owns the shared lease" >&2
         return 1
     fi
-    export QDRANT_WRITER_LEASE_DESCRIPTOR
-    export QDRANT_WRITER_LEASE_HELD=true
+    export QDRANT_WRITER_LEASE_DESCRIPTOR=9
 }
