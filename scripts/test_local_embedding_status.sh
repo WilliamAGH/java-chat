@@ -64,7 +64,36 @@ if [ "${FAKE_QDRANT_FAILURE:-false}" = true ]; then
 fi
 printf '%s\n' '{"result":{"points_count":58367,"indexed_vectors_count":124390,"status":"green"}}'
 EOF
-chmod +x "$TEST_COMMAND_DIRECTORY/systemctl" "$TEST_COMMAND_DIRECTORY/journalctl" "$TEST_COMMAND_DIRECTORY/curl"
+
+cat > "$TEST_COMMAND_DIRECTORY/uname" <<'EOF'
+#!/bin/bash
+printf 'Linux\n'
+EOF
+
+cat > "$TEST_COMMAND_DIRECTORY/stat" <<'EOF'
+#!/bin/bash
+case "$2" in
+    '%Y %s') printf '%s %s\n' "$FAKE_PROCESS_LOG_EPOCH" 123 ;;
+    '%Y') printf '%s\n' "$FAKE_PROCESS_LOG_EPOCH" ;;
+    *) exit 64 ;;
+esac
+EOF
+
+cat > "$TEST_COMMAND_DIRECTORY/date" <<'EOF'
+#!/bin/bash
+if [ "$1" = -d ]; then
+    printf '%s\n' "$FAKE_RESUME_EPOCH"
+elif [ "$1" = -u ] && [ "$2" = -d ]; then
+    printf '2026-08-26T03:00:00Z\n'
+elif [ "$1" = -u ]; then
+    printf '2026-08-26T03:00:00Z\n'
+else
+    exit 64
+fi
+EOF
+chmod +x "$TEST_COMMAND_DIRECTORY/systemctl" "$TEST_COMMAND_DIRECTORY/journalctl" \
+    "$TEST_COMMAND_DIRECTORY/curl" "$TEST_COMMAND_DIRECTORY/uname" \
+    "$TEST_COMMAND_DIRECTORY/stat" "$TEST_COMMAND_DIRECTORY/date"
 
 run_status_case() {
     local scenario_name="$1"
@@ -73,7 +102,7 @@ run_status_case() {
     local process_log_contents="$4"
     local expected_phase_line="$5"
     local expected_repository_line="$6"
-    local process_log_timestamp="${7:-2026-08-26 03:00:00 UTC}"
+    local process_log_epoch="${7:-1787713200}"
     local invocation_id="${8:-active-invocation}"
     local status_command="${9:-$STATUS_SCRIPT}"
     local scenario_directory="$TEST_WORK_DIRECTORY/$scenario_name"
@@ -81,7 +110,6 @@ run_status_case() {
     printf '%s\n' "$invocation_sequence" > "$scenario_directory/invocations"
     printf '%s\n' "$journal_contents" > "$scenario_directory/journals/$invocation_id"
     printf '%s\n' "$process_log_contents" > "$TEST_PROJECT_ROOT/process_qdrant.log"
-    touch -d "$process_log_timestamp" "$TEST_PROJECT_ROOT/process_qdrant.log"
 
     local status_report
     status_report="$(
@@ -90,7 +118,9 @@ run_status_case() {
         FAKE_JOURNAL_DIRECTORY="$scenario_directory/journals" \
         FAKE_JOURNAL_ARGUMENT_LOG="$TEST_WORK_DIRECTORY/journal-arguments" \
         FAKE_JOURNAL_FAILURE=false \
+        FAKE_PROCESS_LOG_EPOCH="$process_log_epoch" \
         FAKE_QDRANT_FAILURE=false \
+        FAKE_RESUME_EPOCH=1787706000 \
         FAKE_SYSTEMCTL_FAILURE=false \
         PATH="$TEST_COMMAND_DIRECTORY:$PATH" \
         "$status_command"
@@ -139,7 +169,7 @@ run_status_case \
     'Routed (docSet=jooq/3.21/api, docType=api-docs)' \
     'phase=documentation documentation=0/25 active_doc_set=jooq/3.21/api' \
     'repositories=0/23 started=0 active_repository=waiting_for_documentation staging_complete=false' \
-    '2026-08-26 03:00:00 UTC' \
+    1787713200 \
     active-invocation \
     "$TEST_HOME_DIRECTORY/.local/bin/java-chat-embedding-status"
 
@@ -150,7 +180,7 @@ run_status_case \
     $'Qdrant postcondition required for docSet: stale/complete\nRouted (docSet=stale/active, docType=api-docs)' \
     'phase=documentation documentation=0/25 active_doc_set=initializing' \
     'repositories=0/23 started=0 active_repository=waiting_for_documentation staging_complete=false' \
-    '2026-08-26 00:00:00 UTC'
+    1787700000
 
 run_status_case \
     inactive-with-stale-log \
@@ -171,14 +201,15 @@ printf '%s\n' \
     'REPOSITORY_START 2026-08-26T02:00:00Z data/repos/github/owner/current-repository' \
     > "$race_directory/journals/new-invocation"
 printf '%s\n' 'Routed (docSet=docs/complete, docType=api-docs)' > "$TEST_PROJECT_ROOT/process_qdrant.log"
-touch -d '2026-08-26 03:00:00 UTC' "$TEST_PROJECT_ROOT/process_qdrant.log"
 race_status_report="$(
     HOME="$TEST_HOME_DIRECTORY" \
     FAKE_INVOCATION_SEQUENCE_FILE="$race_directory/invocations" \
     FAKE_JOURNAL_DIRECTORY="$race_directory/journals" \
     FAKE_JOURNAL_ARGUMENT_LOG="$TEST_WORK_DIRECTORY/journal-arguments" \
     FAKE_JOURNAL_FAILURE=false \
+    FAKE_PROCESS_LOG_EPOCH=1787713200 \
     FAKE_QDRANT_FAILURE=false \
+    FAKE_RESUME_EPOCH=1787706000 \
     FAKE_SYSTEMCTL_FAILURE=false \
     PATH="$TEST_COMMAND_DIRECTORY:$PATH" \
     "$STATUS_SCRIPT"
@@ -199,14 +230,15 @@ printf '%s\n' \
     'LOCAL_STAGING_COMPLETE 2026-08-26T02:02:00Z' \
     > "$TEST_WORK_DIRECTORY/complete-journals/complete-invocation"
 printf '%s\n' 'Qdrant postcondition required for docSet: docs/complete' > "$TEST_PROJECT_ROOT/process_qdrant.log"
-touch -d '2026-08-26 03:00:00 UTC' "$TEST_PROJECT_ROOT/process_qdrant.log"
 complete_status_report="$(
     HOME="$TEST_HOME_DIRECTORY" \
     FAKE_INVOCATION_SEQUENCE_FILE="$TEST_WORK_DIRECTORY/complete-invocations" \
     FAKE_JOURNAL_DIRECTORY="$TEST_WORK_DIRECTORY/complete-journals" \
     FAKE_JOURNAL_ARGUMENT_LOG="$TEST_WORK_DIRECTORY/journal-arguments" \
     FAKE_JOURNAL_FAILURE=false \
+    FAKE_PROCESS_LOG_EPOCH=1787713200 \
     FAKE_QDRANT_FAILURE=false \
+    FAKE_RESUME_EPOCH=1787706000 \
     FAKE_SYSTEMCTL_FAILURE=false \
     PATH="$TEST_COMMAND_DIRECTORY:$PATH" \
     "$STATUS_SCRIPT"
@@ -229,7 +261,9 @@ if journal_failure_report="$(
     FAKE_JOURNAL_DIRECTORY="$journal_failure_directory/journals" \
     FAKE_JOURNAL_ARGUMENT_LOG="$TEST_WORK_DIRECTORY/journal-arguments" \
     FAKE_JOURNAL_FAILURE=true \
+    FAKE_PROCESS_LOG_EPOCH=1787713200 \
     FAKE_QDRANT_FAILURE=false \
+    FAKE_RESUME_EPOCH=1787706000 \
     FAKE_SYSTEMCTL_FAILURE=false \
     PATH="$TEST_COMMAND_DIRECTORY:$PATH" \
     "$STATUS_SCRIPT" 2>&1
@@ -249,7 +283,9 @@ if systemctl_failure_report="$(
     FAKE_JOURNAL_DIRECTORY="$systemctl_failure_directory/journals" \
     FAKE_JOURNAL_ARGUMENT_LOG="$TEST_WORK_DIRECTORY/journal-arguments" \
     FAKE_JOURNAL_FAILURE=false \
+    FAKE_PROCESS_LOG_EPOCH=1787713200 \
     FAKE_QDRANT_FAILURE=false \
+    FAKE_RESUME_EPOCH=1787706000 \
     FAKE_SYSTEMCTL_FAILURE=true \
     PATH="$TEST_COMMAND_DIRECTORY:$PATH" \
     "$STATUS_SCRIPT" 2>&1
@@ -271,7 +307,9 @@ if qdrant_failure_report="$(
     FAKE_JOURNAL_DIRECTORY="$qdrant_failure_directory/journals" \
     FAKE_JOURNAL_ARGUMENT_LOG="$TEST_WORK_DIRECTORY/journal-arguments" \
     FAKE_JOURNAL_FAILURE=false \
+    FAKE_PROCESS_LOG_EPOCH=1787713200 \
     FAKE_QDRANT_FAILURE=true \
+    FAKE_RESUME_EPOCH=1787706000 \
     FAKE_SYSTEMCTL_FAILURE=false \
     PATH="$TEST_COMMAND_DIRECTORY:$PATH" \
     "$STATUS_SCRIPT" 2>&1
