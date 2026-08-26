@@ -21,20 +21,22 @@ readonly EMBEDDING_SERVICE="java-chat-local-embedding-staging.service"
 readonly STAGING_INVOCATION_RECEIPT="$HOME/.local/state/java-chat/local-embedding-staging.invocation"
 readonly WATCH_INTERVAL_SECONDS=55
 readonly INVOCATION_READ_ATTEMPTS=3
+readonly STATUS_USAGE_ERROR=64
 readonly STATUS_DEPENDENCY_FAILURE=69
 readonly STATUS_INVOCATION_RACE=75
+readonly STATUS_STAGING_COMPLETE=10
 
 case "${1:-}" in
     "") watch_mode=false ;;
     --watch) watch_mode=true ;;
     *)
         printf 'Usage: %s [--watch]\n' "$0" >&2
-        exit 64
+        exit "$STATUS_USAGE_ERROR"
         ;;
 esac
 if [ "$#" -gt 1 ]; then
     printf 'Usage: %s [--watch]\n' "$0" >&2
-    exit 64
+    exit "$STATUS_USAGE_ERROR"
 fi
 
 require_monitoring_command() {
@@ -261,7 +263,7 @@ report_embedding_status() {
         return "$qdrant_status"
     fi
     if [ "$staging_complete" = true ]; then
-        return 10
+        return "$STATUS_STAGING_COMPLETE"
     fi
 }
 
@@ -270,7 +272,7 @@ while true; do
         :
     else
         report_status=$?
-        if [ "$report_status" -eq 10 ]; then
+        if [ "$report_status" -eq "$STATUS_STAGING_COMPLETE" ]; then
             exit 0
         fi
         exit "$report_status"
