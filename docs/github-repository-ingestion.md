@@ -88,7 +88,7 @@ Per file, ingestion stores marker metadata in the active generation's configured
 
 On rerun:
 
-- unchanged file + sufficient Qdrant points: skipped
+- unchanged file + exact Qdrant point IDs: skipped
 - changed file: embed and upsert the complete replacement, then remove stale same-collection point IDs and local chunks
 - marker from another or unknown collection generation: fail without vector, marker, or parsed-state mutation
 
