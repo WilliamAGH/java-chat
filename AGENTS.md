@@ -30,6 +30,7 @@ alwaysApply: true
 - [AR1a-f] Architecture & Boundaries (canonical roots, layer rules, framework-free domain)
 - [CS1a-h] Code Smells (primitive obsession, data clumps, magic literals)
 - [VR1a-f] Verification Loops (build/test/run, slice validation, completion tail)
+- [BR1a-b] Browser process boundary (browser tests are explicit, CI-owned on macOS Codex)
 - [JD1a-h] Javadoc Standards (mandatory, why > what)
 - [ND1a-h] Naming Discipline (intent-revealing, banned generics, constant naming, type names)
 
@@ -194,6 +195,11 @@ alwaysApply: true
 - [VR1d] **Validate each slice**: After completing an end-to-end slice ([CC1e]), run `make build` and `make test` before starting the next slice.
 - [VR1e] **Direct-Owner Cleanup Handoff**: Name the direct production owner, list redundant artifacts deleted, identify each intentional small boundary-local duplication and why it avoids schema machinery, and cite tests that exercise the behavior. Do not create a manifest, catalog, contract, registry, or parity report for handoff.
 - [VR1f] **Completion Tail**: When verification loops are green: commit, merge the task worktree to `dev`, push, and watch any CI run to a terminal verdict. GitHub issues are filed only for material defects or features (behavior, correctness, security, performance, data quality, or a governed contract); pedantic/nitpick/style-only findings are fixed in place or dropped, never filed. Fixes and issue scope follow the minimalism bar — reuse before new code, simplify before completing, per the `ponytail` and `ce-simplify-code` skills.
+
+## [BR1] Browser Process Boundary
+
+- [BR1a] `make test` and `npm test` are browser-free. Playwright is an explicit `npm run test:browser`/GitHub CI lane; generic install, test, build, run, or verification requests never authorize it.
+- [BR1b] `frontend/playwright.config.ts` calls the canonical browser-process guard before server or browser startup. macOS Codex sessions fail before spawning Chrome/Chromium from any repo, worktree, tmp, scratch, private, subagent, or background path.
 
 ## [JD1] Javadoc Standards
 

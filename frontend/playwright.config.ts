@@ -1,4 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import { assertBrowserProcessBoundary } from "./browser-process-boundary";
+
+assertBrowserProcessBoundary();
 
 export default defineConfig({
   testDir: "./e2e",
