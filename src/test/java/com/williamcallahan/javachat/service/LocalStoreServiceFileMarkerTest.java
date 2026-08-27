@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -51,6 +52,7 @@ class LocalStoreServiceFileMarkerTest {
         String collectionName = "java-api-docs";
         List<String> chunkHashes = List.of("a1", "b2", "c3");
 
+        fileIngestionMarkerStore.registerStorageUrlForCanonicalCitation(sourceUrl);
         fileIngestionMarkerStore.markFileIngested(
                 sourceUrl,
                 new FileIngestionMarkerStore.FileIngestionRecord(
@@ -64,6 +66,7 @@ class LocalStoreServiceFileMarkerTest {
         Path markerPath = indexDirectory.resolve("file_" + localStore.toSafeName(sourceUrl) + ".marker");
         assertEquals(
                 List.of(
+                        "url=" + sourceUrl,
                         "size=" + fileSizeBytes,
                         "mtime=" + lastModifiedMillis,
                         "fingerprint=" + ingestionFingerprint,
@@ -73,6 +76,23 @@ class LocalStoreServiceFileMarkerTest {
                         "hash=b2",
                         "hash=c3"),
                 Files.readAllLines(markerPath, StandardCharsets.UTF_8));
+        assertEquals(Set.of(sourceUrl), fileIngestionMarkerStore.storageUrlsForCanonicalCitation(sourceUrl));
+        String siblingStorageUrl = sourceUrl + "?java-chat-mirror=nested";
+        fileIngestionMarkerStore.registerStorageUrlForCanonicalCitation(siblingStorageUrl);
+        fileIngestionMarkerStore.markFileIngested(
+                siblingStorageUrl,
+                new FileIngestionMarkerStore.FileIngestionRecord(
+                        fileSizeBytes,
+                        lastModifiedMillis,
+                        ingestionFingerprint,
+                        extractionSemanticsVersion,
+                        collectionName,
+                        chunkHashes));
+        assertEquals(
+                Set.of(sourceUrl, siblingStorageUrl),
+                fileIngestionMarkerStore.storageUrlsForCanonicalCitation(sourceUrl));
+        fileIngestionMarkerStore.deleteFileIngestionRecord(siblingStorageUrl);
+        assertEquals(Set.of(sourceUrl), fileIngestionMarkerStore.storageUrlsForCanonicalCitation(sourceUrl));
 
         FileIngestionMarkerStore.FileIngestionRecord persistedIngestionRecord =
                 fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl).orElseThrow();

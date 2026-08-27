@@ -1,14 +1,17 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 
 /** Persists file-level ingestion records independently from chunk and snapshot storage. */
@@ -17,6 +20,7 @@ public class FileIngestionMarkerStore {
     private static final String FILE_MARKER_PREFIX = "file_";
     private static final String FILE_MARKER_EXTENSION = ".marker";
     private static final String FILE_MARKER_SIZE_PREFIX = "size=";
+    private static final String FILE_MARKER_URL_PREFIX = "url=";
     private static final String FILE_MARKER_LAST_MODIFIED_PREFIX = "mtime=";
     private static final String FILE_MARKER_HASH_PREFIX = "hash=";
     private static final String FILE_MARKER_INGESTION_FINGERPRINT_PREFIX = "fingerprint=";
@@ -24,6 +28,8 @@ public class FileIngestionMarkerStore {
     private static final String FILE_MARKER_COLLECTION_NAME_PREFIX = "collectionName=";
     private static final String FILE_MARKER_TEMPORARY_PREFIX = ".file-marker-";
     private static final String FILE_MARKER_TEMPORARY_SUFFIX = ".tmp";
+    private static final String CITATION_FAMILY_PREFIX = "citation_";
+    private static final String CITATION_FAMILY_EXTENSION = ".urls";
 
     private final LocalStoreService localStoreService;
 
@@ -43,7 +49,15 @@ public class FileIngestionMarkerStore {
             throw new IllegalArgumentException("Collection name is required for new file ingestion markers");
         }
         Path markerPath = fileMarkerPath(url);
-        writeFileMarkerAtomically(markerPath, buildFileMarkerPayload(canonicalFileIngestionRecord));
+        writeFileMarkerAtomically(markerPath, buildFileMarkerPayload(url, canonicalFileIngestionRecord));
+    }
+
+    /** Registers a local-document storage URL before its authoritative file marker is committed. */
+    public void registerStorageUrlForCanonicalCitation(String storageUrl) throws IOException {
+        if (storageUrl == null || storageUrl.isBlank()) {
+            throw new IllegalArgumentException("Storage URL is required for citation-family registration");
+        }
+        updateCitationFamily(storageUrl, true);
     }
 
     /** Loads the file ingestion marker for an authoritative URL. */
@@ -68,6 +82,45 @@ public class FileIngestionMarkerStore {
             return;
         }
         Files.deleteIfExists(fileMarkerPath(url));
+        updateCitationFamily(url, false);
+    }
+
+    /** Lists storage URLs whose normalized public citation matches the requested URL. */
+    public Set<String> storageUrlsForCanonicalCitation(String canonicalCitationUrl) throws IOException {
+        Path citationFamilyPath = citationFamilyPath(canonicalCitationUrl);
+        if (!Files.isRegularFile(citationFamilyPath)) {
+            return Set.of();
+        }
+        return Files.readAllLines(citationFamilyPath, StandardCharsets.UTF_8).stream()
+                .map(String::trim)
+                .filter(storageUrl -> !storageUrl.isBlank())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    private void updateCitationFamily(String storageUrl, boolean present) throws IOException {
+        Path citationFamilyPath = citationFamilyPath(storageUrl);
+        Set<String> storageUrls = Files.isRegularFile(citationFamilyPath)
+                ? new LinkedHashSet<>(Files.readAllLines(citationFamilyPath, StandardCharsets.UTF_8))
+                : new LinkedHashSet<>();
+        if (present) {
+            storageUrls.add(storageUrl);
+        } else {
+            storageUrls.remove(storageUrl);
+        }
+        if (storageUrls.isEmpty()) {
+            Files.deleteIfExists(citationFamilyPath);
+            return;
+        }
+        writeFileMarkerAtomically(citationFamilyPath, String.join("\n", storageUrls) + "\n");
+    }
+
+    private Path citationFamilyPath(String storageUrl) {
+        String canonicalCitationUrl = DocsSourceRegistry.normalizeDocUrl(storageUrl);
+        return localStoreService
+                .indexDirectory()
+                .resolve(CITATION_FAMILY_PREFIX
+                        + localStoreService.toSafeName(canonicalCitationUrl)
+                        + CITATION_FAMILY_EXTENSION);
     }
 
     private void writeFileMarkerAtomically(Path markerPath, String markerPayload) throws IOException {
@@ -151,8 +204,9 @@ public class FileIngestionMarkerStore {
         }
     }
 
-    private String buildFileMarkerPayload(FileIngestionRecord fileIngestionRecord) {
+    private String buildFileMarkerPayload(String url, FileIngestionRecord fileIngestionRecord) {
         StringBuilder markerPayload = new StringBuilder();
+        markerPayload.append(FILE_MARKER_URL_PREFIX).append(url).append('\n');
         markerPayload
                 .append(FILE_MARKER_SIZE_PREFIX)
                 .append(fileIngestionRecord.fileSizeBytes())

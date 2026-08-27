@@ -1,7 +1,9 @@
 package com.williamcallahan.javachat.config;
 
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,6 +38,7 @@ public final class DocsSourceRegistry {
     private static final String PATH_SEPARATOR_TEXT = "/";
     private static final String GITHUB_BLOB_PATH = "/blob/";
     private static final String GITHUB_TREE_PATH = "/tree/";
+    private static final String INGESTION_IDENTITY_QUERY_PREFIX = "?java-chat-mirror=";
     private static final String SPRING_FRAMEWORK_MARKER = "spring-framework";
     private static final String SPRING_FRAMEWORK_LEGACY_DUPLICATE_JAVADOC_PREFIX =
             "docs/current/api/current/javadoc-api/";
@@ -289,6 +292,42 @@ public final class DocsSourceRegistry {
                     "current",
                     DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
             new DocumentationSource(
+                    "https://doc.traefik.io/traefik/",
+                    "traefik",
+                    "Traefik Proxy Documentation",
+                    "traefik",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://porkbun.com/api/json/v3/documentation",
+                    "porkbun",
+                    "Porkbun API v3.15 Documentation",
+                    "porkbun",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "api-docs",
+                    "3.15",
+                    DocumentationCitationPathStyle.SINGLE_DOCUMENT),
+            new DocumentationSource(
+                    "https://github.com/oborseth/Porkbun-MCP/blob/64e8b4f4caad75e99333733bca5f2987afee3c75/README.md",
+                    "porkbun-mcp",
+                    "Porkbun MCP Server 0.17.1",
+                    "porkbun-mcp",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "tool-reference",
+                    "0.17.1-64e8b4f4caad",
+                    DocumentationCitationPathStyle.SINGLE_DOCUMENT),
+            new DocumentationSource(
+                    "https://developers.cloudflare.com/",
+                    "cloudflare",
+                    "Cloudflare Developer Documentation",
+                    "cloudflare",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
                     "https://docs.dokploy.com/",
                     "dokploy",
                     "Dokploy Documentation",
@@ -384,7 +423,8 @@ public final class DocsSourceRegistry {
                     "quarkus",
                     "official",
                     "framework-guide",
-                    ""),
+                    "",
+                    DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
             new DocumentationSource(
                     SPRING_AI_BASE + "reference/1.1/",
                     "spring-ai-reference",
@@ -528,6 +568,8 @@ public final class DocsSourceRegistry {
     public enum DocumentationCitationPathStyle {
         /** Keeps the mirrored relative path unchanged. */
         LITERAL,
+        /** Uses one canonical source URL for every fragment of a single mirrored document. */
+        SINGLE_DOCUMENT,
         /** Maps an extracted Javadoc page to the matching source file in the official repository. */
         JAVA_SOURCE,
         /** Removes the HTML filename synthesized for an extensionless canonical route. */
@@ -572,6 +614,16 @@ public final class DocsSourceRegistry {
                 .filter(documentationSource ->
                         documentationSource.relativeMirrorPath().equals(relativeMirrorPath))
                 .findFirst();
+    }
+
+    /** Returns the canonical citation base for an exact registered mirror root. */
+    public static Optional<String> citationBaseForRelativeMirrorPath(String relativeMirrorPath) {
+        Optional<String> documentationBase =
+                documentationSourceForRelativeMirrorPath(relativeMirrorPath).map(DocumentationSource::citationBaseUrl);
+        return documentationBase.or(() -> JAVA_API_DOCUMENTATION_SOURCES.stream()
+                .filter(source -> source.relativeMirrorPath().equals(relativeMirrorPath))
+                .map(JavaApiDocumentationSource::remoteBaseUrl)
+                .findFirst());
     }
 
     /** Finds the longest documentation mirror root containing a relative document path. */
@@ -636,11 +688,21 @@ public final class DocsSourceRegistry {
         }
 
         Optional<String> resolveCitationUrl(String mirroredRelativePath) {
+            if (citationPathStyle == DocumentationCitationPathStyle.SINGLE_DOCUMENT) {
+                return Optional.of(citationBaseUrl);
+            }
             if (citationPathStyle == DocumentationCitationPathStyle.JAVA_SOURCE) {
                 return resolveJavaSourceCitation(citationBaseUrl, mirroredRelativePath);
             }
             return joinBaseAndRel(citationBaseUrl, citationPathStyle.citationRelativePath(mirroredRelativePath));
         }
+    }
+
+    private static String ingestionIdentityQuery(String mirroredRelativePath) {
+        String encodedMirrorPath = Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(mirroredRelativePath.getBytes(StandardCharsets.UTF_8));
+        return INGESTION_IDENTITY_QUERY_PREFIX + encodedMirrorPath;
     }
 
     private static Optional<String> resolveJavaSourceCitation(String sourceBaseUrl, String mirroredRelativePath) {
@@ -700,6 +762,58 @@ public final class DocsSourceRegistry {
                 .flatMap(source -> new CitationRoute(source.citationBaseUrl(), source.citationPathStyle())
                         .resolveCitationUrl(relativeDocumentPath))
                 .map(DocsSourceRegistry::canonicalizeHttpDocUrl);
+    }
+
+    /** Resolves stable per-file storage identities independently from canonical citation projection. */
+    public static Map<Path, String> resolveMirroredIngestionIdentities(Path mirrorRoot, List<Path> documentFiles) {
+        Objects.requireNonNull(mirrorRoot, "mirrorRoot");
+        List<Path> requiredDocumentFiles = List.copyOf(Objects.requireNonNull(documentFiles, "documentFiles"));
+        Path absoluteMirrorRoot = mirrorRoot.toAbsolutePath().normalize();
+        Map<Path, String> ingestionIdentities = new LinkedHashMap<>();
+        for (Path documentFile : requiredDocumentFiles) {
+            Path absoluteDocumentFile = documentFile.toAbsolutePath().normalize();
+            String normalizedDocumentPath =
+                    absoluteDocumentFile.toString().replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR);
+            Optional<DocumentationSource> documentationSource = DOCUMENTATION_SOURCES.stream()
+                    .filter(source -> normalizedDocumentPath.contains(
+                            PATH_SEPARATOR_TEXT + source.relativeMirrorPath() + PATH_SEPARATOR_TEXT))
+                    .max(Comparator.comparingInt(
+                            source -> source.relativeMirrorPath().length()));
+            resolveMirroredPath(absoluteMirrorRoot, absoluteDocumentFile)
+                    .or(() -> documentationSource.flatMap(
+                            source -> new CitationRoute(source.citationBaseUrl(), source.citationPathStyle())
+                                    .resolveCitationUrl(relativePathWithinSource(normalizedDocumentPath, source))
+                                    .map(DocsSourceRegistry::canonicalizeHttpDocUrl)))
+                    .or(() -> resolveLocalPath(normalizedDocumentPath))
+                    .ifPresent(canonicalUrl -> ingestionIdentities.put(
+                            absoluteDocumentFile,
+                            documentationSource
+                                    .filter(source ->
+                                            source.citationPathStyle() == DocumentationCitationPathStyle.JAVA_SOURCE)
+                                    .map(source ->
+                                            stableJavaSourceIdentity(normalizedDocumentPath, source, canonicalUrl))
+                                    .orElse(canonicalUrl)));
+        }
+        return Map.copyOf(ingestionIdentities);
+    }
+
+    private static String relativePathWithinSource(
+            String normalizedDocumentPath, DocumentationSource documentationSource) {
+        String mirrorMarker = PATH_SEPARATOR_TEXT + documentationSource.relativeMirrorPath() + PATH_SEPARATOR_TEXT;
+        return normalizedDocumentPath.substring(normalizedDocumentPath.indexOf(mirrorMarker) + mirrorMarker.length());
+    }
+
+    private static String stableJavaSourceIdentity(
+            String normalizedDocumentPath, DocumentationSource documentationSource, String canonicalUrl) {
+        String mirroredRelativePath = relativePathWithinSource(normalizedDocumentPath, documentationSource);
+        int fileNameStart = mirroredRelativePath.lastIndexOf(UNIX_PATH_SEPARATOR) + 1;
+        String fileName = mirroredRelativePath.substring(fileNameStart);
+        boolean canonicalOwner = fileName.equals("package-summary.html")
+                || (fileName.endsWith(HTML_EXTENSION)
+                        && Character.isUpperCase(fileName.charAt(0))
+                        && !fileName.substring(0, fileName.length() - HTML_EXTENSION.length())
+                                .contains("."));
+        return canonicalOwner ? canonicalUrl : canonicalUrl + ingestionIdentityQuery(mirroredRelativePath);
     }
 
     private static boolean pathEndsWith(String normalizedRoot, String relativeMirrorPath) {
@@ -1014,7 +1128,7 @@ public final class DocsSourceRegistry {
         if (rawUrl == null || rawUrl.isBlank()) {
             return rawUrl;
         }
-        String trimmedUrl = rawUrl.trim();
+        String trimmedUrl = stripIngestionIdentity(rawUrl.trim());
         if (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) {
             return canonicalizeHttpDocUrl(trimmedUrl);
         }
@@ -1034,5 +1148,10 @@ public final class DocsSourceRegistry {
         return mapLocalPrefixToRemote(localPath)
                 .map(DocsSourceRegistry::canonicalizeHttpDocUrl)
                 .orElse(REDACTED_LOCAL_URL);
+    }
+
+    private static String stripIngestionIdentity(String url) {
+        int identityStart = url.indexOf(INGESTION_IDENTITY_QUERY_PREFIX);
+        return identityStart < 0 ? url : url.substring(0, identityStart);
     }
 }

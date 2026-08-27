@@ -105,8 +105,74 @@ log() {
 
 assert_documentation_mirror_path_policy
 
+TEXT_RESOURCE_TEST_PATH="$TEST_WORK_DIRECTORY/documentation-text-resource.txt"
+printf '%s\n' "Cloudflare DNS" "R2 Object Storage" "Model Context Protocol (MCP)" \
+    > "$TEXT_RESOURCE_TEST_PATH"
+validate_documentation_text_resource \
+    "$TEXT_RESOURCE_TEST_PATH" "Documentation Text Resource" 40 \
+    "Cloudflare DNS" "R2 Object Storage" "Model Context Protocol (MCP)"
+if validate_documentation_text_resource \
+    "$TEXT_RESOURCE_TEST_PATH" "Documentation Text Resource" 1000 \
+    "Cloudflare DNS" > /dev/null 2>&1; then
+    fail_documentation_fetch_test "truncated completeness resource was accepted"
+fi
+if validate_documentation_text_resource \
+    "$TEXT_RESOURCE_TEST_PATH" "Documentation Text Resource" 40 \
+    "Workers AI" > /dev/null 2>&1; then
+    fail_documentation_fetch_test "text resource missing required coverage was accepted"
+fi
+
+if ! (
+    STABLE_SEED_TEST_ROOT="$TEST_WORK_DIRECTORY/stable-seed"
+    mkdir -p "$STABLE_SEED_TEST_ROOT"
+    printf '%s\n' 'https://docs.example.invalid/reference/' \
+        > "$STABLE_SEED_TEST_ROOT/current-seed.txt"
+    wget2() {
+        local discovery_output_path=""
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --output-document=*) discovery_output_path="${1#*=}" ;;
+            esac
+            shift
+        done
+        printf '%s\n' \
+            '<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://docs.example.invalid/reference/</loc></url></urlset>' \
+            > "$discovery_output_path"
+    }
+    validate_stable_documentation_seed \
+        --current-seed-file "$STABLE_SEED_TEST_ROOT/current-seed.txt" \
+        --target-directory "$STABLE_SEED_TEST_ROOT" \
+        --seed-document-type xml-sitemap \
+        --seed-discovery-url 'https://docs.example.invalid/sitemap.xml' \
+        --seed-source-prefix 'https://docs.example.invalid/' \
+        --canonical-prefix 'https://docs.example.invalid/' \
+        --seed-reject-regex '' \
+        --cut-directories 0
+    printf '%s\n' 'https://docs.example.invalid/stale/' \
+        > "$STABLE_SEED_TEST_ROOT/current-seed.txt"
+    if validate_stable_documentation_seed \
+        --current-seed-file "$STABLE_SEED_TEST_ROOT/current-seed.txt" \
+        --target-directory "$STABLE_SEED_TEST_ROOT" \
+        --seed-document-type xml-sitemap \
+        --seed-discovery-url 'https://docs.example.invalid/sitemap.xml' \
+        --seed-source-prefix 'https://docs.example.invalid/' \
+        --canonical-prefix 'https://docs.example.invalid/' \
+        --seed-reject-regex '' \
+        --cut-directories 0 > /dev/null 2>&1; then
+        exit 1
+    fi
+); then
+    fail_documentation_fetch_test "stable seed validation did not reject discovery drift"
+fi
+
 if grep -Fq -- '--retry-on-http-error' "$FETCH_SOURCE_LIBRARY"; then
     fail_documentation_fetch_test "documented Ubuntu Wget2 does not support --retry-on-http-error"
+fi
+if grep -Fq -- 'grep -P' "$FETCH_SOURCE_LIBRARY"; then
+    fail_documentation_fetch_test "documentation fetch still requires GNU grep PCRE support"
+fi
+if ! grep -Fq -- '--matches-regex' "$FETCH_SOURCE_LIBRARY"; then
+    fail_documentation_fetch_test "Cloudflare alias validation bypasses the portable Python regex boundary"
 fi
 if ! grep -Fq -- '--discovery-url "$seed_additional_discovery_url"' "$FETCH_SOURCE_LIBRARY"; then
     fail_documentation_fetch_test "additional discovery links do not resolve against their own document URL"
@@ -307,7 +373,7 @@ fi
 assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     fetch_source \
     --url \
-    "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" \
+    "https://archive.apache.org/dist/groovy/5.0.7/distribution/apache-groovy-docs-5.0.7.zip" \
     --mirror-path \
     "groovy/5.0.7" \
     --name \
@@ -316,18 +382,18 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     "5.0.7" \
     --identity-regex \
     'Groovy.*5\.0\.7|5\.0\.7.*Groovy' \
+    --required-identity-page \
+    "core-introduction.html" \
+    --required-identity-text \
+    "version 5.0.7" \
     --cut-directories \
-    4 \
+    0 \
     --minimum-html-files \
-    9 \
-    --reject-regex \
-    '/(gdk|templating|type-checking-extensions)\.html$' \
-    --seed-document-type \
-    html-links \
-    --seed-discovery-url \
-    "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" \
-    --seed-source-prefix \
-    "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/"
+    40 \
+    --archive-format \
+    zip \
+    --archive-publication-root \
+    "groovy-5.0.7/html/documentation"
 
 if ! (
     set --
@@ -407,7 +473,30 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     --seed-discovery-url \
     "https://quarkus.io/guides/" \
     --seed-source-prefix \
-    "https://quarkus.io/guides/"
+    "https://quarkus.io/guides/" \
+    --canonicalize-extensionless-directory-urls
+
+QUARKUS_DISCOVERY_FIXTURE="$TEST_WORK_DIRECTORY/quarkus-guides.html"
+QUARKUS_SEED_OUTPUT="$TEST_WORK_DIRECTORY/quarkus-seed.txt"
+QUARKUS_MIRROR_OUTPUT="$TEST_WORK_DIRECTORY/quarkus-mirror-paths.txt"
+printf '%s\n' '<a href="/guides/aesh">Aesh</a><a href="/guides/stylesheet/config.css">CSS</a>' \
+    > "$QUARKUS_DISCOVERY_FIXTURE"
+python3 "$SCRIPT_DIR/documentation_seed.py" \
+    --document-type html-links \
+    --input "$QUARKUS_DISCOVERY_FIXTURE" \
+    --discovery-url "https://quarkus.io/guides/" \
+    --source-prefix "https://quarkus.io/guides/" \
+    --canonical-prefix "https://quarkus.io/guides/" \
+    --output "$QUARKUS_SEED_OUTPUT" \
+    --mirror-path-output "$QUARKUS_MIRROR_OUTPUT" \
+    --cut-directories 1 \
+    --canonicalize-extensionless-directory-urls
+if ! grep -Fxq 'https://quarkus.io/guides/aesh/' "$QUARKUS_SEED_OUTPUT" \
+    || ! grep -Fxq 'https://quarkus.io/guides/stylesheet/config.css' "$QUARKUS_SEED_OUTPUT" \
+    || ! grep -Fxq 'aesh/index.html' "$QUARKUS_MIRROR_OUTPUT" \
+    || ! grep -Fxq 'stylesheet/config.css.html' "$QUARKUS_MIRROR_OUTPUT"; then
+    fail_documentation_fetch_test "Quarkus extensionless guides did not project onto canonical directory URLs"
+fi
 
 assert_current_documentation_source_dispatch() {
     local documentation_source_identifier="$1"
@@ -458,6 +547,43 @@ if ! (
     record_documentation_fetch() {
         printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
     }
+    fetch_named_official_source traefik
+); then
+    fail_documentation_fetch_test "canonical Traefik documentation dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://doc.traefik.io/traefik/" \
+    --mirror-path \
+    traefik \
+    --name \
+    "Traefik Proxy Documentation" \
+    --source-version \
+    current \
+    --identity-regex \
+    "Traefik Proxy" \
+    --cut-directories \
+    1 \
+    --minimum-html-files \
+    280 \
+    --seed-document-type \
+    xml-sitemap \
+    --seed-discovery-url \
+    "https://doc.traefik.io/sitemap.xml" \
+    --seed-source-prefix \
+    "https://doc.traefik.io/traefik/"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
     fetch_named_official_source amp-code
 ); then
     fail_documentation_fetch_test "canonical Amp Code documentation dispatch did not complete"
@@ -498,6 +624,89 @@ assert_current_documentation_source_dispatch \
     "https://tinker-docs.thinkingmachines.ai/" \
     tinker \
     "https://tinker-docs.thinkingmachines.ai/sitemap.xml"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source porkbun
+); then
+    fail_documentation_fetch_test "canonical Porkbun documentation dispatch did not complete"
+fi
+for required_porkbun_argument in \
+    "https://porkbun.com/api/json/v3/documentation" \
+    "https://porkbun.com/llms-full.txt" \
+    "https://porkbun.com/llms.txt" \
+    "npx -y @porkbunllc/mcp-server" \
+    "https://porkbun.com/llms/agent-setup"; do
+    if ! grep -Fxq -- "$required_porkbun_argument" "$ENVIRONMENT_OVERRIDE_CAPTURE"; then
+        fail_documentation_fetch_test "Porkbun dispatch lost required API/MCP coverage: $required_porkbun_argument"
+    fi
+done
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source porkbun-mcp
+); then
+    fail_documentation_fetch_test "canonical Porkbun MCP documentation dispatch did not complete"
+fi
+for required_porkbun_mcp_argument in \
+    "https://github.com/oborseth/Porkbun-MCP/blob/64e8b4f4caad75e99333733bca5f2987afee3c75/README.md" \
+    "https://raw.githubusercontent.com/oborseth/Porkbun-MCP/64e8b4f4caad75e99333733bca5f2987afee3c75/README.md" \
+    "0.17.1-64e8b4f4caad" \
+    "npx -y @porkbunllc/mcp-server"; do
+    if ! grep -Fxq -- "$required_porkbun_mcp_argument" "$ENVIRONMENT_OVERRIDE_CAPTURE"; then
+        fail_documentation_fetch_test "Porkbun MCP dispatch lost pinned official coverage: $required_porkbun_mcp_argument"
+    fi
+done
+assert_current_documentation_source_dispatch \
+    cloudflare \
+    "https://developers.cloudflare.com/" \
+    cloudflare \
+    "https://developers.cloudflare.com/sitemap-0.xml"
+for required_cloudflare_argument in \
+    "https://developers.cloudflare.com/sitemap-index.xml" \
+    "https://developers.cloudflare.com/llms-full.txt" \
+    "8199" \
+    "--validate-cloudflare-seed-aliases" \
+    "# Cloudflare DNS" \
+    "# R2 Object Storage" \
+    "## Wrangler usage" \
+    "# AI Gateway" \
+    "## Workers AI" \
+    "Model Context Protocol (MCP)"; do
+    if ! grep -Fxq -- "$required_cloudflare_argument" "$ENVIRONMENT_OVERRIDE_CAPTURE"; then
+        fail_documentation_fetch_test "Cloudflare dispatch lost required platform coverage: $required_cloudflare_argument"
+    fi
+done
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    DEFAULT_SOURCE_CAPTURE="$TEST_WORK_DIRECTORY/default-source-capture"
+    fetch_named_official_source() {
+        printf '%s\n' "$1" >> "$DEFAULT_SOURCE_CAPTURE"
+    }
+    fetch_all_official_sources
+    grep -Fxq porkbun "$DEFAULT_SOURCE_CAPTURE" \
+        && grep -Fxq porkbun-mcp "$DEFAULT_SOURCE_CAPTURE" \
+        && grep -Fxq cloudflare "$DEFAULT_SOURCE_CAPTURE"
+); then
+    fail_documentation_fetch_test "default documentation inventory omitted a platform source"
+fi
 
 if ! (
     set --
@@ -817,7 +1026,8 @@ if ! (
     fail_documentation_fetch_test "missing mutool did not fail before Java 25 specification downloads"
 fi
 if ! grep -Fq -- "brew install mupdf" "$JAVA25_MISSING_PARSER_LOG" \
-    || ! grep -Fq -- "apt install mupdf-tools" "$JAVA25_MISSING_PARSER_LOG"; then
+    || ! grep -Fq -- "apt install mupdf-tools" "$JAVA25_MISSING_PARSER_LOG" \
+    || ! grep -Fq -- "dnf install mupdf" "$JAVA25_MISSING_PARSER_LOG"; then
     fail_documentation_fetch_test "missing mutool did not report its installation command"
 fi
 
@@ -1063,6 +1273,47 @@ if [ "$(grep -Fxc -- "/dev/null" "$JAVA25_PDF_FAILURE_PARSER_CAPTURE")" -ne 1 ] 
     || ! grep -Fq -- "jls25.pdf" "$JAVA25_PDF_FAILURE_PARSER_CAPTURE" \
     || grep -Fq -- "jvms25.pdf" "$JAVA25_PDF_FAILURE_PARSER_CAPTURE"; then
     fail_documentation_fetch_test "Java 25 specification pair continued after the JLS full-parse failure"
+fi
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    DOCS_ROOT="$TEST_WORK_DIRECTORY/resumed-publication/data/docs"
+    LOG_FILE="$TEST_WORK_DIRECTORY/resumed-publication.log"
+    RESUMED_STAGING_DIRECTORY="$TEST_WORK_DIRECTORY/resumed-publication/staging"
+    RESUMED_PUBLICATION_CAPTURE="$TEST_WORK_DIRECTORY/resumed-publication/published"
+    PROJECT_ROOT="$TEST_WORK_DIRECTORY/resumed-publication/project"
+    mkdir -p "$PROJECT_ROOT"
+    log() {
+        :
+    }
+    create_documentation_fetch_staging_directory() {
+        mkdir -p "$RESUMED_STAGING_DIRECTORY"
+        printf '<html>Resumed Reference stable</html>\n' > "$RESUMED_STAGING_DIRECTORY/index.html"
+        printf '%s\n' "$RESUMED_STAGING_DIRECTORY"
+    }
+    fetch_discovered_documentation_seed() {
+        exit 1
+    }
+    fetch_documentation_archive() {
+        exit 1
+    }
+    publish_staged_documentation_mirror() {
+        printf '%s\n' "$@" > "$RESUMED_PUBLICATION_CAPTURE"
+    }
+    fetch_source \
+        --url "https://docs.example.invalid/reference/" \
+        --mirror-path "resumed-reference" \
+        --name "Resumed Reference" \
+        --source-version "stable" \
+        --identity-regex "Resumed Reference stable" \
+        --cut-directories 0 \
+        --minimum-html-files 1 \
+        --archive-format zip > /dev/null
+    [ -s "$RESUMED_PUBLICATION_CAPTURE" ]
+); then
+    fail_documentation_fetch_test "complete resumed archive staging was discarded instead of published"
 fi
 
 if ! (
@@ -1370,6 +1621,41 @@ if ! (
     [ -d "$STAGED_PUBLICATION_DIRECTORY" ]
 ); then
     fail_documentation_fetch_test "staged publication failure was not propagated"
+fi
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    DOCS_ROOT="$TEST_WORK_DIRECTORY/sentinel-resume/data/docs"
+    LOG_FILE="$TEST_WORK_DIRECTORY/sentinel-resume.log"
+    SENTINEL_RESUME_DIRECTORY="$TEST_WORK_DIRECTORY/sentinel-resume/staging"
+    mkdir -p "$SENTINEL_RESUME_DIRECTORY"
+    printf '<html>resume progress</html>\n' > "$SENTINEL_RESUME_DIRECTORY/progress.html"
+    log() {
+        :
+    }
+    create_documentation_fetch_staging_directory() {
+        printf '%s\n' "$SENTINEL_RESUME_DIRECTORY"
+    }
+    validate_documentation_llm_sentinel() {
+        return 1
+    }
+    if fetch_source \
+        --url "https://docs.example.invalid/reference/" \
+        --mirror-path "sentinel-resume" \
+        --name "Sentinel Resume" \
+        --source-version "stable" \
+        --identity-regex "Sentinel Resume" \
+        --cut-directories 0 \
+        --minimum-html-files 1 \
+        --llm-sentinel-url "https://docs.example.invalid/llms.txt" \
+        --minimum-llm-sentinel-bytes 1 > /dev/null 2>&1; then
+        exit 1
+    fi
+    [ -s "$SENTINEL_RESUME_DIRECTORY/progress.html" ]
+); then
+    fail_documentation_fetch_test "sentinel failure deleted resumable staging progress"
 fi
 
 printf 'PASS: explicit fetch options, pinned source selection, version rejection, and Java seed safety are wired.\n'

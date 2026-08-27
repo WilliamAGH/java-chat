@@ -14,7 +14,14 @@ fail_local_staging_contract_test() {
 }
 
 launcher_path="$TEST_SCRIPT_DIRECTORY/run_local_embedding_staging.sh"
+local_profile_path="$TEST_SCRIPT_DIRECTORY/../src/main/resources/application-local.properties"
 bash -n "$launcher_path"
+
+if grep -Fq 'APP_EMBEDDINGS_BATCH_' "$launcher_path" \
+    || ! grep -Fxq 'app.embeddings.batch-max-concurrent-requests=8' "$local_profile_path" \
+    || ! grep -Fxq 'app.embeddings.batch-requests-per-second=8.0' "$local_profile_path"; then
+    fail_local_staging_contract_test "local batch capacity is not owned by the Spring profile"
+fi
 
 if ! grep -Fxq 'export QDRANT_HOST=127.0.0.1' "$launcher_path" \
     || ! grep -Fxq 'export QDRANT_PORT=8086' "$launcher_path" \
@@ -47,11 +54,11 @@ documentation_set_count="$(
         | wc -l \
         | tr -d ' '
 )"
-if [ "$documentation_set_count" -ne 24 ]; then
-    fail_local_staging_contract_test "launcher does not enumerate exactly 24 documentation sets"
+if [ "$documentation_set_count" -ne 25 ]; then
+    fail_local_staging_contract_test "launcher does not enumerate exactly 25 documentation sets"
 fi
-if ! grep -Fxq 'readonly EXPECTED_REPOSITORY_COUNT=22' "$launcher_path"; then
-    fail_local_staging_contract_test "launcher does not require exactly 22 pinned repositories"
+if ! grep -Fxq 'readonly EXPECTED_REPOSITORY_COUNT=23' "$launcher_path"; then
+    fail_local_staging_contract_test "launcher does not require exactly 23 pinned repositories"
 fi
 if grep -Eq 'GRADLE_USER_HOME=/|find .* -printf|sort -z|date -Ins|mapfile' "$launcher_path"; then
     fail_local_staging_contract_test "launcher contains GNU-only or developer-specific commands"
@@ -59,6 +66,17 @@ fi
 if ! grep -Fq 'repository_git_directories=(data/repos/github/*/*/.git)' "$launcher_path" \
     || ! grep -Fq "date -u '+%Y-%m-%dT%H:%M:%SZ'" "$launcher_path"; then
     fail_local_staging_contract_test "launcher does not use portable repository discovery and timestamps"
+fi
+repository_validation_locations="$(grep -n 'Pinned repository is dirty:' "$launcher_path" || true)"
+writer_lease_locations="$(grep -n '^acquire_qdrant_writer_lease$' "$launcher_path" || true)"
+if [ "$(printf '%s\n' "$repository_validation_locations" | sed '/^$/d' | wc -l | tr -d ' ')" -ne 1 ] \
+    || [ "$(printf '%s\n' "$writer_lease_locations" | sed '/^$/d' | wc -l | tr -d ' ')" -ne 1 ]; then
+    fail_local_staging_contract_test "launcher does not contain exactly one repository validation and writer lease"
+fi
+repository_validation_line="${repository_validation_locations%%:*}"
+writer_lease_line="${writer_lease_locations%%:*}"
+if [ "$writer_lease_line" -le "$repository_validation_line" ]; then
+    fail_local_staging_contract_test "launcher contends on the writer lease before repository validation"
 fi
 
 printf 'PASS: durable staging forces local Qdrant and masks cloud credentials across .env loading.\n'

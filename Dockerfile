@@ -65,7 +65,28 @@ COPY --from=frontend-builder /app/src/main/resources/static ./src/main/resources
 
 # 6. Build application with cache mount
 RUN --mount=type=cache,target=/root/.gradle \
-    SOURCE_COMMIT="${SOURCE_COMMIT}" ./gradlew clean build -x test --no-daemon && \
+    --mount=type=bind,source=.git,target=/app/source-control,readonly \
+    resolved_source_commit="${SOURCE_COMMIT}" && \
+    if [ "${resolved_source_commit}" = "unknown" ]; then \
+      source_control_head="$(cat /app/source-control/HEAD)" && \
+      case "${source_control_head}" in \
+        "ref: "*) \
+          source_reference="${source_control_head#ref: }" && \
+          if [ -f "/app/source-control/${source_reference}" ]; then \
+            resolved_source_commit="$(cat "/app/source-control/${source_reference}")"; \
+          else \
+            resolved_source_commit="$(awk -v source_reference="${source_reference}" \
+              '$2 == source_reference { print $1; exit }' /app/source-control/packed-refs)"; \
+          fi \
+          ;; \
+        *) resolved_source_commit="${source_control_head}" ;; \
+      esac; \
+    fi && \
+    case "${resolved_source_commit}" in \
+      unknown|"") echo "Source commit could not be resolved." >&2; exit 1 ;; \
+    esac && \
+    SOURCE_COMMIT="${resolved_source_commit}" ./gradlew clean build -x test --no-daemon && \
+    printf '%s\n' "${resolved_source_commit}" > build/source-commit && \
     cp $(ls build/libs/*.jar | grep -v '\-plain\.jar' | head -n 1) build/app.jar
 
 # ================================
@@ -79,6 +100,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends jq python3 \
     && useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash appuser
 
 COPY scripts/process_all_to_qdrant.sh scripts/
+COPY scripts/qdrant_writer_lease.py scripts/
 COPY scripts/with_build_state_lock.sh scripts/BuildStateLock.java scripts/
 COPY scripts/lib/common_qdrant.sh scripts/lib/shell_bootstrap.sh \
     scripts/lib/env_loader.sh scripts/lib/embedding_preflight.sh scripts/lib/
@@ -103,7 +125,6 @@ ENTRYPOINT ["/app/scripts/process_all_to_qdrant.sh", "--app-jar=/app/build/app.j
 # RUNTIME STAGE
 # ================================
 FROM bellsoft/liberica-openjre-debian:25.0.3-11 AS runtime
-ARG SOURCE_COMMIT=unknown
 LABEL io.iocloudhost.logs.owner=split
 
 # 1. System packages (never changes) - FIRST for maximum cache reuse
@@ -134,10 +155,10 @@ ENV APP_LOCAL_EMBEDDING_ENABLED=false
 ENV DOCS_SNAPSHOT_DIR=/app/data/qwen3-embedding-4b-2560/prod/snapshots
 ENV DOCS_PARSED_DIR=/app/data/qwen3-embedding-4b-2560/prod/parsed
 ENV DOCS_INDEX_DIR=/app/data/qwen3-embedding-4b-2560/prod/index
-ENV SOURCE_COMMIT=${SOURCE_COMMIT}
 
 # 5. Application JAR (changes every build) - LAST for optimal caching
 COPY --from=builder /app/build/app.jar app.jar
+COPY --from=builder /app/build/source-commit source-commit
 
 # 6. Finalize permissions
 RUN chown -R appuser:appuser logs /app/data app.jar
@@ -149,7 +170,7 @@ EXPOSE 8085
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
     CMD curl --fail --silent --show-error http://localhost:${PORT:-8085}/actuator/health/readiness || exit 1
 
-ENTRYPOINT ["/bin/sh", "-c", "exec java \
+ENTRYPOINT ["/bin/sh", "-c", "SOURCE_COMMIT=$(cat /app/source-commit); export SOURCE_COMMIT; exec java \
   -XX:+IgnoreUnrecognizedVMOptions \
   --enable-native-access=ALL-UNNAMED \
   --sun-misc-unsafe-memory-access=allow \

@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationCitationPathStyle;
@@ -8,6 +9,7 @@ import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSourc
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -138,10 +140,60 @@ class DocsSourceRegistryTest {
     }
 
     @Test
+    void assignsDistinctStorageUrlsToJavaPagesThatShareOneCanonicalSourceFile(@TempDir Path temporaryDirectory) {
+        Path mirrorRoot = temporaryDirectory.resolve("jackson/2.22.2/api");
+        Path outerTypePage = mirrorRoot.resolve("com/fasterxml/jackson/databind/ObjectMapper.html");
+        Path nestedTypePage = mirrorRoot.resolve("com/fasterxml/jackson/databind/ObjectMapper.DefaultTyping.html");
+        Path singletonTypePage = mirrorRoot.resolve("com/fasterxml/jackson/databind/JsonNode.html");
+
+        Map<Path, String> ingestionIdentities = DocsSourceRegistry.resolveMirroredIngestionIdentities(
+                mirrorRoot, List.of(outerTypePage, nestedTypePage, singletonTypePage));
+        String outerStorageUrl =
+                ingestionIdentities.get(outerTypePage.toAbsolutePath().normalize());
+        String nestedStorageUrl =
+                ingestionIdentities.get(nestedTypePage.toAbsolutePath().normalize());
+        String singletonStorageUrl =
+                ingestionIdentities.get(singletonTypePage.toAbsolutePath().normalize());
+
+        assertNotEquals(outerStorageUrl, nestedStorageUrl);
+        assertEquals(
+                DocsSourceRegistry.normalizeDocUrl(outerStorageUrl),
+                DocsSourceRegistry.normalizeDocUrl(nestedStorageUrl));
+        assertEquals(
+                DocsSourceRegistry.resolveMirroredPath(mirrorRoot, outerTypePage)
+                        .orElseThrow(),
+                DocsSourceRegistry.normalizeDocUrl(outerStorageUrl));
+        assertEquals(
+                DocsSourceRegistry.resolveMirroredPath(mirrorRoot, singletonTypePage)
+                        .orElseThrow(),
+                singletonStorageUrl);
+
+        String nestedSingletonIdentity = DocsSourceRegistry.resolveMirroredIngestionIdentities(
+                        mirrorRoot, List.of(nestedTypePage))
+                .get(nestedTypePage.toAbsolutePath().normalize());
+        String nestedSubdirectoryIdentity = DocsSourceRegistry.resolveMirroredIngestionIdentities(
+                        nestedTypePage.getParent(), List.of(nestedTypePage))
+                .get(nestedTypePage.toAbsolutePath().normalize());
+        assertEquals(nestedStorageUrl, nestedSingletonIdentity);
+        assertEquals(nestedStorageUrl, nestedSubdirectoryIdentity);
+    }
+
+    @Test
     void restoresExtensionlessCanonicalRoutesForMirroredPlatformDocumentation() {
         assertEquals(
                 "https://docs.docker.com/engine/swarm/",
                 DocsSourceRegistry.normalizeDocUrl("file:///data/docs/docker/engine/swarm/index.html"));
+        assertEquals(
+                "https://doc.traefik.io/traefik/reference/install-configuration/providers/swarm/",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/traefik/reference/install-configuration/providers/swarm/index.html"));
+        assertEquals(
+                "https://developers.cloudflare.com/r2/objects/workers/workers-api-usage/",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/cloudflare/r2/objects/workers/workers-api-usage/index.html"));
+        assertEquals(
+                "https://quarkus.io/guides/aesh/",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/quarkus/aesh/index.html"));
         assertEquals(
                 "https://docs.dokploy.com/docs/core/backups",
                 DocsSourceRegistry.normalizeDocUrl("file:///data/docs/dokploy/docs/core/backups.html"));
@@ -163,6 +215,16 @@ class DocsSourceRegistryTest {
                 DocsSourceRegistry.documentationSourceForRelativeMirrorPath("docker")
                         .orElseThrow()
                         .citationPathStyle());
+    }
+
+    @Test
+    void preservesCanonicalUrlsForSingleDocumentMirrors() {
+        assertEquals(
+                "https://porkbun.com/api/json/v3/documentation",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/porkbun/index.html"));
+        assertEquals(
+                "https://github.com/oborseth/Porkbun-MCP/blob/64e8b4f4caad75e99333733bca5f2987afee3c75/README.md",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/porkbun-mcp/index.html"));
     }
 
     @Test

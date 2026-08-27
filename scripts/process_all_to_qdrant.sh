@@ -150,6 +150,10 @@ for ingestion_argument in "$@"; do
     case $ingestion_argument in
         --doc-sets=*)
             DOCS_SETS_FILTER="${ingestion_argument#*=}"
+            if [[ "$DOCS_SETS_FILTER" =~ ^[[:space:]]*$ ]]; then
+                echo "--doc-sets requires at least one documentation set" >&2
+                return 1
+            fi
             ;;
         --app-jar=*)
             PREBUILT_APP_JAR="${ingestion_argument#*=}"
@@ -200,6 +204,7 @@ for writable_state_directory in "$DOCS_SNAPSHOT_DIR" "$DOCS_PARSED_DIR" "$DOCS_I
     fi
 done
 
+acquire_qdrant_writer_lease
 setup_pid_and_cleanup "$PID_FILE"
 if ! archive_prior_processing_log; then
     rm -f "$PID_FILE"
@@ -269,7 +274,7 @@ if ! app_jar="$(stage_app_jar "$source_app_jar" "$staged_app_jar_directory")"; t
 fi
 
 log "${YELLOW}Starting document processor...${NC}"
-java -Dspring.profiles.active=cli \
+java -Dspring.profiles.active="cli,$SPRING_PROFILE" \
      -jar "$app_jar" \
      --app.qdrant.ensure-collections=true \
      --spring.main.web-application-type=none \

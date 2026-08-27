@@ -28,14 +28,18 @@ test-shell: ## Run deterministic ingestion and fetch shell contract tests
 	bash scripts/test_documentation_fetch_projection.sh
 	bash scripts/test_documentation_fetch_publication.sh
 	bash scripts/test_embedding_preflight.sh
+	bash scripts/test_github_repository_metadata_contract.sh
 	bash scripts/test_github_sync_failure_contract.sh
 	bash scripts/test_ingestion_pid_safety.sh
+	bash scripts/test_qdrant_writer_lease.sh
 	bash scripts/test_local_embedding_staging_contract.sh
+	bash scripts/test_local_embedding_status.sh
 	bash scripts/test_make_local_qdrant_bootstrap.sh
 	bash scripts/test_make_port_safety.sh
 	bash scripts/test_process_all_to_qdrant_environment.sh
 	bash scripts/test_process_all_to_qdrant_postconditions.sh
 	bash scripts/test_prune_retired_java_api_vectors.sh
+	bash scripts/test_queued_platform_documentation_staging_contract.sh
 
 test-cli: ## Run command-line client tests
 	cd cli && npm test

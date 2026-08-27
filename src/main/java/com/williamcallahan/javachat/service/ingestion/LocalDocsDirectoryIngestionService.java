@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service.ingestion;
 
 import com.williamcallahan.javachat.application.ingestion.FileLimit;
 import com.williamcallahan.javachat.application.ingestion.LocalDocumentationIngestionUseCase;
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.domain.ingestion.IngestionBacklogStatus;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
@@ -16,7 +17,9 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -79,6 +82,8 @@ public final class LocalDocsDirectoryIngestionService implements LocalDocumentat
         try (ingestionRunClaim) {
             EligibleFileInventory eligibleFileInventory = eligibleFileInventory(realSelectedRoot);
             List<Path> eligibleFiles = eligibleFileInventory.eligibleFiles();
+            Map<Path, String> ingestionIdentities =
+                    DocsSourceRegistry.resolveMirroredIngestionIdentities(realSelectedRoot, eligibleFiles);
             String selectedDirectoryLabel = selectedDirectoryLabel(realDocumentationRoot, realSelectedRoot);
             backlogStatus = resumableBacklog(
                     realSelectedRoot,
@@ -101,7 +106,8 @@ public final class LocalDocsDirectoryIngestionService implements LocalDocumentat
                 int batchProcessedCount = 0;
                 int batchSkippedCount = 0;
                 int batchFailedCount = 0;
-                for (LocalDocsFileOutcome fileOutcome : fileProcessor.processBatch(realSelectedRoot, fileBatch)) {
+                for (LocalDocsFileOutcome fileOutcome :
+                        fileProcessor.processBatch(realSelectedRoot, fileBatch, ingestionIdentities)) {
                     if (fileOutcome.processed()) {
                         batchProcessedCount++;
                     } else if (fileOutcome.failure().isPresent()) {
@@ -118,6 +124,11 @@ public final class LocalDocsDirectoryIngestionService implements LocalDocumentat
             }
             backlogStatus = backlogStatus.finish();
             ingestionRunStore.write(realSelectedRoot, backlogStatus, eligibleFileInventory.inventoryFingerprint());
+            if (failures.isEmpty() && selectedFileEndIndex == eligibleFiles.size()) {
+                DocsSourceRegistry.citationBaseForRelativeMirrorPath(selectedDirectoryLabel)
+                        .ifPresent(citationBase -> fileProcessor.pruneRemovedSourceUrls(
+                                citationBase, Set.copyOf(ingestionIdentities.values())));
+            }
         }
 
         return IngestionLocalOutcome.fromBacklog(backlogStatus, rootDirectory, failures);

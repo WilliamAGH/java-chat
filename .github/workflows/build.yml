@@ -16,6 +16,21 @@ permissions:
   contents: read
 
 jobs:
+  writer-lease-portability:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Verify system Bash and Python writer lease
+        run: |
+          /bin/bash --version | head -1
+          python3 --version
+          /bin/bash scripts/test_qdrant_writer_lease.sh
+
   frontend:
     runs-on: ubuntu-24.04
     defaults:
@@ -142,18 +157,19 @@ jobs:
       - name: Build image from pinned Liberica stages
         run: |
           docker buildx build --load \
-            --build-arg SOURCE_COMMIT="${{ github.sha }}" \
             --tag java-chat:ci \
             .
 
           docker buildx build --load \
-            --build-arg SOURCE_COMMIT="${{ github.sha }}" \
             --target ingestion \
             --tag java-chat-ingestion:ci \
             .
 
           docker run --rm --entrypoint /bin/bash java-chat-ingestion:ci \
             -c 'curl --version >/dev/null && jq --version >/dev/null && python3 --version >/dev/null'
+          docker run --rm --entrypoint /bin/bash \
+            java-chat-ingestion:ci \
+            -c 'set -euo pipefail; source /app/scripts/lib/common_qdrant.sh; acquire_qdrant_writer_lease; test "$QDRANT_WRITER_LEASE_DESCRIPTOR" = 9'
           docker run --rm java-chat-ingestion:ci --help | grep --fixed-strings 'Usage:'
 
       - name: Start pinned Qdrant dependency

@@ -50,6 +50,8 @@ unsafe_zip_fixture_path = pathlib.Path(sys.argv[2])
 with zipfile.ZipFile(zip_fixture_path, "w") as archive:
     archive.writestr("index.html", "<title>Exact Javadoc 1.0 API</title>")
     archive.writestr("package-summary.html", "<title>Package</title>")
+    archive.writestr("versioned/html/documentation/guide.html", "<title>Guide</title>")
+    archive.writestr("versioned/html/api/index.html", "<title>API</title>")
 with zipfile.ZipFile(unsafe_zip_fixture_path, "w") as archive:
     archive.writestr("../escaped.html", "unsafe")
 PYTHON
@@ -70,6 +72,20 @@ fetch_documentation_archive \
     0
 [ -f "$ZIP_TARGET_DIRECTORY/index.html" ]
 [ -f "$ZIP_TARGET_DIRECTORY/package-summary.html" ]
+
+ZIP_PUBLICATION_TARGET_DIRECTORY="$TEST_WORK_DIRECTORY/zip-publication-target"
+mkdir -p "$ZIP_PUBLICATION_TARGET_DIRECTORY"
+fetch_documentation_archive \
+    "file://$ZIP_FIXTURE_PATH" \
+    "$ZIP_PUBLICATION_TARGET_DIRECTORY" \
+    "Versioned ZIP Documentation" \
+    1 \
+    zip \
+    0 \
+    "versioned/html/documentation"
+[ -f "$ZIP_PUBLICATION_TARGET_DIRECTORY/guide.html" ]
+[ ! -e "$ZIP_PUBLICATION_TARGET_DIRECTORY/versioned" ]
+[ ! -e "$ZIP_PUBLICATION_TARGET_DIRECTORY/index.html" ]
 
 TAR_TARGET_DIRECTORY="$TEST_WORK_DIRECTORY/tar-target"
 mkdir -p "$TAR_TARGET_DIRECTORY"

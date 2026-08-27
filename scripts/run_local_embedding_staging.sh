@@ -7,15 +7,16 @@ set -euo pipefail
 
 SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIRECTORY/.."
-readonly EXPECTED_REPOSITORY_COUNT=22
-readonly DOCUMENTATION_SETS="jooq/3.21/manual,jooq/3.21/api,python/3.14,postgresql/17,postgresql/18,hikaricp/7.1.0/api,hikaricp/7.0.2/api,jackson/2.22.2/api,jackson/2.21.2/api,jackson/3.2.2/api,jackson/3.1.2/api,lombok/1.18.46/api,lombok/1.18.46/reference,anthropic/api,anthropic/claude-code,amp-code,tinker,docker,dokploy,infisical,doppler/docs,doppler/reference,doppler/changelog,spring-framework/7.0.7/api"
+readonly EXPECTED_REPOSITORY_COUNT=23
+readonly DOCUMENTATION_SETS="jooq/3.21/manual,jooq/3.21/api,python/3.14,postgresql/17,postgresql/18,hikaricp/7.1.0/api,hikaricp/7.0.2/api,jackson/2.22.2/api,jackson/2.21.2/api,jackson/3.2.2/api,jackson/3.1.2/api,lombok/1.18.46/api,lombok/1.18.46/reference,anthropic/api,anthropic/claude-code,amp-code,tinker,docker,traefik,dokploy,infisical,doppler/docs,doppler/reference,doppler/changelog,spring-framework/7.0.7/api"
 
 cd "$PROJECT_ROOT"
 
+# shellcheck source=lib/common_qdrant.sh
+source "$SCRIPT_DIRECTORY/lib/common_qdrant.sh"
+
 export SPRING_PROFILE=local
 export APP_LOCAL_EMBEDDING_ENABLED=false
-export APP_EMBEDDINGS_BATCH_MAX_CONCURRENT_REQUESTS=8
-export APP_EMBEDDINGS_BATCH_REQUESTS_PER_SECOND=8.0
 export QDRANT_HOST=127.0.0.1
 export QDRANT_PORT=8086
 export QDRANT_REST_PORT=8087
@@ -29,11 +30,6 @@ export DOCS_DIR="$PROJECT_ROOT/data/docs"
 export DOCS_SNAPSHOT_DIR="$PROJECT_ROOT/data/qwen3-embedding-4b-2560/local/snapshots"
 export DOCS_PARSED_DIR="$PROJECT_ROOT/data/qwen3-embedding-4b-2560/local/parsed"
 export DOCS_INDEX_DIR="$PROJECT_ROOT/data/qwen3-embedding-4b-2560/local/index"
-
-if [ -e process_qdrant.pid ]; then
-    echo "Documentation ingestion already owns process_qdrant.pid" >&2
-    exit 1
-fi
 
 shopt -s nullglob
 repository_git_directories=(data/repos/github/*/*/.git)
@@ -54,11 +50,13 @@ for repository_path in "${repository_paths[@]}"; do
     fi
 done
 
+acquire_qdrant_writer_lease
+
 staging_timestamp() {
     date -u '+%Y-%m-%dT%H:%M:%SZ'
 }
 
-echo "LOCAL_STAGING_RESUME $(staging_timestamp) BATCH_SIZE=8 CONCURRENCY=8 DOCS=24 REPOS=$EXPECTED_REPOSITORY_COUNT"
+echo "LOCAL_STAGING_RESUME $(staging_timestamp) BATCH_SIZE=8 CONCURRENCY=8 DOCS=25 REPOS=$EXPECTED_REPOSITORY_COUNT"
 ./scripts/process_all_to_qdrant.sh --doc-sets="$DOCUMENTATION_SETS"
 
 for repository_path in "${repository_paths[@]}"; do

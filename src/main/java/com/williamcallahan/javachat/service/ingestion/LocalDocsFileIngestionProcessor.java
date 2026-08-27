@@ -20,8 +20,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 import org.jsoup.Jsoup;
 import org.slf4j.Logger;
@@ -47,7 +49,7 @@ public class LocalDocsFileIngestionProcessor {
     private static final String INTERACTIVE_API_ALTERNATE_SELECTOR =
             "head > link[rel=alternate][type=\"text/markdown\"], head > link[rel=alternate][type=\"application/yaml\"]";
     static final int MAX_EMBEDDING_BATCH_DOCUMENTS = 256;
-    static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v4";
+    static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v5";
 
     private final FileContentServices fileContentServices;
     private final IngestionStorageServices storage;
@@ -89,7 +91,9 @@ public class LocalDocsFileIngestionProcessor {
      * @return processing outcome indicating processed/failed/skipped
      */
     public LocalDocsFileOutcome process(Path root, Path file) {
-        return completePreparation(prepare(root, file));
+        Map<Path, String> ingestionIdentities =
+                DocsSourceRegistry.resolveMirroredIngestionIdentities(root, List.of(file));
+        return completePreparation(prepare(root, file, ingestionIdentities));
     }
 
     /**
@@ -104,14 +108,20 @@ public class LocalDocsFileIngestionProcessor {
      * @return ordered outcomes through the first failure
      */
     public List<LocalDocsFileOutcome> processBatch(Path root, List<Path> files) {
+        return processBatch(root, files, DocsSourceRegistry.resolveMirroredIngestionIdentities(root, files));
+    }
+
+    List<LocalDocsFileOutcome> processBatch(Path root, List<Path> files, Map<Path, String> ingestionIdentities) {
         Objects.requireNonNull(root, "root");
         List<Path> requiredFiles = List.copyOf(Objects.requireNonNull(files, "files"));
+        Map<Path, String> requiredIngestionIdentities =
+                Map.copyOf(Objects.requireNonNull(ingestionIdentities, "ingestionIdentities"));
         List<LocalDocsFileOutcome> outcomes = new ArrayList<>(requiredFiles.size());
         List<DocumentProcessingRequest> pendingNewFiles = new ArrayList<>();
         int pendingDocumentCount = 0;
 
         for (Path file : requiredFiles) {
-            FilePreparation preparation = prepare(root, file);
+            FilePreparation preparation = prepare(root, file, requiredIngestionIdentities);
             if (preparation instanceof DeferredFilePreparation deferredPreparation) {
                 if (!flushNewFileBatch(pendingNewFiles, outcomes)) {
                     return List.copyOf(outcomes);
@@ -166,7 +176,7 @@ public class LocalDocsFileIngestionProcessor {
         return List.copyOf(outcomes);
     }
 
-    private FilePreparation prepare(Path root, Path file) {
+    private FilePreparation prepare(Path root, Path file, Map<Path, String> ingestionIdentities) {
         long fileStartMillis = System.currentTimeMillis();
         Path fileNamePath = file.getFileName();
         if (fileNamePath == null) {
@@ -175,7 +185,9 @@ public class LocalDocsFileIngestionProcessor {
         }
 
         String fileName = fileNamePath.toString().toLowerCase(Locale.ROOT);
-        String url = mapLocalPathToUrl(root, file);
+        String url = Optional.ofNullable(
+                        ingestionIdentities.get(file.toAbsolutePath().normalize()))
+                .orElseGet(() -> fallbackIngestionUrl(root, file));
 
         final long fileSizeBytes;
         final long lastModifiedMillis;
@@ -403,11 +415,11 @@ public class LocalDocsFileIngestionProcessor {
     private ReindexDecision inspectExistingMarker(MarkerContext markerContext) {
         Optional<FileIngestionRecord> priorIngestionRecord = markerContext.priorIngestionRecord();
         boolean unchangedByFingerprint = priorIngestionRecord
-                .map(ingestionRecord -> ingestionRecord.fileSizeBytes() == markerContext.fileSizeBytes()
-                        && ingestionRecord.lastModifiedMillis() == markerContext.lastModifiedMillis()
-                        && markerContext.ingestionFingerprint().equals(ingestionRecord.ingestionFingerprint())
-                        && LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION.equals(ingestionRecord.extractionSemanticsVersion())
-                        && markerContext.collectionName().equals(ingestionRecord.collectionName()))
+                .map(ingestionRecord ->
+                        markerContext.ingestionFingerprint().equals(ingestionRecord.ingestionFingerprint())
+                                && LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION.equals(
+                                        ingestionRecord.extractionSemanticsVersion())
+                                && markerContext.collectionName().equals(ingestionRecord.collectionName()))
                 .orElse(false);
         if (!unchangedByFingerprint) {
             return ReindexDecision.continueWith(priorIngestionRecord.isPresent());
@@ -792,6 +804,7 @@ public class LocalDocsFileIngestionProcessor {
             return;
         }
         try {
+            storage.fileMarkers().registerStorageUrlForCanonicalCitation(url);
             storage.fileMarkers().markFileIngested(url, fileIngestionRecord);
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to mark file as ingested: " + url, exception);
@@ -815,6 +828,12 @@ public class LocalDocsFileIngestionProcessor {
         Objects.requireNonNull(documents, "documents");
         Objects.requireNonNull(provenance, "provenance");
         for (Document indexedDocument : documents) {
+            indexedDocument
+                    .getMetadata()
+                    .put(
+                            QdrantPayloadFieldSchema.CITATION_URL_FIELD,
+                            DocsSourceRegistry.normalizeDocUrl(
+                                    DocumentFactory.metadataText(indexedDocument, QdrantPayloadFieldSchema.URL_FIELD)));
             if (!provenance.docSet().isBlank()) {
                 indexedDocument.getMetadata().put(QdrantPayloadFieldSchema.DOC_SET_FIELD, provenance.docSet());
             }
@@ -836,7 +855,7 @@ public class LocalDocsFileIngestionProcessor {
         }
     }
 
-    private String mapLocalPathToUrl(final Path root, final Path file) {
+    private String fallbackIngestionUrl(final Path root, final Path file) {
         final String absolutePath = file.toAbsolutePath().toString().replace('\\', '/');
         return DocsSourceRegistry.resolveMirroredPath(root, file)
                 .or(() -> DocsSourceRegistry.resolveLocalPath(absolutePath))
@@ -847,5 +866,35 @@ public class LocalDocsFileIngestionProcessor {
         Objects.requireNonNull(fileContentFingerprint, "fileContentFingerprint");
         Objects.requireNonNull(provenance, "provenance");
         return storage.hasher().sha256(provenance.fingerprintInput(fileContentFingerprint));
+    }
+
+    void pruneRemovedSourceUrls(String citationBase, Set<String> activeStorageUrls) {
+        String normalizedCitationBase = DocsSourceRegistry.normalizeDocUrl(citationBase);
+        String normalizedCitationTreeBase = normalizedCitationBase.replace("/blob/", "/tree/");
+        for (QdrantCollectionKind collectionKind : QdrantCollectionKind.values()) {
+            String collectionName = storage.hybridVector().resolveCollectionName(collectionKind);
+            for (String storedUrl : storage.hybridVector().scrollAllUrlsInCollection(collectionName)) {
+                String normalizedStoredUrl = DocsSourceRegistry.normalizeDocUrl(storedUrl);
+                if (activeStorageUrls.contains(storedUrl)
+                        || (!normalizedStoredUrl.startsWith(normalizedCitationBase)
+                                && !normalizedStoredUrl.startsWith(normalizedCitationTreeBase))) {
+                    continue;
+                }
+                Optional<FileIngestionRecord> ingestionRecord =
+                        storage.fileMarkers().readFileIngestionRecord(storedUrl);
+                if (ingestionRecord.isPresent()
+                        && ingestionRecord.orElseThrow().hasCollectionIdentity()
+                        && !collectionName.equals(ingestionRecord.orElseThrow().collectionName())) {
+                    continue;
+                }
+                try {
+                    ingestedFilePruneService.pruneCollectionFileStrict(
+                            collectionName, storedUrl, ingestionRecord.orElse(null));
+                } catch (IOException cleanupFailure) {
+                    throw new IllegalStateException(
+                            "Failed to prune removed documentation URL: " + storedUrl, cleanupFailure);
+                }
+            }
+        }
     }
 }

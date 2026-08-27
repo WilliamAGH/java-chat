@@ -100,7 +100,7 @@ make process-github-repo  # GitHub repo ingestion (REPO_PATH / REPO_URL / SYNC_E
 
 | Flag | Effect |
 |---|---|
-| `--doc-sets=...` | Comma-separated doc set paths (or IDs for non-Java sets) to process (see [doc set filtering](#doc-set-filtering)) |
+| `--doc-sets=...` | Comma-separated exact documentation mirror paths to process (see [doc set filtering](#doc-set-filtering)) |
 | `--help` | Show usage |
 
 ## GitHub repository ingestion
@@ -130,7 +130,7 @@ GitHub ingestion runs in headless CLI mode (`spring.main.web-application-type=no
 
 ### Doc set filtering
 
-Limit ingestion to specific doc sets by path. Non-Java sets also accept short IDs; Java API sets use their exact mirror paths:
+Limit ingestion to specific doc sets by their exact mirror paths. Blank and unknown selectors are rejected even when the same filter contains valid paths:
 
 ```bash
 DOCS_SETS=java/java25-complete make process-doc-sets
@@ -141,7 +141,7 @@ DOCS_SETS=java/java25-complete make process-doc-sets
 
 Canonical framework doc sets include:
 
-| ID | Content |
+| Mirror path | Content |
 |---|---|
 | `spring-framework-reference` | Spring Framework reference |
 | `spring-framework-api` | Spring Framework Javadocs |
@@ -154,8 +154,9 @@ Canonical framework doc sets include:
 ### What "incremental" means for ingestion
 
 - Per-chunk SHA-256 hash markers in the configured generation-specific index root track what has been processed.
-- A file is skipped only when its file-level marker has the same size, mtime, content SHA-256,
-  extractor-semantics version, and provenance-aware ingestion fingerprint as the current ingestion contract.
+- A file is skipped only when its file-level marker has the same provenance-aware ingestion fingerprint,
+  extractor-semantics version, collection identity, and exact Qdrant point IDs as the current ingestion contract.
+  Size and mtime remain diagnostic marker fields.
 - File-level markers (`DOCS_INDEX_DIR/file_*.marker`) include those values plus the ingested chunk hashes.
   A source-content, provenance, or extractor-semantics change triggers strict stale-vector and parsed-chunk
   same-collection replacement after the complete successor has been embedded and upserted. A marker owned by

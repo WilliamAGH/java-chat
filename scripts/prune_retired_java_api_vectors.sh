@@ -323,6 +323,7 @@ prune_retired_java_api_vectors() {
     local qdrant_collection="$QDRANT_COLLECTION_DOCS"
     local qdrant_base_url
     qdrant_base_url="$(qdrant_rest_base_url)"
+    acquire_qdrant_writer_lease
     prune_retired_java_api_vectors_in_collection "$qdrant_base_url" "$qdrant_collection"
 }
 
