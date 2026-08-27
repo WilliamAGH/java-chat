@@ -776,7 +776,9 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     --seed-additional-discovery-url \
     "https://projectlombok.org/features/experimental/" \
     --seed-source-prefix \
-    "https://projectlombok.org/features/"
+    "https://projectlombok.org/features/" \
+    --seed-reject-regex \
+    '^https://projectlombok\.org/features/(?:experimental/)?all$'
 
 if ! (
     set --
