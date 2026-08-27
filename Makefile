@@ -40,6 +40,7 @@ test-shell: ## Run deterministic ingestion and fetch shell contract tests
 	bash scripts/test_process_all_to_qdrant_postconditions.sh
 	bash scripts/test_prune_retired_java_api_vectors.sh
 	bash scripts/test_queued_platform_documentation_staging_contract.sh
+	bash scripts/test_upload_local_qdrant_snapshots_contract.sh
 
 test-cli: ## Run command-line client tests
 	cd cli && npm test

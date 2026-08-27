@@ -237,7 +237,7 @@ Before launching the non-web CLI, `process_all_to_qdrant.sh` requires an exact `
 
 ## Ingest via HTTP API (runtime)
 
-With the app running, you can trigger ingestion directly via HTTP:
+With the app running outside the `prod` profile, you can trigger ingestion directly via HTTP:
 
 ```bash
 # Ingest local docs directory
