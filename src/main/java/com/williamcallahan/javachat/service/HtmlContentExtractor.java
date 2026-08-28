@@ -217,9 +217,8 @@ public class HtmlContentExtractor {
                 || className.contains("footer")
                 || id.contains("nav")
                 || id.contains("menu")
-                || text.startsWith("skip")
-                || text.startsWith("hide")
-                || text.startsWith("show");
+                || (text.length() <= MIN_INLINE_TEXT_LENGTH
+                        && (text.startsWith("skip") || text.startsWith("hide") || text.startsWith("show")));
     }
 
     private void appendListItems(Element listElement, StringBuilder extractedTextBuilder, int listNestingDepth) {
