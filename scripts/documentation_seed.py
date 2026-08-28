@@ -21,7 +21,7 @@ DOCUMENTATION_URL_ASCII_CONTROL_MAXIMUM = 0x1F
 DOCUMENTATION_URL_ASCII_DELETE_CHARACTER = 0x7F
 # Per https://www.sitemaps.org/protocol.html, an uncompressed sitemap is capped at 52,428,800 bytes.
 MAXIMUM_XML_SITEMAP_BYTES = 52_428_800
-MAXIMUM_PLAIN_TEXT_DOCUMENT_BYTES = 10_485_760
+MAXIMUM_PLAIN_TEXT_DOCUMENT_BYTES = 33_554_432
 
 
 class DocumentationLinkParser(html.parser.HTMLParser):
