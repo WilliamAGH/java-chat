@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$SCRIPT_DIRECTORY/.."
+PROJECT_ROOT="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
 readonly ACTIVE_STAGING_SERVICE="java-chat-local-embedding-staging.service"
 readonly QUEUE_POLL_INTERVAL_SECONDS=60
 readonly STAGING_INVOCATION_RECEIPT="$HOME/.local/state/java-chat/local-embedding-staging.invocation"

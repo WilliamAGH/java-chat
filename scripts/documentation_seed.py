@@ -565,6 +565,7 @@ def main() -> int:
     if parsed_arguments.canonicalize_extensionless_directory_urls:
         seed_urls = canonicalize_extensionless_directory_urls(seed_urls)
     seed_urls = prefer_directory_urls(seed_urls)
+    seed_urls = list(dict.fromkeys(seed_urls))
     if parsed_arguments.reject_regex:
         try:
             rejected_seed_url = re.compile(parsed_arguments.reject_regex)

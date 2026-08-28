@@ -1,0 +1,16 @@
+[Unit]
+Description=Reconcile completed local Java Chat vectors to production Qdrant
+ConditionPathExists=!%h/.local/state/java-chat/production-qdrant-reconcile.complete
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Developer/git/java-chat
+ExecStart=/bin/bash -lc 'exec infisical run --projectId f15c5155-687d-48b5-b736-c3142beb4b79 --env prod -- %h/Developer/git/java-chat/scripts/upload_local_qdrant_snapshots.sh'
+Restart=on-failure
+RestartSec=60s
+TimeoutStartSec=infinity
+TimeoutStopSec=20s
+LimitCORE=0
+
+[Install]
+WantedBy=default.target

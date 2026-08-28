@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Profile;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -56,6 +57,13 @@ class IngestionControllerTest {
 
     @MockitoBean
     LocalDocumentationIngestionUseCase localDocumentationIngestionUseCase;
+
+    @Test
+    void excludesIngestionEndpointsFromProduction() {
+        assertEquals(
+                List.of("!prod"),
+                List.of(IngestionController.class.getAnnotation(Profile.class).value()));
+    }
 
     @Test
     void rejectsRemoteIngestionAboveConfiguredPageLimit() throws Exception {
