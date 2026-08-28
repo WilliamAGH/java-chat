@@ -315,7 +315,7 @@ assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
     --minimum-html-files \
     250 \
     --reject-regex \
-    '(^|/)custom-frontend-app(/|$)|(^|/)([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(/|(-[^/]+)?\.html$)|(^|/)[^/]*-([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(-[^/]+)?\.html$' \
+    '(^|/)(custom-frontend-app(/|$)|home\.html$)|(^|/)([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(/|(-[^/]+)?\.html$)|(^|/)[^/]*-([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(-[^/]+)?\.html$' \
     --seed-document-type \
     xml-sitemap \
     --seed-discovery-url \
