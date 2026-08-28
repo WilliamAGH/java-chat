@@ -324,6 +324,36 @@ assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
     "https://kotlinlang.org/docs/"
 
 if ! (
+    run_documentation_fetch --doc-sets=docker > /dev/null
+); then
+    fail_documentation_fetch_test "named Docker selection did not complete"
+fi
+
+assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
+    --url \
+    "https://docs.docker.com/" \
+    --mirror-path \
+    docker \
+    --name \
+    "Docker Documentation" \
+    --source-version \
+    current \
+    --identity-regex \
+    Docker \
+    --cut-directories \
+    0 \
+    --minimum-html-files \
+    1600 \
+    --seed-document-type \
+    xml-sitemap \
+    --seed-discovery-url \
+    "https://docs.docker.com/sitemap.xml" \
+    --seed-source-prefix \
+    "https://docs.docker.com/" \
+    --seed-reject-regex \
+    '^https://docs\.docker\.com/(build/(buildkit/dockerfile-release-notes|release-notes)|enterprise/security/provisioning/scim|reference/(api/(dvp/latest|engine/version/v1\.[0-9]+|hub/latest|registry/latest)|cli/docker/(build|builder/build|exec|images|info|mcp/(feature|tools)/list|ps|pull|push|run))|scout/release-notes/cli)/$'
+
+if ! (
     run_documentation_fetch --doc-sets=doppler-guides > /dev/null
 ); then
     fail_documentation_fetch_test "named Doppler guides selection did not complete"
