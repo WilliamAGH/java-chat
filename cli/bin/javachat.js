@@ -16,6 +16,7 @@ import { mkdir, readFile, writeFile, chmod, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { stdout, stderr, argv, exit, env } from "node:process";
 import { stripVTControlCharacters } from "node:util";
+import packageMetadata from "../package.json" with { type: "json" };
 
 const DEFAULT_HOST = "https://javachat.ai";
 const CREDENTIALS_MODE = 0o600;
@@ -517,6 +518,7 @@ Options
   --new           Start a fresh conversation instead of continuing the last one
   --verbose       Show retrieval progress on stderr
   --no-browser    Print the approval URL instead of opening a browser
+  --version       Show the installed CLI version
 
 Environment
   JAVACHAT_API_KEY   Use this key instead of the stored one (for CI)
@@ -539,7 +541,13 @@ function parseArguments(rawArguments) {
 }
 
 async function main() {
-  const { host, options, positional } = parseArguments(argv.slice(2));
+  const rawArguments = argv.slice(2);
+  if (rawArguments.includes("--version")) {
+    stdout.write(`${packageMetadata.version}\n`);
+    return 0;
+  }
+
+  const { host, options, positional } = parseArguments(rawArguments);
   const [first, ...rest] = positional;
 
   if (!first || first === "--help" || first === "-h" || first === "help") {
