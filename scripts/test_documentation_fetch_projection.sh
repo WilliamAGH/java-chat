@@ -354,6 +354,36 @@ assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
     '^https://docs\.docker\.com/(build/(buildkit/dockerfile-release-notes|release-notes)|enterprise/security/provisioning/scim|reference/(api/(dvp/latest|engine/version/v1\.[0-9]+|hub/latest|registry/latest)|cli/docker/(build|builder/build|exec|images|info|mcp/(feature|tools)/list|ps|pull|push|run))|scout/release-notes/cli)/$'
 
 if ! (
+    run_documentation_fetch --doc-sets=clerk > /dev/null
+); then
+    fail_documentation_fetch_test "named Clerk selection did not complete"
+fi
+
+assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
+    --url \
+    "https://clerk.com/docs/" \
+    --mirror-path \
+    clerk \
+    --name \
+    "Clerk Documentation" \
+    --source-version \
+    current \
+    --identity-regex \
+    Clerk \
+    --cut-directories \
+    1 \
+    --minimum-html-files \
+    1 \
+    --plain-text-document-url \
+    "https://clerk.com/docs/llms-full.txt" \
+    --plain-text-document-title \
+    "Clerk Documentation" \
+    --minimum-plain-text-bytes \
+    500000 \
+    --plain-text-required-text \
+    "# Clerk"
+
+if ! (
     run_documentation_fetch --doc-sets=doppler-guides > /dev/null
 ); then
     fail_documentation_fetch_test "named Doppler guides selection did not complete"

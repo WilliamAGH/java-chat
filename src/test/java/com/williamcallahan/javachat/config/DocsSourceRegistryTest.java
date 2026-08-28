@@ -225,6 +225,9 @@ class DocsSourceRegistryTest {
         assertEquals(
                 "https://github.com/oborseth/Porkbun-MCP/blob/64e8b4f4caad75e99333733bca5f2987afee3c75/README.md",
                 DocsSourceRegistry.normalizeDocUrl("file:///data/docs/porkbun-mcp/index.html"));
+        assertEquals(
+                "https://clerk.com/docs/llms-full.txt",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/clerk/index.html"));
     }
 
     @Test
