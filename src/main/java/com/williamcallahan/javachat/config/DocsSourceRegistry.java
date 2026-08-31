@@ -63,8 +63,9 @@ public final class DocsSourceRegistry {
     private static final String DOCS_API_PREFIX = "docs/api/";
     private static final String API_SUFFIX = "/api";
     private static final String API_PREFIX = "api/";
-    private static final Pattern NUMERIC_VERSION_PREFIX_PATTERN = Pattern.compile("^[0-9]+(?:\\.[0-9]+)*");
-
+    private static final Pattern NUMERIC_DOCUMENTATION_VERSION_PATTERN =
+            Pattern.compile("[0-9]+(?:\\.[0-9]{1,})*(?:[-+][A-Za-z0-9.]{1,})?");
+    private static final Pattern NUMERIC_VERSION_PREFIX_PATTERN = Pattern.compile("^[0-9]+(?:\\.[0-9]{1,})*");
     private static final String SPRING_FRAMEWORK_REFERENCE_URL_PREFIX =
             SPRING_DOCS_HTTPS_PREFIX + SPRING_FRAMEWORK_MARKER + "/reference";
     private static final String SPRING_FRAMEWORK_JAVADOC_URL_PREFIX =
@@ -593,7 +594,9 @@ public final class DocsSourceRegistry {
         String normalizedQuery =
                 query.toLowerCase(Locale.ROOT).replace('-', ' ').replace('_', ' ');
         Map<String, List<DocumentationSource>> sourcesByFamily = DOCUMENTATION_SOURCES.stream()
-                .filter(source -> source.docVersion().matches("[0-9]+(?:\\.[0-9]+)*(?:[-+][A-Za-z0-9.]+)?"))
+                .filter(source -> NUMERIC_DOCUMENTATION_VERSION_PATTERN
+                        .matcher(source.docVersion())
+                        .matches())
                 .collect(java.util.stream.Collectors.groupingBy(
                         source -> documentationSourceFamily(source.docSet()),
                         LinkedHashMap::new,
