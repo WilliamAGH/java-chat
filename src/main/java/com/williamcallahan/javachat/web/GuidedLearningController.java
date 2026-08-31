@@ -376,14 +376,6 @@ public class GuidedLearningController extends BaseController {
         Throwable upstreamError = terminalFailureContext
                 .map(ReportedStreamingFailure::upstreamFailure)
                 .orElse(error);
-        if (upstreamError
-                instanceof
-                GuidedLearningService.UnsupportedJavaDocumentationReleaseException unsupportedReleaseFailure) {
-            return sseSupport.streamErrorEvent(
-                    unsupportedReleaseFailure.getMessage(),
-                    "Choose a supported Java documentation release and retry.",
-                    false);
-        }
         if (upstreamError instanceof ConfiguredProviderTemporarilyUnavailableException) {
             return sseSupport.configuredProviderUnavailableError();
         }

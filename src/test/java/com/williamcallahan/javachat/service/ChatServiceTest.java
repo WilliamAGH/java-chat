@@ -138,4 +138,41 @@ class ChatServiceTest {
                         + "Transaction behavior",
                 promptOutcome.structuredPrompt().contextDocuments().getFirst().content());
     }
+
+    @Test
+    void structuredPromptLabelsAdjacentSameFamilyDependencyEvidence() {
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        SystemPromptConfig systemPromptConfig = mock(SystemPromptConfig.class);
+        when(systemPromptConfig.getCoreSystemPrompt()).thenReturn("Use same-family source records.");
+        Document hikaricpDocumentation = Document.builder()
+                .id("hikaricp-702")
+                .text("Connection timeout behavior")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, "https://javadoc.io/doc/com.zaxxer/HikariCP/7.0.2/")
+                .metadata(QdrantPayloadFieldSchema.SOURCE_NAME_FIELD, "hikaricp/7.0.2/api")
+                .metadata(QdrantPayloadFieldSchema.DOC_SET_FIELD, "hikaricp/7.0.2/api")
+                .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "7.0.2")
+                .build();
+        when(retrievalService.retrieveWithLimitOutcome(
+                        eq("HikariCP 7.0.5 connection timeout"),
+                        eq(ModelConfiguration.RAG_LIMIT_CONSTRAINED),
+                        eq(ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED),
+                        any(RetrievalConstraint.class),
+                        any(),
+                        anyLong()))
+                .thenReturn(new RetrievalService.RetrievalOutcome(List.of(hikaricpDocumentation), List.of()));
+        ChatService chatService = new ChatService(
+                mock(OpenAIStreamingService.class), retrievalService, systemPromptConfig, new AppProperties());
+
+        ChatService.StructuredPromptOutcome promptOutcome =
+                chatService.buildStructuredPromptWithContextOutcome(List.of(), "HikariCP 7.0.5 connection timeout");
+
+        org.junit.jupiter.api.Assertions.assertTrue(
+                promptOutcome
+                        .structuredPrompt()
+                        .contextDocuments()
+                        .getFirst()
+                        .content()
+                        .contains(
+                                "family=\"hikaricp\" version=\"7.0.2\" requestedVersions=\"7.0.5\" evidenceRelation=\"adjacent-same-family\""));
+    }
 }

@@ -54,6 +54,108 @@ class DocsSourceRegistryTest {
     }
 
     @Test
+    void resolvesExactAndAdjacentJavaApiDocumentationSources() {
+        assertEquals(
+                List.of("25"),
+                DocsSourceRegistry.javaApiDocumentationSourcesForRelease("25").stream()
+                        .map(JavaApiDocumentationSource::javaRelease)
+                        .toList());
+        assertEquals(
+                List.of("21", "25"),
+                DocsSourceRegistry.javaApiDocumentationSourcesForRelease("22").stream()
+                        .map(JavaApiDocumentationSource::javaRelease)
+                        .toList());
+        assertEquals(
+                List.of("21"),
+                DocsSourceRegistry.javaApiDocumentationSourcesForRelease("20").stream()
+                        .map(JavaApiDocumentationSource::javaRelease)
+                        .toList());
+        assertEquals(
+                List.of("26"),
+                DocsSourceRegistry.javaApiDocumentationSourcesForRelease("27").stream()
+                        .map(JavaApiDocumentationSource::javaRelease)
+                        .toList());
+    }
+
+    @Test
+    void resolvesVersionedDependencyGapsWithinOneSourceFamily() {
+        DocsSourceRegistry.VersionedDocumentationEvidence evidence = DocsSourceRegistry.versionedDocumentationEvidence(
+                        "HikariCP 7.0.5 connection pooling")
+                .orElseThrow();
+
+        assertEquals("hikaricp", evidence.sourceFamily());
+        assertEquals("7.0.5", evidence.requestedVersion());
+        assertEquals(
+                List.of("7.0.2", "7.1.0"),
+                evidence.sources().stream().map(DocumentationSource::docVersion).toList());
+        assertEquals(
+                List.of("7.0.2"),
+                DocsSourceRegistry.versionedDocumentationEvidence("HikariCP 7.0.2 connection pooling")
+                        .orElseThrow()
+                        .sources()
+                        .stream()
+                        .map(DocumentationSource::docVersion)
+                        .toList());
+        assertEquals(
+                List.of("7.0.2"),
+                DocsSourceRegistry.versionedDocumentationEvidence("HikariCP 6.9 connection pooling")
+                        .orElseThrow()
+                        .sources()
+                        .stream()
+                        .map(DocumentationSource::docVersion)
+                        .toList());
+        assertEquals(
+                List.of("7.1.0"),
+                DocsSourceRegistry.versionedDocumentationEvidence("HikariCP 8.0 connection pooling")
+                        .orElseThrow()
+                        .sources()
+                        .stream()
+                        .map(DocumentationSource::docVersion)
+                        .toList());
+        assertEquals(
+                List.of("7.0.2", "7.1.0"),
+                DocsSourceRegistry.versionedDocumentationEvidenceAll("Compare HikariCP 7.0.2 with HikariCP 7.1.0")
+                        .stream()
+                        .flatMap(versionEvidence -> versionEvidence.sources().stream())
+                        .map(DocumentationSource::docVersion)
+                        .toList());
+
+        assertEquals(
+                List.of("0.17.1-64e8b4f4caad"),
+                DocsSourceRegistry.versionedDocumentationEvidence("Porkbun MCP 0.17.1").orElseThrow().sources().stream()
+                        .map(DocumentationSource::docVersion)
+                        .toList());
+
+        DocsSourceRegistry.VersionedDocumentationEvidence jacksonEvidence =
+                DocsSourceRegistry.versionedDocumentationEvidence("Jackson Databind 2.22.1 serialization")
+                        .orElseThrow();
+        assertEquals("jackson", jacksonEvidence.sourceFamily());
+        assertEquals(
+                List.of("2.21.2", "2.22.2"),
+                jacksonEvidence.sources().stream()
+                        .map(DocumentationSource::docVersion)
+                        .toList());
+        assertEquals(
+                List.of("2.21.2", "2.22.2"),
+                DocsSourceRegistry.versionedDocumentationEvidence("Jackson 2.22.1 serialization")
+                        .orElseThrow()
+                        .sources()
+                        .stream()
+                        .map(DocumentationSource::docVersion)
+                        .toList());
+
+        DocsSourceRegistry.VersionedDocumentationEvidence springAiEvidence =
+                DocsSourceRegistry.versionedDocumentationEvidence("Spring AI 1.1.5 tool calling")
+                        .orElseThrow();
+        assertEquals("spring-ai", springAiEvidence.sourceFamily());
+        assertEquals(
+                List.of("1.1.2", "1.1.8"),
+                springAiEvidence.sources().stream()
+                        .map(DocumentationSource::docVersion)
+                        .toList());
+    }
+
+    @Test
     void returnsImmutableDocumentationSourceSnapshot() {
         List<DocumentationSource> documentationSources = DocsSourceRegistry.documentationSources();
 

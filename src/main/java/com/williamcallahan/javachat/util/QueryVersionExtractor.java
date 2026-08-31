@@ -9,10 +9,11 @@ import java.util.regex.Pattern;
 
 /** Extracts encounter-ordered Java release references from learner queries. */
 public final class QueryVersionExtractor {
+    private static final int MINIMUM_PLAUSIBLE_JAVA_RELEASE = 8;
     private static final Pattern EXPLICIT_VERSION_PATTERN =
-            Pattern.compile("\\b(?:java\\s*se|javase|java|jdk)[\\s-]*(\\d{1,2})\\b", Pattern.CASE_INSENSITIVE);
+            Pattern.compile("\\b(?:java\\s*se|javase|java|jdk)[\\s-]*(\\d{1,3})\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern SHORTHAND_VERSION_PATTERN = Pattern.compile(
-            "^\\s*(?:,|and\\b|vs(?:\\.|\\b)|versus\\b|\\+|/|&)\\s*(\\d{1,2})\\b", Pattern.CASE_INSENSITIVE);
+            "^\\s*(?:,|and\\b|vs(?:\\.|\\b)|versus\\b|\\+|/|&)\\s*(\\d{1,3})\\b", Pattern.CASE_INSENSITIVE);
 
     private QueryVersionExtractor() {}
 
@@ -23,10 +24,9 @@ public final class QueryVersionExtractor {
      * and {@code JDK 21 vs 24} remains version-bearing until the connector chain ends.</p>
      *
      * @param query learner query
-     * @param supportedShorthandVersions releases that an unprefixed comparison token may represent
      * @return immutable release tokens such as {@code [21, 24]}
      */
-    public static List<String> extractVersionNumbers(String query, List<String> supportedShorthandVersions) {
+    public static List<String> extractVersionNumbers(String query) {
         if (query == null || query.isBlank()) {
             return List.of();
         }
@@ -34,7 +34,7 @@ public final class QueryVersionExtractor {
         Matcher explicitVersionMatcher = EXPLICIT_VERSION_PATTERN.matcher(query);
         while (explicitVersionMatcher.find()) {
             retainedVersions.add(explicitVersionMatcher.group(1));
-            collectShorthandVersions(query, explicitVersionMatcher.end(), retainedVersions, supportedShorthandVersions);
+            collectShorthandVersions(query, explicitVersionMatcher.end(), retainedVersions);
         }
         return List.copyOf(retainedVersions);
     }
@@ -58,23 +58,24 @@ public final class QueryVersionExtractor {
         return String.join("; ", versionContexts) + ": " + query;
     }
 
-    private static void collectShorthandVersions(
-            String query,
-            int explicitVersionEnd,
-            Set<String> retainedVersions,
-            List<String> supportedShorthandVersions) {
+    private static void collectShorthandVersions(String query, int explicitVersionEnd, Set<String> retainedVersions) {
         int comparisonCursor = explicitVersionEnd;
+        Matcher shorthandVersionMatcher = SHORTHAND_VERSION_PATTERN.matcher(query);
         while (comparisonCursor < query.length()) {
-            Matcher shorthandVersionMatcher = SHORTHAND_VERSION_PATTERN.matcher(query.substring(comparisonCursor));
-            if (!shorthandVersionMatcher.find()) {
+            shorthandVersionMatcher.region(comparisonCursor, query.length());
+            if (!shorthandVersionMatcher.lookingAt()) {
                 return;
             }
             String shorthandVersion = shorthandVersionMatcher.group(1);
-            if (!supportedShorthandVersions.contains(shorthandVersion)) {
+            if (!isPlausibleJavaRelease(shorthandVersion)) {
                 return;
             }
             retainedVersions.add(shorthandVersion);
-            comparisonCursor += shorthandVersionMatcher.end();
+            comparisonCursor = shorthandVersionMatcher.end();
         }
+    }
+
+    private static boolean isPlausibleJavaRelease(String candidateVersion) {
+        return Integer.parseInt(candidateVersion) >= MINIMUM_PLAUSIBLE_JAVA_RELEASE;
     }
 }

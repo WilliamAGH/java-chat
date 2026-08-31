@@ -39,7 +39,7 @@ All paths are relative to `src/main/java/com/williamcallahan/javachat/`.
 
 ### Version detection
 
-`QueryVersionExtractor` (`util/QueryVersionExtractor.java`) detects Java version mentions in queries using the regex pattern `\b(?:java\s*se|javase|java|jdk)[\s-]*(\d{1,2})\b` (case-insensitive).
+`QueryVersionExtractor` (`util/QueryVersionExtractor.java`) detects Java version mentions in queries using the regex pattern `\b(?:java\s*se|javase|java|jdk)[\s-]*(\d{1,3})\b` (case-insensitive).
 
 Matches: `Java 25`, `JDK 24`, `java25`, `jdk-25`, `Java SE 24`, `JavaSE 25`.
 
@@ -55,9 +55,9 @@ For multi-release comparison queries such as `Java 21 vs 24`, each requested rel
 
 ### Metadata filter generation
 
-`extractVersionNumbers()` returns every requested Java release in encounter order, expanding comparison shorthand such as `Java 21/24` or `JDK 21 vs 24` against the configured Java API release list.
+`extractVersionNumbers()` returns every requested Java release in encounter order, including comparison shorthand such as `Java 21/22` or `JDK 21 vs 17`. Extraction is independent of the indexed release inventory so a corpus gap cannot erase the learner's requested version before adjacent-evidence resolution.
 
-For each requested release, `RetrievalService` builds a `RetrievalConstraint` whose `docVersions` is an any-of `docVersion` keyword filter pushed to Qdrant server-side via `QdrantRetrievalConstraintBuilder` (`matchKeywords`). Multi-release queries fan out one exact-`docVersion` search per requested release; each release must return at least one official documentation hit or retrieval fails fast. There is no client-side URL/title post-filter fallback.
+For an indexed requested release, `RetrievalService` builds a `RetrievalConstraint` whose `docVersions` is an any-of `docVersion` keyword filter pushed to Qdrant server-side via `QdrantRetrievalConstraintBuilder` (`matchKeywords`). A Java release missing from the corpus resolves to the nearest indexed release below and above it; a request outside the indexed range uses the nearest available side. For example, Java 22 searches Java 21 and Java 25 documentation. Versioned dependency queries use the same-family identities from `DocsSourceRegistry` to select exact or adjacent indexed versions and label the requested/evidence relationship in each source record. Repository policy for version gaps is owned solely by `AGENTS.md` `[VG1]`. There is no client-side URL/title post-filter fallback.
 
 ---
 

@@ -1,0 +1,15 @@
+id: java-no-version-gap-answer-denial
+valid:
+  - |
+      class AdjacentVersionEvidence {
+          java.util.List<String> resolve(String requestedVersion) {
+              return java.util.List.of(requestedVersion);
+          }
+      }
+  - |
+      class UnsupportedLessonException extends IllegalArgumentException {}
+invalid:
+  - |
+      class UnsupportedDependencyVersionException extends IllegalArgumentException {}
+  - |
+      class VersionUnsupportedFailure extends IllegalStateException {}

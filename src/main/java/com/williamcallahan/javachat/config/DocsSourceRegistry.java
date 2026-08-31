@@ -3,13 +3,17 @@ package com.williamcallahan.javachat.config;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -59,6 +63,7 @@ public final class DocsSourceRegistry {
     private static final String DOCS_API_PREFIX = "docs/api/";
     private static final String API_SUFFIX = "/api";
     private static final String API_PREFIX = "api/";
+    private static final Pattern NUMERIC_VERSION_PREFIX_PATTERN = Pattern.compile("^[0-9]+(?:\\.[0-9]+)*");
 
     private static final String SPRING_FRAMEWORK_REFERENCE_URL_PREFIX =
             SPRING_DOCS_HTTPS_PREFIX + SPRING_FRAMEWORK_MARKER + "/reference";
@@ -129,15 +134,15 @@ public final class DocsSourceRegistry {
                     "java/java21-complete",
                     "Java 21 Complete API"),
             new JavaApiDocumentationSource(
-                    "24",
-                    "https://docs.oracle.com/en/java/javase/24/docs/api/",
-                    "java/java24-complete",
-                    "Java 24 Complete API"),
-            new JavaApiDocumentationSource(
                     "25",
                     "https://docs.oracle.com/en/java/javase/25/docs/api/",
                     "java/java25-complete",
-                    "Java 25 Complete API"));
+                    "Java 25 Complete API"),
+            new JavaApiDocumentationSource(
+                    "26",
+                    "https://docs.oracle.com/en/java/javase/26/docs/api/",
+                    "java/java26-complete",
+                    "Java 26 Complete API"));
 
     private static final List<DocumentationSource> DOCUMENTATION_SOURCES = List.of(
             new DocumentationSource(
@@ -517,6 +522,170 @@ public final class DocsSourceRegistry {
     /** Returns the Java API sources the JVM can recognize in already-mirrored content. */
     public static List<JavaApiDocumentationSource> javaApiDocumentationSources() {
         return JAVA_API_DOCUMENTATION_SOURCES;
+    }
+
+    /**
+     * Resolves a requested Java release to exact or adjacent indexed API sources.
+     *
+     * <p>An exact corpus wins. A gap uses the nearest lower and higher releases; a request outside the indexed
+     * range uses the nearest available side. This keeps in-scope Java questions answerable while preserving the
+     * evidence releases supplied to retrieval.</p>
+     *
+     * @param requestedRelease numeric Java release requested by the learner
+     * @return exact source, bracketing sources, or the nearest range-edge source
+     */
+    public static List<JavaApiDocumentationSource> javaApiDocumentationSourcesForRelease(String requestedRelease) {
+        int requestedReleaseNumber = Integer.parseInt(requestedRelease);
+        Optional<JavaApiDocumentationSource> exactSource = JAVA_API_DOCUMENTATION_SOURCES.stream()
+                .filter(source -> Integer.parseInt(source.javaRelease()) == requestedReleaseNumber)
+                .findFirst();
+        if (exactSource.isPresent()) {
+            return exactSource.stream().toList();
+        }
+        Optional<JavaApiDocumentationSource> nearestLowerSource = JAVA_API_DOCUMENTATION_SOURCES.stream()
+                .filter(source -> Integer.parseInt(source.javaRelease()) < requestedReleaseNumber)
+                .max(Comparator.comparingInt(source -> Integer.parseInt(source.javaRelease())));
+        Optional<JavaApiDocumentationSource> nearestHigherSource = JAVA_API_DOCUMENTATION_SOURCES.stream()
+                .filter(source -> Integer.parseInt(source.javaRelease()) > requestedReleaseNumber)
+                .min(Comparator.comparingInt(source -> Integer.parseInt(source.javaRelease())));
+        return Stream.concat(nearestLowerSource.stream(), nearestHigherSource.stream())
+                .toList();
+    }
+
+    /** Resolves multiple requested releases to encounter-ordered, deduplicated indexed API sources. */
+    public static List<JavaApiDocumentationSource> javaApiDocumentationSourcesForReleases(
+            List<String> requestedReleases) {
+        return requestedReleases.stream()
+                .flatMap(requestedRelease -> javaApiDocumentationSourcesForRelease(requestedRelease).stream())
+                .distinct()
+                .toList();
+    }
+
+    /** Describes same-family indexed evidence for a requested dependency version. */
+    public record VersionedDocumentationEvidence(
+            String sourceFamily, String requestedVersion, List<DocumentationSource> sources) {
+        public VersionedDocumentationEvidence {
+            Objects.requireNonNull(sourceFamily, "sourceFamily");
+            Objects.requireNonNull(requestedVersion, "requestedVersion");
+            sources = List.copyOf(sources);
+        }
+    }
+
+    /** Resolves a named versioned dependency in a query to exact or adjacent same-family sources. */
+    public static Optional<VersionedDocumentationEvidence> versionedDocumentationEvidence(String query) {
+        return versionedDocumentationEvidenceAll(query).stream().findFirst();
+    }
+
+    /** Resolves every named versioned dependency in a query without dropping another source family. */
+    public static List<VersionedDocumentationEvidence> versionedDocumentationEvidenceAll(String query) {
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+        String normalizedQuery =
+                query.toLowerCase(Locale.ROOT).replace('-', ' ').replace('_', ' ');
+        Map<String, List<DocumentationSource>> sourcesByFamily = DOCUMENTATION_SOURCES.stream()
+                .filter(source -> source.docVersion().matches("[0-9]+(?:\\.[0-9]+)*(?:[-+][A-Za-z0-9.]+)?"))
+                .collect(java.util.stream.Collectors.groupingBy(
+                        source -> documentationSourceFamily(source.docSet()),
+                        LinkedHashMap::new,
+                        java.util.stream.Collectors.toList()));
+        List<VersionedDocumentationEvidence> resolvedEvidence = new ArrayList<>();
+        for (Map.Entry<String, List<DocumentationSource>> familySources : sourcesByFamily.entrySet()) {
+            String familyAliases = familySources.getValue().stream()
+                    .flatMap(source -> documentationSourceAliases(source).stream())
+                    .filter(alias -> !alias.isBlank())
+                    .distinct()
+                    .sorted(Comparator.comparingInt(String::length).reversed())
+                    .map(Pattern::quote)
+                    .collect(java.util.stream.Collectors.joining("|"));
+            Matcher requestedVersionMatcher = Pattern.compile(
+                            "\\b(?:" + familyAliases + ")\\s+(\\d+(?:\\.\\d+){0,3})\\b")
+                    .matcher(normalizedQuery);
+            while (requestedVersionMatcher.find()) {
+                String requestedVersion = requestedVersionMatcher.group(1);
+                List<DocumentationSource> exactSources = familySources.getValue().stream()
+                        .filter(source -> source.docVersion().equals(requestedVersion)
+                                || source.docVersion().startsWith(requestedVersion + "-"))
+                        .toList();
+                if (!exactSources.isEmpty()) {
+                    resolvedEvidence.add(
+                            new VersionedDocumentationEvidence(familySources.getKey(), requestedVersion, exactSources));
+                    continue;
+                }
+                Optional<String> lowerVersion = familySources.getValue().stream()
+                        .map(DocumentationSource::docVersion)
+                        .filter(version -> compareNumericVersions(version, requestedVersion) < 0)
+                        .max(DocsSourceRegistry::compareNumericVersions);
+                Optional<String> higherVersion = familySources.getValue().stream()
+                        .map(DocumentationSource::docVersion)
+                        .filter(version -> compareNumericVersions(version, requestedVersion) > 0)
+                        .min(DocsSourceRegistry::compareNumericVersions);
+                List<String> evidenceVersions = Stream.concat(lowerVersion.stream(), higherVersion.stream())
+                        .toList();
+                List<DocumentationSource> evidenceSources = evidenceVersions.stream()
+                        .flatMap(evidenceVersion -> familySources.getValue().stream()
+                                .filter(source -> evidenceVersion.equals(source.docVersion())))
+                        .toList();
+                resolvedEvidence.add(
+                        new VersionedDocumentationEvidence(familySources.getKey(), requestedVersion, evidenceSources));
+            }
+        }
+        return List.copyOf(resolvedEvidence);
+    }
+
+    /** Returns a stable source-family identity from a versioned or unversioned documentation set. */
+    public static String documentationSourceFamily(String documentationSet) {
+        if (documentationSet == null || documentationSet.isBlank()) {
+            return "";
+        }
+        int familyDelimiter = documentationSet.indexOf('/');
+        String pathFamily = familyDelimiter < 0 ? documentationSet : documentationSet.substring(0, familyDelimiter);
+        return pathFamily.replaceFirst("-(?:api(?:-stable)?|reference|docs|guides)$", "");
+    }
+
+    private static List<String> documentationSourceAliases(DocumentationSource documentationSource) {
+        String displayAlias = documentationSource
+                .displayName()
+                .toLowerCase(Locale.ROOT)
+                .replaceFirst("\\s+\\d+(?:\\.\\d+)*(?:\\s+.*)?$", "")
+                .replaceFirst("\\s+(?:stable\\s+)?(?:api|reference|documentation|guides)$", "")
+                .trim();
+        String familyAlias = documentationSourceFamily(documentationSource.docSet())
+                .toLowerCase(Locale.ROOT)
+                .replace('-', ' ')
+                .replace('_', ' ');
+        return Stream.of(familyAlias, displayAlias)
+                .filter(alias -> !alias.isBlank())
+                .filter(alias -> !"java".equals(alias) && !"jdk".equals(alias))
+                .distinct()
+                .toList();
+    }
+
+    private static int compareNumericVersions(String leftVersion, String rightVersion) {
+        String[] leftComponents = numericVersionPrefix(leftVersion).split("\\.");
+        String[] rightComponents = numericVersionPrefix(rightVersion).split("\\.");
+        int componentCount = Math.max(leftComponents.length, rightComponents.length);
+        for (int componentIndex = 0; componentIndex < componentCount; componentIndex++) {
+            java.math.BigInteger leftComponent = componentIndex < leftComponents.length
+                    ? new java.math.BigInteger(leftComponents[componentIndex])
+                    : java.math.BigInteger.ZERO;
+            java.math.BigInteger rightComponent = componentIndex < rightComponents.length
+                    ? new java.math.BigInteger(rightComponents[componentIndex])
+                    : java.math.BigInteger.ZERO;
+            int comparison = leftComponent.compareTo(rightComponent);
+            if (comparison != 0) {
+                return comparison;
+            }
+        }
+        return 0;
+    }
+
+    private static String numericVersionPrefix(String version) {
+        Matcher numericVersionMatcher = NUMERIC_VERSION_PREFIX_PATTERN.matcher(version);
+        if (!numericVersionMatcher.find()) {
+            throw new IllegalArgumentException("Version has no numeric prefix");
+        }
+        return numericVersionMatcher.group();
     }
 
     /** Describes provenance and citation fields consumed by JVM ingestion. */

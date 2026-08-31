@@ -49,12 +49,12 @@ class RetrievalServiceTest {
                     .orElseThrow();
     private static final int DOCUMENTATION_CITATION_CANDIDATE_LIMIT = 10;
     private static final String JAVA_21_RELEASE = "21";
-    private static final String JAVA_24_RELEASE = "24";
-    private static final String EXACT_LIST_OF_QUERY = "Compare Java 21 and Java 24 for java.util.List.of(E, E).";
+    private static final String JAVA_26_RELEASE = "26";
+    private static final String EXACT_LIST_OF_QUERY = "Compare Java 21 and Java 26 for java.util.List.of(E, E).";
     private static final String JAVA_21_EXACT_LIST_DOCUMENT_ID = "java-21-exact";
-    private static final String JAVA_24_EXACT_LIST_DOCUMENT_ID = "java-24-exact";
+    private static final String JAVA_26_EXACT_LIST_DOCUMENT_ID = "java-26-exact";
     private static final String JAVA_21_EXACT_LIST_CONTENT_HASH = "exact-hash-21";
-    private static final String JAVA_24_EXACT_LIST_CONTENT_HASH = "exact-hash-24";
+    private static final String JAVA_26_EXACT_LIST_CONTENT_HASH = "exact-hash-26";
     private static final String EXACT_LIST_OVERLOAD_TEXT =
             "static <E> List<E> of(E e1, E e2) Returns an unmodifiable list containing two elements";
     private static final String EXACT_LIST_OVERLOAD_ANCHOR = "of(E,E)";
@@ -62,8 +62,8 @@ class RetrievalServiceTest {
     private static final String JAVA_LIST_API_PAGE = "List.html";
     private static final String JAVA_21_LIST_API_URL =
             "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/List.html";
-    private static final String JAVA_24_LIST_API_URL =
-            "https://docs.oracle.com/en/java/javase/24/docs/api/java.base/java/util/List.html";
+    private static final String JAVA_26_LIST_API_URL =
+            "https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/util/List.html";
     private static final Duration STAGE_DEADLINE_ASSERTION_TOLERANCE = Duration.ofSeconds(1);
 
     @Test
@@ -142,7 +142,7 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint java25Constraint = officialDocumentationConstraint.withDocVersions(List.of("25"));
+        RetrievalConstraint java25Constraint = javaEvidenceConstraint(officialDocumentationConstraint, "25");
         String memberQuery = "Explain Java 25 String::formatted";
         Document formattedDocument = Document.builder()
                 .id("java-25-formatted")
@@ -242,7 +242,11 @@ class RetrievalServiceTest {
         assertEquals(List.of(kotlinDocument), retrievalOutcome.documents());
         verify(hybridSearchService)
                 .searchOutcome(
-                        eq("How does Kotlin interoperate with Java 21?"), anyInt(), same(kotlinConstraint), anyLong());
+                        eq(
+                                "JDK 21 Java SE 21 Java 21 release documentation: How does Kotlin interoperate with Java 21?"),
+                        anyInt(),
+                        same(kotlinConstraint),
+                        anyLong());
     }
 
     @Test
@@ -254,7 +258,7 @@ class RetrievalServiceTest {
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
         RetrievalConstraint expectedCombinedConstraint =
-                officialDocumentationConstraint.withDocVersions(List.of(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
+                javaEvidenceConstraint(officialDocumentationConstraint, REPRESENTED_JAVA_API_SOURCE.javaRelease());
         String versionedQuery = "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " collections";
         Document versionedDocument =
                 versionedDocument("represented-version", REPRESENTED_JAVA_API_SOURCE.javaRelease(), "represented-hash");
@@ -363,7 +367,7 @@ class RetrievalServiceTest {
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
         RetrievalConstraint expectedCombinedConstraint =
-                officialDocumentationConstraint.withDocVersions(List.of(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
+                javaEvidenceConstraint(officialDocumentationConstraint, REPRESENTED_JAVA_API_SOURCE.javaRelease());
         String citationQuery = "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " collections";
         Document versionedCitation = versionedCitationDocument(
                 "represented-version-citation", REPRESENTED_JAVA_API_SOURCE.javaRelease(), "represented-hash");
@@ -389,31 +393,268 @@ class RetrievalServiceTest {
                 new RetrievalService(hybridSearchService, appProperties, rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint java21Constraint = officialDocumentationConstraint.withDocVersions(List.of("21"));
-        RetrievalConstraint java24Constraint = officialDocumentationConstraint.withDocVersions(List.of("24"));
+        RetrievalConstraint java21Constraint = javaEvidenceConstraint(officialDocumentationConstraint, "21");
+        RetrievalConstraint java26Constraint = javaEvidenceConstraint(officialDocumentationConstraint, "26");
         Document java21Document = versionedDocument("java-21", "21", "shared-content-hash");
         Document secondJava21Document = versionedDocument("java-21-secondary", "21", "secondary-hash");
-        Document java24Document = versionedDocument("java-24", "24", "shared-content-hash");
+        Document java26Document = versionedDocument("java-26", "26", "shared-content-hash");
         when(hybridSearchService.searchOutcomes(
-                        anyString(), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong()))
+                        anyString(), eq(10), eq(List.of(java21Constraint, java26Constraint)), anyLong()))
                 .thenReturn(List.of(
                         new HybridSearchService.SearchOutcome(List.of(java21Document, secondJava21Document), List.of()),
-                        new HybridSearchService.SearchOutcome(List.of(java24Document), List.of())));
+                        new HybridSearchService.SearchOutcome(List.of(java26Document), List.of())));
         when(rerankerService.rerank(anyString(), anyList(), eq(2), anyLong()))
                 .thenReturn(List.of(java21Document, secondJava21Document));
 
         RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveOutcome(
-                "Compare Java 21 and Java 24 collections", officialDocumentationConstraint);
+                "Compare Java 21 and Java 26 collections", officialDocumentationConstraint);
 
         assertEquals(
-                List.of("21", "24"),
+                List.of("21", "26"),
                 retrievalOutcome.documents().stream()
                         .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD))
                         .toList());
         verify(hybridSearchService)
-                .searchOutcomes(anyString(), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong());
+                .searchOutcomes(anyString(), eq(10), eq(List.of(java21Constraint, java26Constraint)), anyLong());
         assertEquals(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES, java21Constraint.docSet());
-        assertEquals(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES, java24Constraint.docSet());
+        assertEquals(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES, java26Constraint.docSet());
+    }
+
+    @Test
+    void missingJavaReleaseSearchesNearestOlderAndNewerDocumentation() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint java21Constraint = javaEvidenceConstraint(officialDocumentationConstraint, "21");
+        RetrievalConstraint java25Constraint = javaEvidenceConstraint(officialDocumentationConstraint, "25");
+        Document java21Document = versionedDocument("java-21", "21", "hash-21");
+        Document java25Document = versionedDocument("java-25", "25", "hash-25");
+        when(hybridSearchService.searchOutcomes(
+                        anyString(), eq(10), eq(List.of(java21Constraint, java25Constraint)), anyLong()))
+                .thenReturn(List.of(
+                        new HybridSearchService.SearchOutcome(List.of(java21Document), List.of()),
+                        new HybridSearchService.SearchOutcome(List.of(java25Document), List.of())));
+        when(rerankerService.rerank(anyString(), anyList(), eq(2), anyLong()))
+                .thenReturn(List.of(java21Document, java25Document));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome("How does this work in Java 22?", officialDocumentationConstraint);
+
+        assertEquals(
+                List.of("21", "25"),
+                retrievalOutcome.documents().stream()
+                        .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD))
+                        .toList());
+        verify(hybridSearchService)
+                .searchOutcomes(anyString(), eq(10), eq(List.of(java21Constraint, java25Constraint)), anyLong());
+    }
+
+    @Test
+    void missingDependencyVersionSearchesNearestSameFamilyVersions() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        List<String> hikaricpDocSets = List.of("hikaricp/7.1.0/api", "hikaricp/7.0.2/api");
+        RetrievalConstraint hikaricp702Constraint =
+                officialDocumentationConstraint.withDocSetScope(hikaricpDocSets).withDocVersions(List.of("7.0.2"));
+        RetrievalConstraint hikaricp710Constraint =
+                officialDocumentationConstraint.withDocSetScope(hikaricpDocSets).withDocVersions(List.of("7.1.0"));
+        Document hikaricp702Document = versionedDocument("hikaricp-702", "7.0.2", "hash-702");
+        Document hikaricp710Document = versionedDocument("hikaricp-710", "7.1.0", "hash-710");
+        when(hybridSearchService.searchOutcomes(
+                        anyString(), eq(10), eq(List.of(hikaricp702Constraint, hikaricp710Constraint)), anyLong()))
+                .thenReturn(List.of(
+                        new HybridSearchService.SearchOutcome(List.of(hikaricp702Document), List.of()),
+                        new HybridSearchService.SearchOutcome(List.of(hikaricp710Document), List.of())));
+        when(hybridSearchService.searchDocumentationCitationsOutcomes(
+                        anyString(), eq(10), eq(List.of(hikaricp702Constraint, hikaricp710Constraint)), anyLong()))
+                .thenReturn(List.of(
+                        new HybridSearchService.SearchOutcome(List.of(hikaricp702Document), List.of()),
+                        new HybridSearchService.SearchOutcome(List.of(hikaricp710Document), List.of())));
+        when(rerankerService.rerank(anyString(), anyList(), eq(2), anyLong()))
+                .thenReturn(List.of(hikaricp702Document, hikaricp710Document));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome("HikariCP 7.0.5 connection pooling", officialDocumentationConstraint);
+        RetrievalService.RetrievalOutcome limitedOutcome = retrievalService.retrieveWithLimitOutcome(
+                "HikariCP 7.0.5 connection pooling", 2, 1_000, officialDocumentationConstraint);
+        RetrievalService.CitationOutcome citationOutcome = retrievalService.discoverCitations(
+                "HikariCP 7.0.5 connection pooling", officialDocumentationConstraint);
+
+        assertEquals(
+                List.of("7.0.2", "7.1.0"),
+                retrievalOutcome.documents().stream()
+                        .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD))
+                        .toList());
+        assertEquals(
+                List.of("7.0.2", "7.1.0"),
+                limitedOutcome.documents().stream()
+                        .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD))
+                        .toList());
+        assertEquals(2, citationOutcome.citations().size());
+        verify(hybridSearchService, org.mockito.Mockito.times(2))
+                .searchOutcomes(
+                        anyString(), eq(10), eq(List.of(hikaricp702Constraint, hikaricp710Constraint)), anyLong());
+    }
+
+    @Test
+    void queryWithJavaAndDependencyGapsRetainsBothSourceFamilies() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        List<String> mixedDocSets =
+                List.of("hikaricp/7.1.0/api", "hikaricp/7.0.2/api", "java/java21-complete", "java/java25-complete");
+        List<String> evidenceVersions = List.of("7.0.2", "7.1.0", "21", "25");
+        List<RetrievalConstraint> evidenceConstraints = evidenceVersions.stream()
+                .map(version -> officialDocumentationConstraint
+                        .withDocSetScope(mixedDocSets)
+                        .withDocVersions(List.of(version)))
+                .toList();
+        List<Document> evidenceDocuments = List.of(
+                versionedDocument("hikaricp-702", "7.0.2", "hash-702"),
+                versionedDocument("hikaricp-710", "7.1.0", "hash-710"),
+                versionedDocument("java-21", "21", "hash-21"),
+                versionedDocument("java-25", "25", "hash-25"));
+        when(hybridSearchService.searchOutcomes(anyString(), eq(10), eq(evidenceConstraints), anyLong()))
+                .thenReturn(evidenceDocuments.stream()
+                        .map(document -> new HybridSearchService.SearchOutcome(List.of(document), List.of()))
+                        .toList());
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
+                .thenReturn(evidenceDocuments);
+
+        RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveOutcome(
+                "Does HikariCP 7.0.5 work with Java 22?", officialDocumentationConstraint);
+        RetrievalService.RetrievalOutcome limitedOutcome = retrievalService.retrieveWithLimitOutcome(
+                "Does HikariCP 7.0.5 work with Java 22?", 4, 1_000, officialDocumentationConstraint);
+
+        assertEquals(
+                evidenceVersions,
+                retrievalOutcome.documents().stream()
+                        .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD))
+                        .toList());
+        assertEquals(
+                evidenceVersions,
+                limitedOutcome.documents().stream()
+                        .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD))
+                        .toList());
+        verify(hybridSearchService, org.mockito.Mockito.times(2))
+                .searchOutcomes(anyString(), eq(10), eq(evidenceConstraints), anyLong());
+    }
+
+    @Test
+    void versionedDependencyMentionDoesNotEscapeCallerOwnedSourceScope() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint kotlinConstraint = RetrievalConstraint.forOfficialDocSets(List.of("kotlin"));
+        Document kotlinDocument = versionedDocument("kotlin", "", "kotlin-hash");
+        when(hybridSearchService.searchOutcome(anyString(), eq(10), same(kotlinConstraint), anyLong()))
+                .thenReturn(new HybridSearchService.SearchOutcome(List.of(kotlinDocument), List.of()));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
+                .thenReturn(List.of(kotlinDocument));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveOutcome(
+                "How does this Kotlin lesson compare with HikariCP 7.0.5?", kotlinConstraint);
+
+        assertEquals(List.of(kotlinDocument), retrievalOutcome.documents());
+        verify(hybridSearchService).searchOutcome(anyString(), eq(10), eq(kotlinConstraint), anyLong());
+        verify(hybridSearchService, never()).searchOutcomes(anyString(), anyInt(), anyList(), anyLong());
+    }
+
+    @Test
+    void versionedDependencyGapDoesNotWidenCallerOwnedVersionScope() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint hikaricp702Constraint =
+                new RetrievalConstraint(List.of("7.0.2"), "official", "", "", List.of("hikaricp/7.0.2/api"));
+        Document hikaricp702Document = versionedDocument("hikaricp-702", "7.0.2", "hash-702");
+        when(hybridSearchService.searchOutcomes(anyString(), eq(10), eq(List.of(hikaricp702Constraint)), anyLong()))
+                .thenReturn(List.of(new HybridSearchService.SearchOutcome(List.of(hikaricp702Document), List.of())));
+        when(hybridSearchService.searchDocumentationCitationsOutcomes(
+                        anyString(), eq(10), eq(List.of(hikaricp702Constraint)), anyLong()))
+                .thenReturn(List.of(new HybridSearchService.SearchOutcome(List.of(hikaricp702Document), List.of())));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
+                .thenReturn(List.of(hikaricp702Document));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome("HikariCP 7.0.5 connection pooling", hikaricp702Constraint);
+        RetrievalService.CitationOutcome citationOutcome =
+                retrievalService.discoverCitations("HikariCP 7.0.5 connection pooling", hikaricp702Constraint);
+
+        assertEquals(List.of(hikaricp702Document), retrievalOutcome.documents());
+        assertEquals(1, citationOutcome.citations().size());
+        verify(hybridSearchService).searchOutcomes(anyString(), eq(10), eq(List.of(hikaricp702Constraint)), anyLong());
+    }
+
+    @Test
+    void disjointCallerVersionScopeReturnsNoAdjacentEvidenceInsteadOfBroadening() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), mock(RerankerService.class), mock(DocumentFactory.class));
+        RetrievalConstraint missingExactConstraint = new RetrievalConstraint(
+                List.of("7.0.5"), "official", "", "", List.of("hikaricp/7.0.2/api", "hikaricp/7.1.0/api"));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome("HikariCP 7.0.5 connection pooling", missingExactConstraint);
+        RetrievalService.CitationOutcome citationOutcome =
+                retrievalService.discoverCitations("HikariCP 7.0.5 connection pooling", missingExactConstraint);
+
+        assertEquals(List.of(), retrievalOutcome.documents());
+        assertEquals(List.of(), citationOutcome.citations());
+        verify(hybridSearchService, never()).searchOutcome(anyString(), anyInt(), any(), anyLong());
+        verify(hybridSearchService, never()).searchOutcomes(anyString(), anyInt(), anyList(), anyLong());
+    }
+
+    @Test
+    void missingJavaReleaseUsesAdjacentEvidenceForExactMembersAndCitations() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint java21Constraint = javaEvidenceConstraint(officialDocumentationConstraint, "21");
+        RetrievalConstraint java25Constraint = javaEvidenceConstraint(officialDocumentationConstraint, "25");
+        String missingReleaseQuery = "How does Java 22 java.util.List.of(E, E) work?";
+        Document java21ExactOverload = exactListOfOverloadDocument("java-21-exact", "21", "exact-hash-21");
+        Document java25ExactOverload = exactListOfOverloadDocument("java-25-exact", "25", "exact-hash-25");
+        when(hybridSearchService.searchDocumentationCitationsOutcomes(
+                        eq(missingReleaseQuery), eq(10), eq(List.of(java21Constraint, java25Constraint)), anyLong()))
+                .thenReturn(List.of(
+                        new HybridSearchService.SearchOutcome(List.of(java21ExactOverload), List.of()),
+                        new HybridSearchService.SearchOutcome(List.of(java25ExactOverload), List.of())))
+                .thenReturn(List.of(
+                        new HybridSearchService.SearchOutcome(List.of(java21ExactOverload), List.of()),
+                        new HybridSearchService.SearchOutcome(List.of(java25ExactOverload), List.of())));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome(missingReleaseQuery, officialDocumentationConstraint);
+        RetrievalService.CitationOutcome citationOutcome =
+                retrievalService.discoverCitations(missingReleaseQuery, officialDocumentationConstraint);
+
+        assertEquals(List.of(java21ExactOverload, java25ExactOverload), retrievalOutcome.documents());
+        assertEquals(
+                List.of(
+                        "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/List.html",
+                        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/List.html"),
+                citationOutcome.citations().stream()
+                        .map(citation -> citation.getUrl())
+                        .toList());
+        verify(hybridSearchService, never())
+                .searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), anyLong());
     }
 
     @Test
@@ -426,26 +667,26 @@ class RetrievalServiceTest {
                 new RetrievalService(hybridSearchService, appProperties, rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint java21Constraint = officialDocumentationConstraint.withDocVersions(List.of("21"));
-        RetrievalConstraint java24Constraint = officialDocumentationConstraint.withDocVersions(List.of("24"));
+        RetrievalConstraint java21Constraint = javaEvidenceConstraint(officialDocumentationConstraint, "21");
+        RetrievalConstraint java26Constraint = javaEvidenceConstraint(officialDocumentationConstraint, "26");
         String exactComparisonQuery =
-                "Compare Java 21 and Java 24 for java.util.List.of(E, E). Use evidence from both releases.";
+                "Compare Java 21 and Java 26 for java.util.List.of(E, E). Use evidence from both releases.";
         Document java21ExactOverload = exactListOfOverloadDocument("java-21-exact", "21", "exact-hash-21");
-        Document java24ExactOverload = exactListOfOverloadDocument("java-24-exact", "24", "exact-hash-24");
+        Document java26ExactOverload = exactListOfOverloadDocument("java-26-exact", "26", "exact-hash-26");
         when(hybridSearchService.searchDocumentationCitationsOutcomes(
-                        eq(exactComparisonQuery), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong()))
+                        eq(exactComparisonQuery), eq(10), eq(List.of(java21Constraint, java26Constraint)), anyLong()))
                 .thenReturn(List.of(
                         new HybridSearchService.SearchOutcome(List.of(java21ExactOverload), List.of()),
-                        new HybridSearchService.SearchOutcome(List.of(java24ExactOverload), List.of())));
+                        new HybridSearchService.SearchOutcome(List.of(java26ExactOverload), List.of())));
 
         RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveWithLimitOutcome(
                 exactComparisonQuery, 3, 1_000, officialDocumentationConstraint);
         RetrievalService.CitationOutcome citationOutcome =
                 retrievalService.toCitationsForQuery(exactComparisonQuery, retrievalOutcome.documents());
 
-        assertEquals(List.of(java21ExactOverload, java24ExactOverload), retrievalOutcome.documents());
+        assertEquals(List.of(java21ExactOverload, java26ExactOverload), retrievalOutcome.documents());
         assertEquals(
-                List.of("21", "24"),
+                List.of("21", "26"),
                 retrievalOutcome.documents().stream()
                         .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD))
                         .toList());
@@ -457,13 +698,13 @@ class RetrievalServiceTest {
         assertEquals(
                 List.of(
                         "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/List.html",
-                        "https://docs.oracle.com/en/java/javase/24/docs/api/java.base/java/util/List.html"),
+                        "https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/util/List.html"),
                 citationOutcome.citations().stream()
                         .map(citation -> citation.getUrl())
                         .toList());
         verify(hybridSearchService)
                 .searchDocumentationCitationsOutcomes(
-                        eq(exactComparisonQuery), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong());
+                        eq(exactComparisonQuery), eq(10), eq(List.of(java21Constraint, java26Constraint)), anyLong());
         verify(hybridSearchService, never())
                 .searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
         verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), anyLong());
@@ -477,28 +718,26 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint java21Constraint =
-                officialDocumentationConstraint.withDocVersions(List.of(JAVA_21_RELEASE));
-        RetrievalConstraint java24Constraint =
-                officialDocumentationConstraint.withDocVersions(List.of(JAVA_24_RELEASE));
+        RetrievalConstraint java21Constraint = javaEvidenceConstraint(officialDocumentationConstraint, JAVA_21_RELEASE);
+        RetrievalConstraint java26Constraint = javaEvidenceConstraint(officialDocumentationConstraint, JAVA_26_RELEASE);
         Document java21ExactOverload = exactListOfOverloadDocument(
                 JAVA_21_EXACT_LIST_DOCUMENT_ID, JAVA_21_RELEASE, JAVA_21_EXACT_LIST_CONTENT_HASH);
-        Document java24ExactOverload = exactListOfOverloadDocument(
-                JAVA_24_EXACT_LIST_DOCUMENT_ID, JAVA_24_RELEASE, JAVA_24_EXACT_LIST_CONTENT_HASH);
+        Document java26ExactOverload = exactListOfOverloadDocument(
+                JAVA_26_EXACT_LIST_DOCUMENT_ID, JAVA_26_RELEASE, JAVA_26_EXACT_LIST_CONTENT_HASH);
         when(hybridSearchService.searchDocumentationCitationsOutcomes(
                         eq(EXACT_LIST_OF_QUERY),
                         eq(DOCUMENTATION_CITATION_CANDIDATE_LIMIT),
-                        eq(List.of(java21Constraint, java24Constraint)),
+                        eq(List.of(java21Constraint, java26Constraint)),
                         anyLong()))
                 .thenReturn(List.of(
                         new HybridSearchService.SearchOutcome(List.of(java21ExactOverload), List.of()),
-                        new HybridSearchService.SearchOutcome(List.of(java24ExactOverload), List.of())));
+                        new HybridSearchService.SearchOutcome(List.of(java26ExactOverload), List.of())));
 
         RetrievalService.CitationOutcome citationOutcome =
                 retrievalService.discoverCitations(EXACT_LIST_OF_QUERY, officialDocumentationConstraint);
 
         assertEquals(
-                List.of(JAVA_21_LIST_API_URL, JAVA_24_LIST_API_URL),
+                List.of(JAVA_21_LIST_API_URL, JAVA_26_LIST_API_URL),
                 citationOutcome.citations().stream()
                         .map(citation -> citation.getUrl())
                         .toList());
@@ -512,7 +751,7 @@ class RetrievalServiceTest {
                 .searchDocumentationCitationsOutcomes(
                         eq(EXACT_LIST_OF_QUERY),
                         eq(DOCUMENTATION_CITATION_CANDIDATE_LIMIT),
-                        eq(List.of(java21Constraint, java24Constraint)),
+                        eq(List.of(java21Constraint, java26Constraint)),
                         anyLong());
         verify(hybridSearchService, never())
                 .searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
@@ -549,7 +788,7 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint java21Constraint = officialDocumentationConstraint.withDocVersions(List.of("21"));
+        RetrievalConstraint java21Constraint = javaEvidenceConstraint(officialDocumentationConstraint, "21");
         String chainedInvocationQuery = "Using Java 21, explain Thread.ofVirtual().start(Runnable).";
         Document virtualThreadDocument = exactThreadBuilderStartDocument();
         when(hybridSearchService.searchDocumentationCitationsOutcomes(
@@ -605,7 +844,7 @@ class RetrievalServiceTest {
         String exactQuery = "Explain java.util.List.of(E, E)";
         List<Document> exactOverloadDocuments = List.of(
                 exactListOfOverloadDocument("java-21-exact", "21", "exact-hash-21"),
-                exactListOfOverloadDocument("java-24-exact", "24", "exact-hash-24"),
+                exactListOfOverloadDocument("java-26-exact", "26", "exact-hash-26"),
                 exactListOfOverloadDocument("java-25-exact", "25", "exact-hash-25"));
         when(hybridSearchService.searchDocumentationCitationsOutcome(
                         eq(exactQuery), anyInt(), same(officialDocumentationConstraint), anyLong()))
@@ -621,27 +860,32 @@ class RetrievalServiceTest {
     }
 
     @Test
-    void exactMultiVersionOverloadFailsWhenOneRequestedReleaseHasNoEvidence() {
+    void exactMultiVersionOverloadUsesAvailableEvidenceWhenOneReleaseHasNoHit() {
         HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         RerankerService rerankerService = mock(RerankerService.class);
         RetrievalService retrievalService = new RetrievalService(
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint java21Constraint = officialDocumentationConstraint.withDocVersions(List.of("21"));
-        RetrievalConstraint java24Constraint = officialDocumentationConstraint.withDocVersions(List.of("24"));
-        String exactComparisonQuery = "Compare Java 21 and Java 24 for java.util.List.of(E, E).";
+        RetrievalConstraint java21Constraint = javaEvidenceConstraint(officialDocumentationConstraint, "21");
+        RetrievalConstraint java26Constraint = javaEvidenceConstraint(officialDocumentationConstraint, "26");
+        String exactComparisonQuery = "Compare Java 21 and Java 26 for java.util.List.of(E, E).";
         when(hybridSearchService.searchDocumentationCitationsOutcomes(
-                        eq(exactComparisonQuery), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong()))
+                        eq(exactComparisonQuery), eq(10), eq(List.of(java21Constraint, java26Constraint)), anyLong()))
                 .thenReturn(List.of(
                         new HybridSearchService.SearchOutcome(
                                 List.of(exactListOfOverloadDocument("java-21-exact", "21", "exact-hash-21")),
                                 List.of()),
                         new HybridSearchService.SearchOutcome(List.of(), List.of())));
 
-        assertThrows(
-                IllegalStateException.class,
-                () -> retrievalService.retrieveOutcome(exactComparisonQuery, officialDocumentationConstraint));
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome(exactComparisonQuery, officialDocumentationConstraint);
+
+        assertEquals(
+                List.of("21"),
+                retrievalOutcome.documents().stream()
+                        .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD))
+                        .toList());
         verify(hybridSearchService, never())
                 .searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
         verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), anyLong());
@@ -657,30 +901,30 @@ class RetrievalServiceTest {
                 new RetrievalService(hybridSearchService, appProperties, rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint java21Constraint = officialDocumentationConstraint.withDocVersions(List.of("21"));
-        RetrievalConstraint java24Constraint = officialDocumentationConstraint.withDocVersions(List.of("24"));
+        RetrievalConstraint java21Constraint = javaEvidenceConstraint(officialDocumentationConstraint, "21");
+        RetrievalConstraint java26Constraint = javaEvidenceConstraint(officialDocumentationConstraint, "26");
         List<Document> java21Documents = List.of(
                 versionedDocument("java-21-a", "21", "hash-21-a"),
                 versionedDocument("java-21-b", "21", "hash-21-b"),
                 versionedDocument("java-21-c", "21", "hash-21-c"),
                 versionedDocument("java-21-d", "21", "hash-21-d"),
                 versionedDocument("java-21-e", "21", "hash-21-e"));
-        Document java24Document = versionedDocument("java-24", "24", "hash-24");
+        Document java26Document = versionedDocument("java-26", "26", "hash-26");
         when(hybridSearchService.searchOutcomes(
-                        anyString(), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong()))
+                        anyString(), eq(10), eq(List.of(java21Constraint, java26Constraint)), anyLong()))
                 .thenReturn(List.of(
                         new HybridSearchService.SearchOutcome(java21Documents, List.of()),
-                        new HybridSearchService.SearchOutcome(List.of(java24Document), List.of())));
+                        new HybridSearchService.SearchOutcome(List.of(java26Document), List.of())));
         List<Document> rerankedDocuments = new java.util.ArrayList<>(java21Documents);
-        rerankedDocuments.add(java24Document);
+        rerankedDocuments.add(java26Document);
         when(rerankerService.rerank(anyString(), anyList(), eq(6), anyLong())).thenReturn(rerankedDocuments);
 
         RetrievalService.RetrievalOutcome limitedOutcome = retrievalService.retrieveWithLimitOutcome(
-                "Compare Java 21 and Java 24 collections", 3, 1_000, officialDocumentationConstraint);
+                "Compare Java 21 and Java 26 collections", 3, 1_000, officialDocumentationConstraint);
 
         assertEquals(3, limitedOutcome.documents().size());
         assertEquals(
-                List.of("21", "21", "24"),
+                List.of("21", "21", "26"),
                 limitedOutcome.documents().stream()
                         .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD))
                         .toList());
@@ -795,6 +1039,16 @@ class RetrievalServiceTest {
                 .filter(sourceIdentity -> !JAVA_API_DOCUMENTATION_SOURCE_IDENTITIES.contains(sourceIdentity)
                         || CURRENT_JAVA_API_DOCUMENTATION_SOURCE_IDENTITY.equals(sourceIdentity))
                 .toList());
+    }
+
+    private static RetrievalConstraint javaEvidenceConstraint(
+            RetrievalConstraint retrievalConstraint, String evidenceVersion) {
+        return new RetrievalConstraint(
+                List.of(evidenceVersion),
+                retrievalConstraint.sourceKind(),
+                DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE,
+                "oracle",
+                retrievalConstraint.docSet());
     }
 
     private static Document versionedDocument(String documentId, String documentVersion, String contentHash) {

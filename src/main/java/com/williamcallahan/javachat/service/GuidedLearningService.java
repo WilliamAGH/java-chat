@@ -83,7 +83,9 @@ public class GuidedLearningService {
             + " the canonical curated lesson context %s.%s Use"
             + " ONLY the canonical curated lesson and retrieved official documentation context from these allowed docSet"
             + " values for factual claims: %s. If those sources do not cover a topic, say so plainly; do not answer from"
-            + " general knowledge. This lesson source policy overrides any general-knowledge fallback instruction. Do NOT"
+            + " general knowledge, except for a clearly labeled version delta when the exact requested version is absent"
+            + " and adjacent same-family evidence is supplied. This lesson source policy otherwise overrides any"
+            + " general-knowledge fallback instruction. Do NOT"
             + " include footnote references like [1] or a citations section; the UI shows sources separately. Embed"
             + " learning aids according to the core system instructions. Prefer short, correct"
             + " explanations with clear code examples when appropriate. If unsure, state the limitation.%n%n## Current"
@@ -105,11 +107,6 @@ public class GuidedLearningService {
             + " authoritative curated lesson context. Do not transcribe it from memory or alter any identifier, syntax,"
             + " comment, whitespace, or token. Do not synthesize, combine, or add a second code example unless the learner"
             + " explicitly asks for an alternative or comparison.";
-    private static final List<String> SUPPORTED_JAVA_API_VERSIONS =
-            DocsSourceRegistry.javaApiDocumentationSources().stream()
-                    .map(DocsSourceRegistry.JavaApiDocumentationSource::javaRelease)
-                    .toList();
-
     private final String jdkVersion;
 
     /**
@@ -238,7 +235,7 @@ public class GuidedLearningService {
         GuidedLesson lesson = requireListedLesson(slug);
         String curatedLessonMarkdown = requiredCuratedLessonMarkdown(lesson);
         String query = buildLessonQuery(lesson) + "\n" + userMessage;
-        List<String> parsedVersions = QueryVersionExtractor.extractVersionNumbers(query, SUPPORTED_JAVA_API_VERSIONS);
+        List<String> parsedVersions = QueryVersionExtractor.extractVersionNumbers(query);
         boolean isJavaLesson = JAVA_TECHNOLOGY.equals(lesson.getTechnology());
         List<String> requestedVersions = isJavaLesson ? parsedVersions : List.of();
         List<String> effectiveDocSets = effectiveDocSetsFor(lesson, requestedVersions);
@@ -351,23 +348,6 @@ public class GuidedLearningService {
     }
 
     /**
-     * Signals that a learner requested a Java API release absent from the configured documentation corpus.
-     */
-    public static final class UnsupportedJavaDocumentationReleaseException extends IllegalArgumentException {
-        @Serial
-        private static final long serialVersionUID = 1L;
-
-        /** Creates an actionable validation failure from the canonical supported-release list. */
-        public UnsupportedJavaDocumentationReleaseException(String requestedRelease, List<String> supportedReleases) {
-            super("Java "
-                    + requestedRelease
-                    + " is not supported. Supported Java documentation releases: "
-                    + String.join(", ", supportedReleases)
-                    + ".");
-        }
-    }
-
-    /**
      * Loads curated lesson markdown from the authoritative classpath lesson package.
      *
      * <p>Curated lessons are stored as {@code .md} files under {@value #CURATED_LESSONS_RESOURCE_DIR}
@@ -443,17 +423,9 @@ public class GuidedLearningService {
         if (!JAVA_TECHNOLOGY.equals(lesson.getTechnology()) || requestedVersions.isEmpty()) {
             return List.copyOf(lesson.getDocSet());
         }
-        List<String> effectiveDocSets = new ArrayList<>(requestedVersions.size());
-        for (String requestedVersion : requestedVersions) {
-            DocsSourceRegistry.JavaApiDocumentationSource requestedSource =
-                    DocsSourceRegistry.javaApiDocumentationSources().stream()
-                            .filter(javaApiSource -> javaApiSource.javaRelease().equals(requestedVersion))
-                            .findFirst()
-                            .orElseThrow(() -> new UnsupportedJavaDocumentationReleaseException(
-                                    requestedVersion, SUPPORTED_JAVA_API_VERSIONS));
-            effectiveDocSets.add(requestedSource.relativeMirrorPath());
-        }
-        return List.copyOf(effectiveDocSets);
+        return DocsSourceRegistry.javaApiDocumentationSourcesForReleases(requestedVersions).stream()
+                .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
+                .toList();
     }
 
     private String buildLessonQuery(GuidedLesson lesson) {

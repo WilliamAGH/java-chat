@@ -59,11 +59,13 @@ if grep -Fq 'date -Ins' "$queued_launcher" \
     fail_queued_platform_test "queued job does not use portable UTC timestamps"
 fi
 
-grep -Fxq 'readonly QUEUED_DOCUMENTATION_SOURCES="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,scala,groovy,clojure,spring-boot,quarkus,java/java21-complete,java/java24-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle-java25-release-notes,ibm-java25-overview,jetbrains-java25-article"' "$queued_launcher" \
+grep -Fxq 'readonly QUEUED_DOCUMENTATION_SOURCES="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,scala,groovy,clojure,spring-boot,quarkus,java/java21-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle-java25-release-notes,ibm-java25-overview,jetbrains-java25-article"' "$queued_launcher" \
     || fail_queued_platform_test "remaining documentation fetch inventory or order changed"
 if grep -Fq 'QUEUED_DOCUMENTATION_SETS' "$queued_launcher"; then
     fail_queued_platform_test "documentation queue duplicates the canonical ingestion registry"
 fi
+grep -Fxq 'readonly FINAL_JAVA_DOCUMENTATION_SOURCE="java/java26-complete"' "$queued_launcher" \
+    || fail_queued_platform_test "Java 26 is not sequenced after the current documentation backlog"
 grep -Fxq 'export QDRANT_HOST=127.0.0.1' "$queued_launcher" \
     || fail_queued_platform_test "queued job does not force loopback Qdrant"
 grep -Fxq 'export QDRANT_API_KEY=' "$queued_launcher" \
@@ -84,18 +86,25 @@ grep -Fq 'acquire_qdrant_writer_lease' "$queued_launcher" \
     || fail_queued_platform_test "queued job does not claim the shared Qdrant writer lease"
 grep -Fq './scripts/fetch_all_docs.sh --doc-sets="$QUEUED_DOCUMENTATION_SOURCES"' "$queued_launcher" \
     || fail_queued_platform_test "queued job does not refresh and validate its exact source inventory"
-grep -Fq './scripts/process_all_to_qdrant.sh --doc-sets=all' "$queued_launcher" \
-    || fail_queued_platform_test "queued job does not invoke the canonical documentation registry"
+grep -Fq './scripts/process_all_to_qdrant.sh --doc-sets="$QUEUED_DOCUMENTATION_SOURCES"' "$queued_launcher" \
+    || fail_queued_platform_test "queued job does not process its exact current documentation inventory"
+grep -Fq './scripts/fetch_all_docs.sh --doc-sets="$FINAL_JAVA_DOCUMENTATION_SOURCE"' "$queued_launcher" \
+    && grep -Fq './scripts/process_all_to_qdrant.sh --doc-sets="$FINAL_JAVA_DOCUMENTATION_SOURCE"' "$queued_launcher" \
+    || fail_queued_platform_test "queued job does not fetch and process Java 26 last"
 
 completion_gate_line="$(queued_launcher_line "expected_staging_invocation_journal | grep -Fq 'LOCAL_STAGING_COMPLETE'")"
 invocation_receipt_line="$(queued_launcher_line 'mv -- "$STAGING_INVOCATION_RECEIPT.next" "$STAGING_INVOCATION_RECEIPT"')"
 writer_lease_line="$(queued_launcher_line 'acquire_qdrant_writer_lease')"
 source_refresh_line="$(queued_launcher_line './scripts/fetch_all_docs.sh --doc-sets="$QUEUED_DOCUMENTATION_SOURCES"')"
-ingestion_start_line="$(queued_launcher_line './scripts/process_all_to_qdrant.sh --doc-sets=all')"
+ingestion_start_line="$(queued_launcher_line './scripts/process_all_to_qdrant.sh --doc-sets="$QUEUED_DOCUMENTATION_SOURCES"')"
+java26_fetch_line="$(queued_launcher_line './scripts/fetch_all_docs.sh --doc-sets="$FINAL_JAVA_DOCUMENTATION_SOURCE"')"
+java26_ingestion_line="$(queued_launcher_line './scripts/process_all_to_qdrant.sh --doc-sets="$FINAL_JAVA_DOCUMENTATION_SOURCE"')"
 if [ "$completion_gate_line" -ge "$invocation_receipt_line" ] \
     || [ "$invocation_receipt_line" -ge "$source_refresh_line" ] \
     || [ "$source_refresh_line" -ge "$writer_lease_line" ] \
-    || [ "$writer_lease_line" -ge "$ingestion_start_line" ]; then
+    || [ "$writer_lease_line" -ge "$ingestion_start_line" ] \
+    || [ "$ingestion_start_line" -ge "$java26_fetch_line" ] \
+    || [ "$java26_fetch_line" -ge "$java26_ingestion_line" ]; then
     fail_queued_platform_test "queued ingestion can start before the current completion gate"
 fi
 
