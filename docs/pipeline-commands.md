@@ -277,6 +277,19 @@ The docs root defaults to `data/docs` unless `DOCS_DIR` is set.
 
 ## Monitoring
 
+The queued platform-documentation systemd job records
+`~/.local/state/java-chat/queued-platform-documentation-staging.attempted` before its first fetch. A failed composite
+attempt remains stopped even when an older installation is still enabled under `default.target`. After diagnosing the
+failed source, deliberately resume the one-shot with:
+
+```bash
+rm ~/.local/state/java-chat/queued-platform-documentation-staging.attempted
+systemctl --user start java-chat-queued-platform-documentation-staging.service
+```
+
+Successful completion remains recorded separately in
+`~/.local/state/java-chat/queued-platform-documentation-staging.complete`.
+
 ```bash
 scripts/monitor_progress.sh        # Simple log-based progress view
 scripts/monitor_indexing.sh        # Dashboard view (requires jq and bc)

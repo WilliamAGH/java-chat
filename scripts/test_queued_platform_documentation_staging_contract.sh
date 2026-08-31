@@ -44,6 +44,8 @@ grep -Fxq 'After=java-chat-local-embedding-staging.service' "$queued_unit" \
     || fail_queued_platform_test "documentation queue is not ordered after the local backlog"
 grep -Fq 'ConditionPathExists=!%h/.local/state/java-chat/queued-platform-documentation-staging.complete' "$queued_unit" \
     || fail_queued_platform_test "completed documentation queue can restart on a later login"
+grep -Fq 'ConditionPathExists=!%h/.local/state/java-chat/queued-platform-documentation-staging.attempted' "$queued_unit" \
+    || fail_queued_platform_test "an already-enabled documentation queue can automatically repeat a failed attempt"
 grep -Fq 'ConditionPathExists=%h/.local/state/java-chat/local-embedding-staging.invocation' "$queued_unit" \
     || fail_queued_platform_test "documentation queue can start without durable predecessor proof"
 grep -Fq 'invocation_id=$(systemctl --user show java-chat-local-embedding-staging.service --property=InvocationID --value)' "$queued_unit" \
@@ -52,8 +54,12 @@ grep -Fq 'invocation_id=$(systemctl --user show java-chat-local-embedding-stagin
     || fail_queued_platform_test "documentation queue does not select its live or completed predecessor invocation"
 grep -Fq 'ExecStartPost=/usr/bin/touch %h/.local/state/java-chat/queued-platform-documentation-staging.complete' "$queued_unit" \
     || fail_queued_platform_test "successful documentation queue does not record terminal completion"
-grep -Fxq 'WantedBy=default.target' "$queued_unit" \
-    || fail_queued_platform_test "documentation queue cannot resume after a user-manager restart"
+if grep -Eq '^Restart=|^RestartSec=' "$queued_unit"; then
+    fail_queued_platform_test "failed documentation queue can automatically restart completed source fetches"
+fi
+if grep -Fq 'WantedBy=' "$queued_unit"; then
+    fail_queued_platform_test "failed documentation queue can automatically restart with the user manager"
+fi
 if grep -Fq 'date -Ins' "$queued_launcher" \
     || ! grep -Fq "date -u '+%Y-%m-%dT%H:%M:%SZ'" "$queued_launcher"; then
     fail_queued_platform_test "queued job does not use portable UTC timestamps"
@@ -89,11 +95,13 @@ grep -Fq './scripts/process_all_to_qdrant.sh --doc-sets=all' "$queued_launcher" 
 
 completion_gate_line="$(queued_launcher_line "expected_staging_invocation_journal | grep -Fq 'LOCAL_STAGING_COMPLETE'")"
 invocation_receipt_line="$(queued_launcher_line 'mv -- "$STAGING_INVOCATION_RECEIPT.next" "$STAGING_INVOCATION_RECEIPT"')"
+attempt_receipt_line="$(queued_launcher_line 'touch "$QUEUED_STAGING_ATTEMPT_RECEIPT"')"
 writer_lease_line="$(queued_launcher_line 'acquire_qdrant_writer_lease')"
 source_refresh_line="$(queued_launcher_line './scripts/fetch_all_docs.sh --doc-sets="$QUEUED_DOCUMENTATION_SOURCES"')"
 ingestion_start_line="$(queued_launcher_line './scripts/process_all_to_qdrant.sh --doc-sets=all')"
 if [ "$completion_gate_line" -ge "$invocation_receipt_line" ] \
-    || [ "$invocation_receipt_line" -ge "$source_refresh_line" ] \
+    || [ "$invocation_receipt_line" -ge "$attempt_receipt_line" ] \
+    || [ "$attempt_receipt_line" -ge "$source_refresh_line" ] \
     || [ "$source_refresh_line" -ge "$writer_lease_line" ] \
     || [ "$writer_lease_line" -ge "$ingestion_start_line" ]; then
     fail_queued_platform_test "queued ingestion can start before the current completion gate"
