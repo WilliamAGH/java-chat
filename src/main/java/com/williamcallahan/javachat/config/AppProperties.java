@@ -27,7 +27,6 @@ public class AppProperties {
     private static final String RAG_KEY = "app.rag";
     private static final String LOCAL_EMBED_KEY = "app.local-embedding";
     private static final String DOCS_KEY = "app.docs";
-    private static final String DIAG_KEY = "app.diagnostics";
     private static final String QDRANT_KEY = "app.qdrant";
     private static final String CORS_KEY = "app.cors";
     private static final String CLERK_KEY = "app.clerk";
@@ -49,7 +48,6 @@ public class AppProperties {
     private RetrievalAugmentationConfig rag = new RetrievalAugmentationConfig();
     private LocalEmbedding localEmbedding = new LocalEmbedding();
     private DocumentationConfig docs = new DocumentationConfig();
-    private Diagnostics diagnostics = new Diagnostics();
     private QdrantProperties qdrant = new QdrantProperties();
     private CorsConfig cors = new CorsConfig();
     private ClerkConfig clerk = new ClerkConfig();
@@ -75,7 +73,6 @@ public class AppProperties {
         requireConfiguredSection(rag, RAG_KEY).validateConfiguration();
         requireConfiguredSection(localEmbedding, LOCAL_EMBED_KEY).validateConfiguration();
         requireConfiguredSection(docs, DOCS_KEY).validateConfiguration();
-        requireConfiguredSection(diagnostics, DIAG_KEY).validateConfiguration();
         requireConfiguredSection(qdrant, QDRANT_KEY).validateConfiguration();
         requireConfiguredSection(cors, CORS_KEY).validateConfiguration();
         requireConfiguredSection(clerk, CLERK_KEY).validateConfiguration();
@@ -214,14 +211,6 @@ public class AppProperties {
 
     public void setDocs(DocumentationConfig docs) {
         this.docs = requireConfiguredSection(docs, DOCS_KEY);
-    }
-
-    public Diagnostics getDiagnostics() {
-        return diagnostics;
-    }
-
-    public void setDiagnostics(Diagnostics diagnostics) {
-        this.diagnostics = requireConfiguredSection(diagnostics, DIAG_KEY);
     }
 
     /**

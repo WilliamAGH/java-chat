@@ -10,8 +10,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.williamcallahan.javachat.adapters.out.clerk.ClerkApiKeyVerifier;
 import com.williamcallahan.javachat.application.auth.VerifiedApiKey;
+import com.williamcallahan.javachat.model.KnowledgeGroup;
 import com.williamcallahan.javachat.service.EmbeddingClient;
+import com.williamcallahan.javachat.service.KnowledgeBaseInventoryService;
 import io.qdrant.client.QdrantClient;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.Answers;
@@ -23,7 +26,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Verifies the Clerk-enabled security chain end to end: anonymous callers are
- * rejected while verified session tokens reach the identity endpoint.
+ * rejected while verified session tokens and API keys reach the authenticated
+ * endpoints ({@code /api/me}, {@code /api/me/api-key}, {@code /api/knowledge/groups}).
  *
  * <p>Runs with the dev-shaped Clerk properties so the conditional
  * {@code clerkJwtDecoder} bean and the resource-server wiring are active,
@@ -56,9 +60,41 @@ class AuthenticatedUserEndpointSecurityIntegrationTest {
     @MockitoBean
     ClerkApiKeyVerifier clerkApiKeyVerifier;
 
+    @MockitoBean
+    KnowledgeBaseInventoryService knowledgeBaseInventoryService;
+
     @Test
     void anonymousRequestIsRejected() throws Exception {
         mockMvc.perform(get("/api/me")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void anonymousRequestToKnowledgeGroupsIsRejected() throws Exception {
+        mockMvc.perform(get("/api/knowledge/groups")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void verifiedApiKeyReachesKnowledgeGroups() throws Exception {
+        when(clerkApiKeyVerifier.verify(CLERK_API_KEY_SECRET))
+                .thenReturn(Optional.of(new VerifiedApiKey(CLERK_API_KEY_ID, CLERK_USER_ID)));
+        when(knowledgeBaseInventoryService.listKnowledgeGroups())
+                .thenReturn(List.of(new KnowledgeGroup("chat-docs", "DOCS", "oracle/javase/25/api", 10)));
+
+        mockMvc.perform(get("/api/knowledge/groups").header("Authorization", "Bearer " + CLERK_API_KEY_SECRET))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].collection").value("chat-docs"))
+                .andExpect(jsonPath("$[0].name").value("oracle/javase/25/api"))
+                .andExpect(jsonPath("$[0].chunks").value(10));
+    }
+
+    @Test
+    void verifiedClerkSessionReachesKnowledgeGroups() throws Exception {
+        when(knowledgeBaseInventoryService.listKnowledgeGroups()).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/knowledge/groups")
+                        .with(jwt().jwt(sessionToken -> sessionToken.subject(CLERK_USER_ID))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
     }
 
     @Test

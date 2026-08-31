@@ -297,6 +297,15 @@ public final class DocsSourceRegistry {
                     "current",
                     DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
             new DocumentationSource(
+                    "https://clerk.com/docs/llms-full.txt",
+                    "clerk",
+                    "Clerk Documentation",
+                    "clerk",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.SINGLE_DOCUMENT),
+            new DocumentationSource(
                     "https://doc.traefik.io/traefik/",
                     "traefik",
                     "Traefik Proxy Documentation",

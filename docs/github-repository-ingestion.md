@@ -22,7 +22,7 @@ metadata required for incremental synchronization.
 
 ## Commands
 
-All GitHub ingestion commands run in headless CLI mode (`spring.main.web-application-type=none`), so they do not bind an HTTP port and can run concurrently with the main app or other ingestion jobs. Each CLI invocation runs in its own short-lived JVM process and exits automatically after completion.
+All GitHub ingestion commands run in headless CLI mode (`spring.main.web-application-type=none`), so they do not bind an HTTP port and can run concurrently with the main app; a shared Qdrant writer lease allows only one CLI ingestion job at a time. Each CLI invocation runs in its own short-lived JVM process and exits automatically after completion.
 
 Runtime configuration precedence for this pipeline:
 
@@ -88,7 +88,7 @@ Per file, ingestion stores marker metadata in the active generation's configured
 
 On rerun:
 
-- unchanged file + sufficient Qdrant points: skipped
+- unchanged file + exact Qdrant point IDs: skipped
 - changed file: embed and upsert the complete replacement, then remove stale same-collection point IDs and local chunks
 - marker from another or unknown collection generation: fail without vector, marker, or parsed-state mutation
 
@@ -96,13 +96,13 @@ An embedding or upsert failure leaves the prior complete page and its marker int
 
 ## Failure diagnostics and retry behavior
 
-- GitHub ingestion fails fast when embedding or vector writes fail.
-- Preflight validates the gateway model alias and `X-Tier: batch` embedding batches of 1 and 4 before ingestion starts.
+- GitHub ingestion fails fast on terminal embedding or vector-write failures.
+- Preflight validates the gateway model alias and `X-Tier: batch` embedding batches of 1 and 8 before ingestion starts.
 - When null/invalid vectors are detected, diagnostics now state likely causes explicitly:
   - wrong endpoint (must resolve to `/v1/embeddings`)
   - non-embedding model
   - provider payload bug
-- Batch ingestion requests perform one provider attempt so a failed batch cannot silently become partial success.
+- Batch ingestion requests retry classified transient embedding-provider failures before the Qdrant mutation boundary, so a failed batch cannot silently become partial success.
 - On terminal failure, `scripts/process_github_repo.sh` prints a failure summary extracted from `process_github_repo.log`, including:
   - failure source classification (`AI Embedding API`, `Qdrant API`, `GitHub API`, or `Application/Unknown`),
   - explicit rate-limit diagnosis (`No rate limit detected` or detected API + evidence),

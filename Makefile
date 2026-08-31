@@ -3,7 +3,7 @@
 
 include config/make/common.mk
 
-.PHONY: all help clean build test test-shell test-cli test-qdrant-integration lint lint-ast lint-frontend format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-doc-sets process-github-repo full-pipeline frontend-install frontend-build
+.PHONY: all help clean build test test-shell test-cli test-qdrant-integration probe lint lint-ast lint-frontend format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-doc-sets process-github-repo full-pipeline frontend-install frontend-build
 
 all: help ## Default target (alias)
 
@@ -47,6 +47,13 @@ test-cli: ## Run command-line client tests
 
 test-qdrant-integration: ## Run synthetic hybrid-contract checks against local Qdrant 1.18.3
 	bash scripts/test_qdrant_1_18_integration.sh
+
+probe: ## Run an ephemeral JShell probe against compiled classes (FILE=<path outside repo>/check.jsh)
+	@if [ -z "$$FILE" ]; then \
+	  echo "$(RED)Usage: make probe FILE=<path outside repo>/check.jsh$(NC)" >&2; \
+	  exit 2; \
+	fi
+	@bash scripts/probe_jshell.sh "$$FILE"
 
 lint: lint-ast lint-frontend ## Run static analysis (Java + Frontend)
 	$(LOCKED_GRADLEW) spotbugsMain spotbugsTest pmdMain pmdTest

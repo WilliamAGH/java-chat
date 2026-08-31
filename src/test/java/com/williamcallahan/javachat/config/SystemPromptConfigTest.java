@@ -126,12 +126,15 @@ class SystemPromptConfigTest {
     }
 
     @Test
-    void shouldDeclineOffTopicQuestionsWithinScopeRules() {
+    void shouldAnswerRetrievedPlatformDocumentationAndDeclineNonSoftwareTopics() {
         String corePrompt = systemPromptConfig.getCoreSystemPrompt();
         String lowQualityPrompt = systemPromptConfig.getLowQualitySearchPrompt();
 
         assertAll(
                 () -> assertTrue(corePrompt.contains("## Scope")),
+                () -> assertTrue(corePrompt.contains("containers, deployment platforms, infrastructure")),
+                () -> assertTrue(corePrompt.contains("authentication, databases, and developer tools")),
+                () -> assertTrue(corePrompt.contains("Apply Java defaults and Java-specific guidance only")),
                 () -> assertTrue(corePrompt.contains("do NOT answer its substance")),
                 () -> assertTrue(corePrompt.contains("do not refuse to answer in-scope questions")),
                 () -> assertTrue(lowQualityPrompt.contains("off-topic questions are still declined")));
