@@ -51,7 +51,12 @@ function credentialsPath() {
 /** Normalizes a host so "javachat.ai" and a trailing slash both resolve alike. */
 function normalizeHost(host) {
   const candidate = host.includes("://") ? host : `https://${host}`;
-  const parsed = new URL(candidate);
+  let parsed;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error(`Invalid JavaChat host "${host}": expected a URL like https://javachat.ai`);
+  }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     throw new Error("JavaChat host must use HTTP or HTTPS.");
   }
@@ -242,8 +247,13 @@ async function authorizeThroughBrowser(host, shouldOpenBrowser) {
 
 async function commandLogin(host, options) {
   const storedHosts = await readCredentials();
-  const existing = env.JAVACHAT_API_KEY?.trim() || storedHosts[host]?.apiKey;
-  if (existing) {
+  if (env.JAVACHAT_API_KEY?.trim()) {
+    stderr.write(
+      `JAVACHAT_API_KEY is set and already authenticates requests to ${host}. Unset it to sign in with the browser instead.\n`,
+    );
+    return 0;
+  }
+  if (storedHosts[host]?.apiKey) {
     stderr.write(`Already signed in to ${host}. Run "javachat logout" before replacing the key.\n`);
     return 0;
   }
@@ -261,6 +271,12 @@ async function commandLogin(host, options) {
 async function commandLogout(host) {
   const allHosts = await readCredentials();
   if (!allHosts[host]) {
+    if (env.JAVACHAT_API_KEY?.trim()) {
+      stderr.write(
+        `No stored credential for ${host}; authentication comes from JAVACHAT_API_KEY. Unset it to sign out.\n`,
+      );
+      return 0;
+    }
     stderr.write(`No stored credential for ${host}.\n`);
     return 0;
   }
@@ -519,6 +535,7 @@ Options
   --verbose       Show retrieval progress on stderr
   --no-browser    Print the approval URL instead of opening a browser
   --version       Show the installed CLI version
+  --              Treat everything after it as question text (for questions starting with -)
 
 Environment
   JAVACHAT_API_KEY   Use this key instead of the stored one (for CI)
@@ -526,16 +543,29 @@ Environment
 `;
 
 function parseArguments(rawArguments) {
-  const options = { verbose: false, newSession: false, noBrowser: false };
+  const options = { verbose: false, newSession: false, noBrowser: false, help: false };
   let host = env.JAVACHAT_HOST?.trim() || DEFAULT_HOST;
   const positional = [];
   for (let index = 0; index < rawArguments.length; index += 1) {
     const argument = rawArguments[index];
-    if (argument === "--host") host = rawArguments[++index] ?? host;
-    else if (argument === "--verbose" || argument === "-v") options.verbose = true;
+    if (argument === "--") {
+      positional.push(...rawArguments.slice(index + 1));
+      break;
+    }
+    if (argument === "--host") {
+      const hostValue = rawArguments[index + 1];
+      if (!hostValue || hostValue.startsWith("-")) {
+        throw new Error("--host requires a value, e.g. javachat --host https://javachat.ai");
+      }
+      host = hostValue;
+      index += 1;
+    } else if (argument === "--verbose" || argument === "-v") options.verbose = true;
     else if (argument === "--new") options.newSession = true;
     else if (argument === "--no-browser") options.noBrowser = true;
-    else positional.push(argument);
+    else if (argument === "--help" || argument === "-h") options.help = true;
+    else if (argument.startsWith("-")) {
+      throw new Error(`Unknown option: ${argument}. Run "javachat --help" for usage.`);
+    } else positional.push(argument);
   }
   return { host: normalizeHost(host), options, positional };
 }
@@ -550,13 +580,18 @@ async function main() {
   const { host, options, positional } = parseArguments(rawArguments);
   const [first, ...rest] = positional;
 
-  if (!first || first === "--help" || first === "-h" || first === "help") {
+  if (options.help || first === "help" || !first) {
     stdout.write(USAGE);
-    return first ? 0 : 1;
+    return options.help || first ? 0 : 1;
   }
-  if (first === "login") return await commandLogin(host, options);
-  if (first === "logout") return await commandLogout(host);
-  if (first === "whoami") return await commandWhoami(host);
+  if (first === "login" || first === "logout" || first === "whoami") {
+    if (rest.length > 0) {
+      throw new Error(`javachat ${first} takes no arguments.`);
+    }
+    if (first === "login") return await commandLogin(host, options);
+    if (first === "logout") return await commandLogout(host);
+    return await commandWhoami(host);
+  }
 
   const question = (first === "ask" ? rest : positional).join(" ").trim();
   if (!question) {

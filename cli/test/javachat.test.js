@@ -276,6 +276,7 @@ test("stores and verifies a browser-created key on successful login", async (tes
     await readFile(join(configurationHome, "javachat", "credentials.json"), "utf8"),
   );
   assert.equal(storedCredentials[host].apiKey, TEST_API_KEY);
+  assert.equal(typeof storedCredentials[host].sessionId, "string");
 });
 
 test("preserves a browser-created key when identity verification is unavailable", async (testContext) => {
@@ -304,6 +305,62 @@ test("preserves a browser-created key when identity verification is unavailable"
     await readFile(join(configurationHome, "javachat", "credentials.json"), "utf8"),
   );
   assert.equal(storedCredentials[host].apiKey, TEST_API_KEY);
+  assert.equal(typeof storedCredentials[host].sessionId, "string");
+});
+
+test("rejects an unknown option instead of treating it as a question", async () => {
+  const cliExecution = await runCli(["--hots", "https://dev.javachat.ai", "whoami"]);
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /Unknown option: --hots/);
+});
+
+test("rejects --host without a value", async () => {
+  const cliExecution = await runCli(["whoami", "--host"]);
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /--host requires a value/);
+});
+
+test("describes the offending host value when it is not a URL", async () => {
+  const cliExecution = await runCli(["--host", "not a url", "--help"]);
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /Invalid JavaChat host "not a url"/);
+});
+
+test("rejects stray arguments on subcommands", async () => {
+  const cliExecution = await runCli(["whoami", "extra"]);
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /javachat whoami takes no arguments/);
+});
+
+test("login points at JAVACHAT_API_KEY when it provides the authentication", async (testContext) => {
+  const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
+  testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
+
+  const cliExecution = await runCli(["login", "--host", "https://javachat.ai"], {
+    JAVACHAT_API_KEY: TEST_API_KEY,
+    XDG_CONFIG_HOME: configurationHome,
+  });
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.match(cliExecution.standardError, /Unset it to sign in with the browser instead/);
+  assert.doesNotMatch(cliExecution.standardError, /logout/);
+});
+
+test("logout explains JAVACHAT_API_KEY when no credential is stored", async (testContext) => {
+  const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
+  testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
+
+  const cliExecution = await runCli(["logout", "--host", "https://javachat.ai"], {
+    JAVACHAT_API_KEY: TEST_API_KEY,
+    XDG_CONFIG_HOME: configurationHome,
+  });
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.match(cliExecution.standardError, /authentication comes from JAVACHAT_API_KEY/);
 });
 
 async function waitForCliState(assertion, timeoutMilliseconds = 2000) {
