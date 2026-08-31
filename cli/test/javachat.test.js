@@ -363,6 +363,139 @@ test("logout explains JAVACHAT_API_KEY when no credential is stored", async (tes
   assert.match(cliExecution.standardError, /authentication comes from JAVACHAT_API_KEY/);
 });
 
+test("knowledge requires a credential before calling the API", async (testContext) => {
+  const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
+  testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
+
+  const cliExecution = await runCli(["knowledge", "--host", "https://javachat.ai"], {
+    JAVACHAT_API_KEY: "",
+    XDG_CONFIG_HOME: configurationHome,
+  });
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /Not signed in to https:\/\/javachat\.ai/);
+});
+
+test("knowledge lists the ingested document groups", async (testContext) => {
+  const apiServer = createServer((request, response) => {
+    assert.equal(request.url, "/api/knowledge/groups");
+    assert.equal(request.headers.authorization, `Bearer ${TEST_API_KEY}`);
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        { collection: "chat-docs", kind: "DOCS", name: "oracle/javase/25/api", chunks: 10 },
+        { collection: "chat-docs", kind: "DOCS", name: "jetbrains/idea/2025/09", chunks: 1 },
+        { collection: "chat-github-repo", kind: "GITHUB", name: "https://github.com/acme/repo", chunks: 7 },
+      ]),
+    );
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const apiAddress = apiServer.address();
+  assert.notEqual(apiAddress, null);
+  assert.equal(typeof apiAddress, "object");
+
+  const cliExecution = await runCli(["knowledge", "--host", `http://127.0.0.1:${apiAddress.port}`], {
+    JAVACHAT_API_KEY: TEST_API_KEY,
+  });
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.match(cliExecution.standardOutput, /Knowledge base at http:\/\/127\.0\.0\.1:/);
+  assert.match(cliExecution.standardOutput, /DOCS — chat-docs/);
+  assert.match(cliExecution.standardOutput, /oracle\/javase\/25\/api \(10 chunks\)/);
+  assert.match(cliExecution.standardOutput, /jetbrains\/idea\/2025\/09 \(1 chunk\)/);
+  assert.match(cliExecution.standardOutput, /GITHUB — chat-github-repo/);
+  assert.match(cliExecution.standardOutput, /3 groups across 2 collections\./);
+  assert.equal(cliExecution.standardError, "");
+});
+
+test("knowledge reports an empty knowledge base", async (testContext) => {
+  const apiServer = createServer((request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end("[]");
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const apiAddress = apiServer.address();
+  assert.notEqual(apiAddress, null);
+  assert.equal(typeof apiAddress, "object");
+
+  const cliExecution = await runCli(["knowledge", "--host", `http://127.0.0.1:${apiAddress.port}`], {
+    JAVACHAT_API_KEY: TEST_API_KEY,
+  });
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.match(cliExecution.standardOutput, /No document groups are ingested/);
+});
+
+test("knowledge rejects a malformed group list", async (testContext) => {
+  const apiServer = createServer((request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end('[{"collection":"chat-docs","kind":"DOCS"}]');
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const apiAddress = apiServer.address();
+  assert.notEqual(apiAddress, null);
+  assert.equal(typeof apiAddress, "object");
+
+  const cliExecution = await runCli(["knowledge", "--host", `http://127.0.0.1:${apiAddress.port}`], {
+    JAVACHAT_API_KEY: TEST_API_KEY,
+  });
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /malformed knowledge group/);
+});
+
+test("knowledge strips terminal control characters from server strings", async (testContext) => {
+  const apiServer = createServer((request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        { collection: "chat-docs", kind: "DOCS", name: "docs/\u001b]52;c;c3Bvb2Y=\u0007evil", chunks: 3 },
+      ]),
+    );
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const apiAddress = apiServer.address();
+  assert.notEqual(apiAddress, null);
+  assert.equal(typeof apiAddress, "object");
+
+  const cliExecution = await runCli(["knowledge", "--host", `http://127.0.0.1:${apiAddress.port}`], {
+    JAVACHAT_API_KEY: TEST_API_KEY,
+  });
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.doesNotMatch(cliExecution.standardOutput, /\u001b|\u0007/);
+  assert.match(cliExecution.standardOutput, /docs\/evil \(3 chunks\)/);
+});
+
+test("knowledge includes the server error body on failure", async (testContext) => {
+  const apiServer = createServer((request, response) => {
+    response.writeHead(401, { "content-type": "application/json" });
+    response.end('{"message":"API key is invalid, revoked, or expired."}');
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const apiAddress = apiServer.address();
+  assert.notEqual(apiAddress, null);
+  assert.equal(typeof apiAddress, "object");
+
+  const cliExecution = await runCli(["knowledge", "--host", `http://127.0.0.1:${apiAddress.port}`], {
+    JAVACHAT_API_KEY: TEST_API_KEY,
+  });
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /HTTP 401/);
+  assert.match(cliExecution.standardError, /API key is invalid, revoked, or expired\./);
+});
+
 async function waitForCliState(assertion, timeoutMilliseconds = 2000) {
   const deadline = Date.now() + timeoutMilliseconds;
   while (!assertion()) {

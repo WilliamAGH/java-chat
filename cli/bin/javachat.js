@@ -331,6 +331,84 @@ async function commandWhoami(host) {
 }
 
 /**
+ * Lists the document groups ingested in the deployment's knowledge base.
+ *
+ * The server owns the grouping (documentation-set tokens for the core
+ * collections, repository URLs for GitHub collections); the terminal's job is
+ * only to validate and print that inventory.
+ */
+async function commandKnowledge(host) {
+  const apiKey = await storedKeyFor(host);
+  if (!apiKey) {
+    stderr.write(`Not signed in to ${host}. Run "javachat login".\n`);
+    return 1;
+  }
+  const groupsResponse = await fetch(new URL("/api/knowledge/groups", host), {
+    headers: { accept: "application/json", authorization: `Bearer ${apiKey}` },
+  });
+  if (!groupsResponse.ok) {
+    const failureText = await groupsResponse.text().catch(() => "");
+    throw new Error(
+      `HTTP ${groupsResponse.status} from ${host}${failureText ? `: ${failureText}` : ""}`,
+    );
+  }
+  const knowledgeGroups = parseKnowledgeGroups(await groupsResponse.json(), host);
+  if (knowledgeGroups.length === 0) {
+    stdout.write(`No document groups are ingested in the knowledge base at ${host}.\n`);
+    return 0;
+  }
+  stdout.write(`Knowledge base at ${host}:\n`);
+  let currentCollection = null;
+  for (const knowledgeGroup of knowledgeGroups) {
+    if (knowledgeGroup.collection !== currentCollection) {
+      currentCollection = knowledgeGroup.collection;
+      stdout.write(
+        `\n${stripVTControlCharacters(knowledgeGroup.kind)} — ${stripVTControlCharacters(knowledgeGroup.collection)}\n`,
+      );
+    }
+    const chunkNoun = knowledgeGroup.chunks === 1 ? "chunk" : "chunks";
+    stdout.write(
+      `  ${stripVTControlCharacters(knowledgeGroup.name)} (${knowledgeGroup.chunks} ${chunkNoun})\n`,
+    );
+  }
+  const collectionCount = new Set(knowledgeGroups.map((knowledgeGroup) => knowledgeGroup.collection))
+    .size;
+  stdout.write(`\n${knowledgeGroups.length} groups across ${collectionCount} collections.\n`);
+  return 0;
+}
+
+/** Validates the server's group list; external data is untrusted until checked. */
+function parseKnowledgeGroups(rawKnowledgeGroups, host) {
+  if (!Array.isArray(rawKnowledgeGroups)) {
+    throw new Error(`JavaChat returned an invalid knowledge group list from ${host}.`);
+  }
+  return rawKnowledgeGroups.map((rawKnowledgeGroup) => {
+    if (
+      !rawKnowledgeGroup ||
+      typeof rawKnowledgeGroup !== "object" ||
+      Array.isArray(rawKnowledgeGroup) ||
+      typeof rawKnowledgeGroup.collection !== "string" ||
+      !rawKnowledgeGroup.collection ||
+      typeof rawKnowledgeGroup.kind !== "string" ||
+      !rawKnowledgeGroup.kind ||
+      typeof rawKnowledgeGroup.name !== "string" ||
+      !rawKnowledgeGroup.name ||
+      typeof rawKnowledgeGroup.chunks !== "number" ||
+      !Number.isInteger(rawKnowledgeGroup.chunks) ||
+      rawKnowledgeGroup.chunks < 0
+    ) {
+      throw new Error(`JavaChat returned a malformed knowledge group from ${host}.`);
+    }
+    return {
+      collection: rawKnowledgeGroup.collection,
+      kind: rawKnowledgeGroup.kind,
+      name: rawKnowledgeGroup.name,
+      chunks: rawKnowledgeGroup.chunks,
+    };
+  });
+}
+
+/**
  * Streams one answer, printing text as it arrives and citations at the end.
  *
  * Parses SSE by hand rather than pulling a dependency: the server emits a small
@@ -528,6 +606,7 @@ Usage
   javachat login                           Authorize this machine in your browser
   javachat logout                          Remove the local credential
   javachat whoami                          Show who the stored key belongs to
+  javachat knowledge                       List the document groups ingested in the knowledge base
 
 Options
   --host <url>    Target a different deployment (default ${DEFAULT_HOST})
@@ -584,13 +663,14 @@ async function main() {
     stdout.write(USAGE);
     return options.help || first ? 0 : 1;
   }
-  if (first === "login" || first === "logout" || first === "whoami") {
+  if (first === "login" || first === "logout" || first === "whoami" || first === "knowledge") {
     if (rest.length > 0) {
       throw new Error(`javachat ${first} takes no arguments.`);
     }
     if (first === "login") return await commandLogin(host, options);
     if (first === "logout") return await commandLogout(host);
-    return await commandWhoami(host);
+    if (first === "whoami") return await commandWhoami(host);
+    return await commandKnowledge(host);
   }
 
   const question = (first === "ask" ? rest : positional).join(" ").trim();
