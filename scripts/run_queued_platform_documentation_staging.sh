@@ -12,6 +12,7 @@ readonly QUEUE_POLL_INTERVAL_SECONDS=60
 readonly STAGING_INVOCATION_RECEIPT="$HOME/.local/state/java-chat/local-embedding-staging.invocation"
 readonly QUEUED_DOCUMENTATION_SOURCES="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,scala,groovy,clojure,spring-boot,quarkus,java/java21-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle-java25-release-notes,ibm-java25-overview,jetbrains-java25-article"
 readonly FINAL_JAVA_DOCUMENTATION_SOURCE="java/java26-complete"
+readonly QUEUED_STAGING_ATTEMPT_RECEIPT="$HOME/.local/state/java-chat/queued-platform-documentation-staging.attempted"
 
 if [ "$#" -ne 1 ] || [[ "$1" != --after-invocation=* ]]; then
     echo "Usage: $0 --after-invocation=SYSTEMD_INVOCATION_ID" >&2
@@ -91,6 +92,7 @@ if ! expected_staging_invocation_journal | grep -Fq 'LOCAL_STAGING_COMPLETE'; th
 fi
 printf '%s\n' "$EXPECTED_STAGING_INVOCATION_ID" > "$STAGING_INVOCATION_RECEIPT.next"
 mv -- "$STAGING_INVOCATION_RECEIPT.next" "$STAGING_INVOCATION_RECEIPT"
+touch "$QUEUED_STAGING_ATTEMPT_RECEIPT"
 
 # shellcheck source=lib/common_qdrant.sh
 source "$SCRIPT_DIRECTORY/lib/common_qdrant.sh"
