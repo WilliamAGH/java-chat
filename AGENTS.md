@@ -30,7 +30,8 @@ alwaysApply: true
 - [NO1a-e] Null/Optional Discipline (no null returns, use Optional/empty collections)
 - [AR1a-f] Architecture & Boundaries (canonical roots, layer rules, framework-free domain)
 - [CS1a-h] Code Smells (primitive obsession, data clumps, magic literals)
-- [VR1a-f] Verification Loops (build/test/run, slice validation, completion tail)
+- [VR1a-k] Verification Loops (build/test/run, slice validation, completion tail, cheapest lane, observable-boundary tests, probes vs tests)
+- [BR1a-b] Browser process boundary (browser tests are explicit, CI-owned on macOS Codex)
 - [JD1a-h] Javadoc Standards (mandatory, why > what)
 - [ND1a-h] Naming Discipline (intent-revealing, banned generics, constant naming, type names)
 
@@ -203,6 +204,16 @@ alwaysApply: true
 - [VR1d] **Validate each slice**: After completing an end-to-end slice ([CC1e]), run `make build` and `make test` before starting the next slice.
 - [VR1e] **Direct-Owner Cleanup Handoff**: Name the direct production owner, list redundant artifacts deleted, identify each intentional small boundary-local duplication and why it avoids schema machinery, and cite tests that exercise the behavior. Do not create a manifest, catalog, contract, registry, or parity report for handoff.
 - [VR1f] **Completion Tail**: When verification loops are green: commit, merge the task worktree to `dev`, push, and watch any CI run to a terminal verdict. GitHub issues are filed only for material defects or features (behavior, correctness, security, performance, data quality, or a governed contract); pedantic/nitpick/style-only findings are fixed in place or dropped, never filed. Fixes and issue scope follow the minimalism bar — reuse before new code, simplify before completing, per the `ponytail` and `ce-simplify-code` skills.
+- [VR1g] **Cheapest Lane First**: Answer each question on the cheapest rung that can answer it and stop there — compiler/LSP diagnostics, then `make lint-ast`, then a JShell probe against compiled classes ([VR1k]), then the running app ([VR1c]), then a committed test at the observable boundary ([VR1h]). Only the last rung persists. A committed JUnit test is the most expensive rung — test compile plus Spring context startup — and is never the first rung reached for.
+- [VR1h] **Observable Boundary**: A committed test asserts behavior at an observable boundary: HTTP status and body, SSE frames, persisted rows or files, returned values, or a real side effect. Never assert internals, mock interaction counts, or the text of the artifact under test. When a change exposes no reachable observable boundary, write NO test and say so in the handoff; a manufactured assertion is worse than no test.
+- [VR1i] **No Tautological Tests**: A test that reads the source or resource file whose behavior it claims to prove and asserts on that file's text is banned. The sole carve-out is a guard whose governed surface IS the text — source-scan rules under `config/sgconfig.yml`, `scripts/lint/`, and generated-output gates. Decide with one question: would this test fail under a plausible regression implemented with different text? If it would not, delete it. Reading fixtures, ingestion inputs, or produced artifacts as data is not tautological.
+- [VR1j] **Probes Are Not Tests**: An agent self-check — including an inverse-assertion scaffold written to confirm the agent's own mistake — is an ephemeral probe: run it, read it, delete it before committing. Never commit a probe into `src/test/`, `scripts/test_*.sh`, or `frontend/src/**/*.test.ts`. Committed tests pin durable behavioral contracts only.
+- [VR1k] **Probe Lane**: `make probe FILE=<path outside the repo>/check.jsh` runs `jshell` against already-compiled classes and invokes no build tool. Probes see BUILT bytecode only — an edited `.java` file is invisible until `make build` recompiles it, and the lane's STALE warning is the tell; never conclude an edited method works from a probe that warned STALE. Snippets MUST live outside every checkout and worktree; the lane refuses in-repo paths and writes nothing. Third-party types are absent from the probe classpath: append cache jars per [DS1a], or move up to [VR1c]. Never add a Gradle task or Gradle invocation to support this lane — Gradle's stale-output cleanup deletes `build/classes` when a run's task graph does not declare it, silently emptying the directory the probe reads.
+
+## [BR1] Browser Process Boundary
+
+- [BR1a] `make test` and `npm test` are browser-free. Playwright is an explicit `npm run test:browser`/GitHub CI lane; generic install, test, build, run, or verification requests never authorize it.
+- [BR1b] `frontend/playwright.config.ts` calls the canonical browser-process guard before server or browser startup. macOS Codex sessions fail before spawning Chrome/Chromium from any repo, worktree, tmp, scratch, private, subagent, or background path.
 
 ## [JD1] Javadoc Standards
 
@@ -236,7 +247,7 @@ alwaysApply: true
 
 - [LM1a] **Settings**: Do not change any LLM settings without explicit written approval.
 - [LM1b] **No Fallback**: Do not auto-fallback or regress models across providers; surface error to user.
-- [LM1c] **Config**: Generative inference MUST use exact `gpt-5.4` through the shared OpenAI-compatible gateway. Its model/base-url/api-key MUST come from `.env`/environment variables (see [EV1d]). All other LLM settings MUST come from Spring property files and `@ConfigurationProperties`.
+- [LM1c] **Config**: Generative inference MUST go through the shared OpenAI-compatible gateway using a non-blank `OPENAI_MODEL` gateway alias (default `gpt-5.4`). Its model/base-url/api-key MUST come from `.env`/environment variables (see [EV1d]). All other LLM settings MUST come from Spring property files and `@ConfigurationProperties`.
 - [LM1d] **Behavior**: Allowed: logging diagnostics. Not allowed: silently changing LLM behavior.
 - [LM1e] **Streaming**: TTFB < 200ms, streaming start < 500ms.
 - [LM1f] **Events**: `text`, `citation`, `code`, `enrichment`, `suggestion`, `status`.

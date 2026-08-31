@@ -315,13 +315,73 @@ assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
     --minimum-html-files \
     250 \
     --reject-regex \
-    '(^|/)([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(/|(-[^/]+)?\.html$)|(^|/)[^/]*-([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(-[^/]+)?\.html$' \
+    '(^|/)(custom-frontend-app(/|$)|home\.html$|multiplatform/(compose-multiplatform|get-started)\.html$)|(^|/)([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(/|(-[^/]+)?\.html$)|(^|/)[^/]*-([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(-[^/]+)?\.html$' \
     --seed-document-type \
     xml-sitemap \
     --seed-discovery-url \
     "https://kotlinlang.org/sitemap.xml" \
     --seed-source-prefix \
     "https://kotlinlang.org/docs/"
+
+if ! (
+    run_documentation_fetch --doc-sets=docker > /dev/null
+); then
+    fail_documentation_fetch_test "named Docker selection did not complete"
+fi
+
+assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
+    --url \
+    "https://docs.docker.com/" \
+    --mirror-path \
+    docker \
+    --name \
+    "Docker Documentation" \
+    --source-version \
+    current \
+    --identity-regex \
+    Docker \
+    --cut-directories \
+    0 \
+    --minimum-html-files \
+    1600 \
+    --seed-document-type \
+    xml-sitemap \
+    --seed-discovery-url \
+    "https://docs.docker.com/sitemap.xml" \
+    --seed-source-prefix \
+    "https://docs.docker.com/" \
+    --seed-reject-regex \
+    '^https://docs\.docker\.com/(build/(buildkit/dockerfile-release-notes|release-notes)|enterprise/security/provisioning/scim|reference/(api/(dvp/latest|engine/version/v1\.[0-9]+|hub/latest|registry/latest)|cli/docker/(build|builder/build|exec|images|info|mcp/(feature|tools)/list|ps|pull|push|run))|scout/release-notes/cli)/$'
+
+if ! (
+    run_documentation_fetch --doc-sets=clerk > /dev/null
+); then
+    fail_documentation_fetch_test "named Clerk selection did not complete"
+fi
+
+assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
+    --url \
+    "https://clerk.com/docs/" \
+    --mirror-path \
+    clerk \
+    --name \
+    "Clerk Documentation" \
+    --source-version \
+    current \
+    --identity-regex \
+    Clerk \
+    --cut-directories \
+    1 \
+    --minimum-html-files \
+    1 \
+    --plain-text-document-url \
+    "https://clerk.com/docs/llms-full.txt" \
+    --plain-text-document-title \
+    "Clerk Documentation" \
+    --minimum-plain-text-bytes \
+    500000 \
+    --plain-text-required-text \
+    "# Clerk"
 
 if ! (
     run_documentation_fetch --doc-sets=doppler-guides > /dev/null
@@ -776,7 +836,9 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     --seed-additional-discovery-url \
     "https://projectlombok.org/features/experimental/" \
     --seed-source-prefix \
-    "https://projectlombok.org/features/"
+    "https://projectlombok.org/features/" \
+    --seed-reject-regex \
+    '^https://projectlombok\.org/features/(?:experimental/)?all$'
 
 if ! (
     set --

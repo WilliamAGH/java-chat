@@ -88,7 +88,7 @@ See [local store directories](domains/local-store-directories.md) for details.
 
 ## Ingest via HTTP API
 
-With the app running:
+With the app running outside the `prod` profile:
 
 ```bash
 # Ingest a local docs directory

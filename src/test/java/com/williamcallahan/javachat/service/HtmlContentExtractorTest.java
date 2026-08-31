@@ -40,6 +40,27 @@ class HtmlContentExtractorTest {
     }
 
     @Test
+    void retainsMainContainerWhoseArticleFollowsSkipLinkText() {
+        Document document = Jsoup.parse("""
+            <html><body><main>
+              <div>
+                <a href="#article">Skip to content</a>
+                <article id="article">
+                  <h1>Show source citations in responses</h1>
+                  <p>Display source citations alongside generated answers.</p>
+                </article>
+              </div>
+            </main></body></html>
+            """);
+        HtmlContentExtractor extractor = new HtmlContentExtractor();
+
+        String extractedText = extractor.extractCleanContent(document);
+
+        assertTrue(extractedText.contains("Show source citations in responses"));
+        assertTrue(extractedText.contains("Display source citations alongside generated answers."));
+    }
+
+    @Test
     void extractsSerializedFormDetailsNestedInsideJavadocLists() {
         Document document = Jsoup.parse("""
             <html><head><title>Serialized Form (Spring AI Parent 1.1.2 API)</title></head>

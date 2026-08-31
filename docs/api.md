@@ -94,5 +94,6 @@ curl -N -H "Content-Type: application/json" \
 
 ## Ingestion
 
+- Available only outside the `prod` profile.
 - POST `/api/ingest?maxPages=...`
 - POST `/api/ingest/local?dir=...&maxFiles=...`

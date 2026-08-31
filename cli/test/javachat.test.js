@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import packageMetadata from "../package.json" with { type: "json" };
 
 const CLI_ENTRYPOINT = fileURLToPath(new URL("../bin/javachat.js", import.meta.url));
 const TEST_API_KEY = "ak_secret_0123456789abcdef0123456789abcdef";
@@ -75,6 +76,17 @@ test("prints usage without loading credentials", async () => {
 
   assert.equal(cliExecution.exitCode, 0);
   assert.match(cliExecution.standardOutput, /javachat login/);
+  assert.equal(cliExecution.standardError, "");
+});
+
+test("prints the installed version without loading credentials", async () => {
+  const cliExecution = await runCli(["--version"], {
+    XDG_CONFIG_HOME: CLI_ENTRYPOINT,
+    JAVACHAT_API_KEY: "",
+  });
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.equal(cliExecution.standardOutput, `${packageMetadata.version}\n`);
   assert.equal(cliExecution.standardError, "");
 });
 

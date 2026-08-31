@@ -201,6 +201,12 @@ class DocumentationSeedSecurityTest(unittest.TestCase):
                     ]
                 )
 
+    def test_plain_text_transport_fits_the_official_clerk_corpus(self) -> None:
+        self.assertGreaterEqual(
+            documentation_seed.MAXIMUM_PLAIN_TEXT_DOCUMENT_BYTES,
+            27_775_297,
+        )
+
     def test_matches_pcre_style_cloudflare_alias_regex(self) -> None:
         cloudflare_alias_regex = (
             r"^https://developers\.cloudflare\.com/"

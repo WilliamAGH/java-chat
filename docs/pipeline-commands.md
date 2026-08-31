@@ -237,7 +237,7 @@ Before launching the non-web CLI, `process_all_to_qdrant.sh` requires an exact `
 
 ## Ingest via HTTP API (runtime)
 
-With the app running, you can trigger ingestion directly via HTTP:
+With the app running outside the `prod` profile, you can trigger ingestion directly via HTTP:
 
 ```bash
 # Ingest local docs directory
@@ -267,7 +267,7 @@ set +a
 
 # With doc set filtering
 DOCS_DIR=/absolute/path/to/docs DOCS_SETS=spring-framework-reference \
-  java -Dspring.profiles.active=cli -jar "$app_jar" \
+  java -Dspring.profiles.active="cli,$SPRING_PROFILE" -jar "$app_jar" \
   --spring.main.web-application-type=none --server.port=0
 ```
 
