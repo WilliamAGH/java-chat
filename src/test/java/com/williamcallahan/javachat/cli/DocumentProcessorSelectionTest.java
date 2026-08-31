@@ -20,7 +20,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 /** Verifies that the CLI selects its direct-owned documentation sets without changing filter semantics. */
 class DocumentProcessorSelectionTest {
     private static final String DOCSET_ALL_SELECTOR = "all";
+    private static final String DOCSET_JAVA_21_COMPLETE_PATH = "java/java21-complete";
+    private static final String DOCSET_JAVA_24_COMPLETE_PATH = "java/java24-complete";
     private static final String DOCSET_JAVA_25_COMPLETE_PATH = "java/java25-complete";
+    private static final String DOCSET_JAVA_26_COMPLETE_PATH = "java/java26-complete";
     private static final String DOCSET_JAVA_25_COMPLETE_UPPERCASE_PATH = "JAVA/JAVA25-COMPLETE";
     private static final String DOCSET_UNKNOWN_MESSAGE_PREFIX = "DOCS_SETS contains unknown selectors: ";
     private static final String DOCSET_SPRING_AI_QUICK_PATH = "spring-ai";
@@ -45,6 +48,10 @@ class DocumentProcessorSelectionTest {
         assertEquals(blankDefaultSets, allSelectorSets);
         assertFalse(containsRelativePath(blankDefaultSets, DOCSET_SPRING_FRAMEWORK_QUICK_PATH));
         assertFalse(containsRelativePath(blankDefaultSets, DOCSET_SPRING_AI_QUICK_PATH));
+        assertTrue(containsRelativePath(allSelectorSets, DOCSET_JAVA_21_COMPLETE_PATH));
+        assertFalse(containsRelativePath(allSelectorSets, DOCSET_JAVA_24_COMPLETE_PATH));
+        assertTrue(containsRelativePath(allSelectorSets, DOCSET_JAVA_25_COMPLETE_PATH));
+        assertTrue(containsRelativePath(allSelectorSets, DOCSET_JAVA_26_COMPLETE_PATH));
     }
 
     @Test

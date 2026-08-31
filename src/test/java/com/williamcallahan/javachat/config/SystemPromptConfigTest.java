@@ -76,6 +76,11 @@ class SystemPromptConfigTest {
         assertAll(
                 () -> assertTrue(corePrompt.contains(SystemPromptConfig.SOURCE_FIDELITY_CLAUSE)),
                 () -> assertTrue(corePrompt.contains("at the requested major version")),
+                () -> assertTrue(corePrompt.contains("explicitly labeled as adjacent same-family evidence")),
+                () -> assertTrue(corePrompt.contains("nearest lower and higher records from the same source family")),
+                () -> assertTrue(corePrompt.contains("Never substitute another dependency or related project")),
+                () -> assertTrue(corePrompt.contains("missing evidence changes provenance, not answer availability")),
+                () -> assertTrue(corePrompt.contains("Never refuse an in-scope question")),
                 () -> assertTrue(corePrompt.contains("Source unavailable: <requested source or version>")),
                 () -> assertTrue(corePrompt.contains("never imply that the Sources panel verifies it")));
     }

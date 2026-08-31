@@ -763,7 +763,11 @@ if ! (
     fetch_all_official_sources
     grep -Fxq porkbun "$DEFAULT_SOURCE_CAPTURE" \
         && grep -Fxq porkbun-mcp "$DEFAULT_SOURCE_CAPTURE" \
-        && grep -Fxq cloudflare "$DEFAULT_SOURCE_CAPTURE"
+        && grep -Fxq cloudflare "$DEFAULT_SOURCE_CAPTURE" \
+        && grep -Fxq java/java21-complete "$DEFAULT_SOURCE_CAPTURE" \
+        && grep -Fxq java/java25-complete "$DEFAULT_SOURCE_CAPTURE" \
+        && grep -Fxq java/java26-complete "$DEFAULT_SOURCE_CAPTURE" \
+        && ! grep -Fxq java/java24-complete "$DEFAULT_SOURCE_CAPTURE"
 ); then
     fail_documentation_fetch_test "default documentation inventory omitted a platform source"
 fi

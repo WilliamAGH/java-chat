@@ -7,56 +7,40 @@ import org.junit.jupiter.api.Test;
 
 /** Verifies plural Java release extraction and semantic query boosting. */
 class QueryVersionExtractorTest {
-    private static final List<String> SUPPORTED_JAVA_RELEASES = List.of("21", "24", "25");
-
     @Test
     void extractsExplicitVersionsInEncounterOrderWithoutDuplicates() {
         assertEquals(
                 List.of("24", "21"),
-                QueryVersionExtractor.extractVersionNumbers(
-                        "Compare Java 24 with JDK 21 and Java SE 24", SUPPORTED_JAVA_RELEASES));
+                QueryVersionExtractor.extractVersionNumbers("Compare Java 24 with JDK 21 and Java SE 24"));
     }
 
     @Test
     void extractsComparisonShorthandAfterAnExplicitVersion() {
-        assertEquals(
-                List.of("21", "24"),
-                QueryVersionExtractor.extractVersionNumbers("Java 21/24 List.of", SUPPORTED_JAVA_RELEASES));
-        assertEquals(
-                List.of("21", "24"),
-                QueryVersionExtractor.extractVersionNumbers("JDK 21 vs 24 records", SUPPORTED_JAVA_RELEASES));
-        assertEquals(
-                List.of("21", "24"),
-                QueryVersionExtractor.extractVersionNumbers("JDK 21 vs. 24 records", SUPPORTED_JAVA_RELEASES));
-        assertEquals(
-                List.of("21", "24"),
-                QueryVersionExtractor.extractVersionNumbers("Java 21 + 24 streams", SUPPORTED_JAVA_RELEASES));
-        assertEquals(
-                List.of("21", "24", "25"),
-                QueryVersionExtractor.extractVersionNumbers("Java 21/24/25 streams", SUPPORTED_JAVA_RELEASES));
+        assertEquals(List.of("21", "22"), QueryVersionExtractor.extractVersionNumbers("Java 21/22 List.of"));
+        assertEquals(List.of("21", "22"), QueryVersionExtractor.extractVersionNumbers("JDK 21 vs 22 records"));
+        assertEquals(List.of("21", "22"), QueryVersionExtractor.extractVersionNumbers("JDK 21 vs. 22 records"));
+        assertEquals(List.of("21", "22"), QueryVersionExtractor.extractVersionNumbers("Java 21 + 22 streams"));
+        assertEquals(List.of("21", "22", "25"), QueryVersionExtractor.extractVersionNumbers("Java 21/22/25 streams"));
     }
 
     @Test
     void ignoresUnprefixedNumbersOutsideAComparisonChain() {
+        assertEquals(List.of("21"), QueryVersionExtractor.extractVersionNumbers("Java 21 with 50 examples"));
         assertEquals(
-                List.of("21"),
-                QueryVersionExtractor.extractVersionNumbers("Java 21 with 50 examples", SUPPORTED_JAVA_RELEASES));
-        assertEquals(
-                List.of("21", "24"),
-                QueryVersionExtractor.extractVersionNumbers(
-                        "Compare Java 21 and 24 and 2 examples", SUPPORTED_JAVA_RELEASES));
-        assertEquals(
-                List.of("21"),
-                QueryVersionExtractor.extractVersionNumbers("Explain Java 21 and 2 examples", SUPPORTED_JAVA_RELEASES));
-        assertEquals(
-                List.of(),
-                QueryVersionExtractor.extractVersionNumbers("Compare 21 and 24 examples", SUPPORTED_JAVA_RELEASES));
+                List.of("21", "22"),
+                QueryVersionExtractor.extractVersionNumbers("Compare Java 21 and 22 and 2 examples"));
+        assertEquals(List.of("21"), QueryVersionExtractor.extractVersionNumbers("Explain Java 21 and 2 examples"));
+        assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers("Compare 21 and 22 examples"));
+
+        assertEquals(List.of("21", "17"), QueryVersionExtractor.extractVersionNumbers("Java 21 vs 17"));
+        assertEquals(List.of("26", "28"), QueryVersionExtractor.extractVersionNumbers("Java 26 vs 28"));
+        assertEquals(List.of("100"), QueryVersionExtractor.extractVersionNumbers("Java 100"));
     }
 
     @Test
     void returnsEmptyVersionsForMissingQueries() {
-        assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers(null, SUPPORTED_JAVA_RELEASES));
-        assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers("  ", SUPPORTED_JAVA_RELEASES));
+        assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers(null));
+        assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers("  "));
     }
 
     @Test

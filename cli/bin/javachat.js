@@ -51,7 +51,12 @@ function credentialsPath() {
 /** Normalizes a host so "javachat.ai" and a trailing slash both resolve alike. */
 function normalizeHost(host) {
   const candidate = host.includes("://") ? host : `https://${host}`;
-  const parsed = new URL(candidate);
+  let parsed;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error(`Invalid JavaChat host "${host}": expected a URL like https://javachat.ai`);
+  }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     throw new Error("JavaChat host must use HTTP or HTTPS.");
   }
@@ -241,9 +246,14 @@ async function authorizeThroughBrowser(host, shouldOpenBrowser) {
 }
 
 async function commandLogin(host, options) {
+  if (env.JAVACHAT_API_KEY?.trim()) {
+    stderr.write(
+      `JAVACHAT_API_KEY is set and already authenticates requests to ${host}. Unset it to sign in with the browser instead.\n`,
+    );
+    return 0;
+  }
   const storedHosts = await readCredentials();
-  const existing = env.JAVACHAT_API_KEY?.trim() || storedHosts[host]?.apiKey;
-  if (existing) {
+  if (storedHosts[host]?.apiKey) {
     stderr.write(`Already signed in to ${host}. Run "javachat logout" before replacing the key.\n`);
     return 0;
   }
@@ -259,6 +269,12 @@ async function commandLogin(host, options) {
 }
 
 async function commandLogout(host) {
+  if (env.JAVACHAT_API_KEY?.trim()) {
+    stderr.write(
+      `Authentication for ${host} comes from JAVACHAT_API_KEY. Unset it, then run "javachat logout" again to remove any stored fallback credential.\n`,
+    );
+    return 0;
+  }
   const allHosts = await readCredentials();
   if (!allHosts[host]) {
     stderr.write(`No stored credential for ${host}.\n`);
@@ -312,6 +328,100 @@ async function commandWhoami(host) {
   }
   stdout.write(`${await fetchIdentity(host, apiKey)} at ${host}\n`);
   return 0;
+}
+
+/**
+ * Lists the document groups ingested in the deployment's knowledge base.
+ *
+ * The server owns the grouping (documentation-set tokens for the core
+ * collections, repository URLs for GitHub collections); the terminal's job is
+ * only to validate and print that inventory.
+ */
+async function commandKnowledge(host) {
+  const apiKey = await storedKeyFor(host);
+  if (!apiKey) {
+    stderr.write(`Not signed in to ${host}. Run "javachat login".\n`);
+    return 1;
+  }
+  const groupsResponse = await fetch(new URL("/api/knowledge/groups", host), {
+    headers: { accept: "application/json", authorization: `Bearer ${apiKey}` },
+  });
+  if (!groupsResponse.ok) {
+    const failureText = await groupsResponse.text().catch(() => "");
+    throw new Error(
+      `HTTP ${groupsResponse.status} from ${host}${failureText ? `: ${failureText}` : ""}`,
+    );
+  }
+  const knowledgeInventory = parseKnowledgeInventory(await groupsResponse.json(), host);
+  const knowledgeGroups = knowledgeInventory.groups;
+  if (knowledgeGroups.length === 0) {
+    stdout.write(`No document groups are ingested in the knowledge base at ${host}.\n`);
+    return 0;
+  }
+  stdout.write(`Knowledge base at ${host}:\n`);
+  let currentCollection = null;
+  for (const knowledgeGroup of knowledgeGroups) {
+    if (knowledgeGroup.collection !== currentCollection) {
+      currentCollection = knowledgeGroup.collection;
+      stdout.write(
+        `\n${stripVTControlCharacters(knowledgeGroup.kind)} — ${stripVTControlCharacters(knowledgeGroup.collection)}\n`,
+      );
+    }
+    const chunkNoun = knowledgeGroup.chunks === 1 ? "chunk" : "chunks";
+    stdout.write(
+      `  ${stripVTControlCharacters(knowledgeGroup.name)} (${knowledgeGroup.chunks} ${chunkNoun})\n`,
+    );
+  }
+  const collectionCount = new Set(knowledgeGroups.map((knowledgeGroup) => knowledgeGroup.collection))
+    .size;
+  const totalChunkNoun = knowledgeInventory.totalChunks === 1 ? "chunk" : "chunks";
+  stdout.write(
+    `\n${knowledgeInventory.totalChunks} ${totalChunkNoun} across ${knowledgeGroups.length} groups in ${collectionCount} collections.\n`,
+  );
+  return 0;
+}
+
+/** Validates the server's inventory; external data is untrusted until checked. */
+function parseKnowledgeInventory(rawKnowledgeInventory, host) {
+  if (
+    !rawKnowledgeInventory ||
+    typeof rawKnowledgeInventory !== "object" ||
+    Array.isArray(rawKnowledgeInventory) ||
+    !Array.isArray(rawKnowledgeInventory.groups) ||
+    !Number.isSafeInteger(rawKnowledgeInventory.totalChunks) ||
+    rawKnowledgeInventory.totalChunks < 0
+  ) {
+    throw new Error(`JavaChat returned an invalid knowledge inventory from ${host}.`);
+  }
+  const groups = rawKnowledgeInventory.groups.map((rawKnowledgeGroup) => {
+    if (
+      !rawKnowledgeGroup ||
+      typeof rawKnowledgeGroup !== "object" ||
+      Array.isArray(rawKnowledgeGroup) ||
+      typeof rawKnowledgeGroup.collection !== "string" ||
+      !rawKnowledgeGroup.collection ||
+      typeof rawKnowledgeGroup.kind !== "string" ||
+      !rawKnowledgeGroup.kind ||
+      typeof rawKnowledgeGroup.name !== "string" ||
+      !rawKnowledgeGroup.name ||
+      typeof rawKnowledgeGroup.chunks !== "number" ||
+      !Number.isSafeInteger(rawKnowledgeGroup.chunks) ||
+      rawKnowledgeGroup.chunks < 0
+    ) {
+      throw new Error(`JavaChat returned a malformed knowledge group from ${host}.`);
+    }
+    return {
+      collection: rawKnowledgeGroup.collection,
+      kind: rawKnowledgeGroup.kind,
+      name: rawKnowledgeGroup.name,
+      chunks: rawKnowledgeGroup.chunks,
+    };
+  });
+  const groupChunkTotal = groups.reduce((total, group) => total + group.chunks, 0);
+  if (!Number.isSafeInteger(groupChunkTotal) || groupChunkTotal !== rawKnowledgeInventory.totalChunks) {
+    throw new Error(`JavaChat returned an inconsistent knowledge inventory from ${host}.`);
+  }
+  return { groups, totalChunks: rawKnowledgeInventory.totalChunks };
 }
 
 /**
@@ -512,6 +622,7 @@ Usage
   javachat login                           Authorize this machine in your browser
   javachat logout                          Remove the local credential
   javachat whoami                          Show who the stored key belongs to
+  javachat knowledge                       List the document groups ingested in the knowledge base
 
 Options
   --host <url>    Target a different deployment (default ${DEFAULT_HOST})
@@ -519,51 +630,94 @@ Options
   --verbose       Show retrieval progress on stderr
   --no-browser    Print the approval URL instead of opening a browser
   --version       Show the installed CLI version
+  --              Treat everything after it as question text (for questions starting with -)
 
 Environment
   JAVACHAT_API_KEY   Use this key instead of the stored one (for CI)
   JAVACHAT_HOST      Default host when --host is absent
 `;
 
+const SUBCOMMANDS = new Map([
+  ["login", commandLogin],
+  ["logout", commandLogout],
+  ["whoami", commandWhoami],
+  ["knowledge", commandKnowledge],
+]);
+
 function parseArguments(rawArguments) {
-  const options = { verbose: false, newSession: false, noBrowser: false };
+  const options = {
+    verbose: false,
+    newSession: false,
+    noBrowser: false,
+    help: false,
+    version: false,
+  };
   let host = env.JAVACHAT_HOST?.trim() || DEFAULT_HOST;
   const positional = [];
   for (let index = 0; index < rawArguments.length; index += 1) {
     const argument = rawArguments[index];
-    if (argument === "--host") host = rawArguments[++index] ?? host;
-    else if (argument === "--verbose" || argument === "-v") options.verbose = true;
+    if (argument === "--") {
+      positional.push(...rawArguments.slice(index + 1));
+      break;
+    }
+    if (argument === "--host") {
+      const hostValue = rawArguments[index + 1];
+      if (!hostValue || hostValue.startsWith("-")) {
+        throw new Error("--host requires a value, e.g. javachat --host https://javachat.ai");
+      }
+      host = hostValue;
+      index += 1;
+    } else if (argument === "--verbose" || argument === "-v") options.verbose = true;
     else if (argument === "--new") options.newSession = true;
     else if (argument === "--no-browser") options.noBrowser = true;
-    else positional.push(argument);
+    else if (argument === "--help" || argument === "-h") options.help = true;
+    else if (argument === "--version") options.version = true;
+    else if (argument.startsWith("-")) {
+      throw new Error(`Unknown option: ${argument}. Run "javachat --help" for usage.`);
+    } else {
+      positional.push(argument);
+      const questionStarted =
+        (!SUBCOMMANDS.has(positional[0]) && positional[0] !== "ask" && positional[0] !== "help") ||
+        (positional[0] === "ask" && positional.length > 1);
+      if (questionStarted) {
+        positional.push(...rawArguments.slice(index + 1));
+        break;
+      }
+    }
   }
-  return { host: normalizeHost(host), options, positional };
+  return { host, options, positional };
 }
 
 async function main() {
   const rawArguments = argv.slice(2);
-  if (rawArguments.includes("--version")) {
+  const { host, options, positional } = parseArguments(rawArguments);
+  const [first, ...rest] = positional;
+
+  if (options.version) {
+    if (positional.length > 0) throw new Error("javachat --version takes no arguments.");
     stdout.write(`${packageMetadata.version}\n`);
     return 0;
   }
 
-  const { host, options, positional } = parseArguments(rawArguments);
-  const [first, ...rest] = positional;
-
-  if (!first || first === "--help" || first === "-h" || first === "help") {
+  const normalizedHost = normalizeHost(host);
+  if (options.help || first === "help" || !first) {
     stdout.write(USAGE);
-    return first ? 0 : 1;
+    return options.help || first ? 0 : 1;
   }
-  if (first === "login") return await commandLogin(host, options);
-  if (first === "logout") return await commandLogout(host);
-  if (first === "whoami") return await commandWhoami(host);
+  const subcommand = SUBCOMMANDS.get(first);
+  if (subcommand) {
+    if (rest.length > 0) {
+      throw new Error(`javachat ${first} takes no arguments.`);
+    }
+    return await subcommand(normalizedHost, options);
+  }
 
   const question = (first === "ask" ? rest : positional).join(" ").trim();
   if (!question) {
     stderr.write('Nothing to ask. Try: javachat "How do Java records work?"\n');
     return 1;
   }
-  return await commandAsk(host, question, options);
+  return await commandAsk(normalizedHost, question, options);
 }
 
 main()

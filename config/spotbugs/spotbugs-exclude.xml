@@ -56,6 +56,10 @@
         <Bug code="EI2"/>
         <Class name="com.williamcallahan.javachat.web.TooltipController"/>
     </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.adapters.in.web.knowledge.KnowledgeBaseController"/>
+    </Match>
 
     <!--
         AppProperties is a Spring @ConfigurationProperties holder; nested objects are intentionally mutable for
@@ -187,6 +191,11 @@
     <Match>
         <Bug pattern="EI_EXPOSE_REP"/>
         <Class name="com.williamcallahan.javachat.service.ingestion.IngestionStorageServices"/>
+    </Match>
+    <!-- KnowledgeInventory stores List.copyOf(groups); its generated accessor returns that immutable list. -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+        <Class name="com.williamcallahan.javachat.domain.knowledge.KnowledgeInventory"/>
     </Match>
     <Match>
         <Bug pattern="EI_EXPOSE_REP2"/>

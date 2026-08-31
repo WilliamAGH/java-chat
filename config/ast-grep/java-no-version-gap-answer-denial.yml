@@ -1,0 +1,16 @@
+# New regression guard: changes require direct verification against [VG1a-e].
+#
+# Detects unsupported-version exception types governed by [VG1a-e].
+
+id: java-no-version-gap-answer-denial
+language: Java
+severity: error
+message: |
+  [VG1a-e] Unsupported-version answer-denial type detected.
+files:
+  - 'src/main/java/**'
+rule:
+  pattern: class $CLASS extends $BASE { $$$BODY }
+constraints:
+  CLASS:
+    regex: '(?i)(Unsupported.*(Version|Release)|(Version|Release).*Unsupported)'

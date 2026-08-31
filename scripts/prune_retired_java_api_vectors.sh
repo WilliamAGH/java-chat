@@ -39,7 +39,7 @@ java_api_vector_prune_required() {
             return 0
         fi
         case "$trimmed_selector" in
-            java/java21-complete|java/java24-complete|java/java25-complete)
+            java/java21-complete|java/java25-complete|java/java26-complete)
                 canonical_java_api_selected=true
                 ;;
             java/java*-complete)

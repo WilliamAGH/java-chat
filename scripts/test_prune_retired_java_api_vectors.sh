@@ -228,7 +228,7 @@ fi
 if ! java_api_vector_prune_required "all"; then
     fail_retired_java_api_vector_prune_test "all selector did not require pruning"
 fi
-if ! java_api_vector_prune_required "kotlin, java/java24-complete"; then
+if ! java_api_vector_prune_required "kotlin, java/java26-complete"; then
     fail_retired_java_api_vector_prune_test "mixed Java API selector did not require pruning"
 fi
 if java_api_vector_prune_required "kotlin,spring-boot"; then

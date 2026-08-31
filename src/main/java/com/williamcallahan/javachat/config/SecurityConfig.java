@@ -47,6 +47,7 @@ public class SecurityConfig {
     private static final String PROMETHEUS_ENDPOINT = "/actuator/prometheus";
     private static final String INFO_ENDPOINT = "/actuator/info";
     private static final String AUTHENTICATED_USER_ENDPOINT = "/api/me";
+    private static final String KNOWLEDGE_BASE_ENDPOINT = "/api/knowledge/**";
     private static final String CLERK_JWKS_URI_PROPERTY = "spring.security.oauth2.resourceserver.jwt.jwk-set-uri";
 
     /**
@@ -138,6 +139,8 @@ public class SecurityConfig {
                                 "/static/**")
                         .permitAll()
                         .requestMatchers(AUTHENTICATED_USER_ENDPOINT)
+                        .authenticated()
+                        .requestMatchers(KNOWLEDGE_BASE_ENDPOINT)
                         .authenticated()
                         .requestMatchers("/api/**")
                         .permitAll()

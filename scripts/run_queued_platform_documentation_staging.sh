@@ -10,7 +10,9 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
 readonly ACTIVE_STAGING_SERVICE="java-chat-local-embedding-staging.service"
 readonly QUEUE_POLL_INTERVAL_SECONDS=60
 readonly STAGING_INVOCATION_RECEIPT="$HOME/.local/state/java-chat/local-embedding-staging.invocation"
-readonly QUEUED_DOCUMENTATION_SOURCES="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,scala,groovy,clojure,spring-boot,quarkus,java/java21-complete,java/java24-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle-java25-release-notes,ibm-java25-overview,jetbrains-java25-article"
+readonly QUEUED_DOCUMENTATION_SOURCES="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,scala,groovy,clojure,spring-boot,quarkus,java/java21-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle-java25-release-notes,ibm-java25-overview,jetbrains-java25-article"
+readonly FINAL_JAVA_DOCUMENTATION_SOURCE="java/java26-complete"
+readonly QUEUED_STAGING_ATTEMPT_RECEIPT="$HOME/.local/state/java-chat/queued-platform-documentation-staging.attempted"
 
 if [ "$#" -ne 1 ] || [[ "$1" != --after-invocation=* ]]; then
     echo "Usage: $0 --after-invocation=SYSTEMD_INVOCATION_ID" >&2
@@ -21,6 +23,8 @@ if [[ ! "$EXPECTED_STAGING_INVOCATION_ID" =~ ^[0-9a-f]{32}$ ]]; then
     echo "Invalid staging systemd invocation identifier" >&2
     exit 1
 fi
+# Record every valid one-shot invocation before preflight so an old enabled unit cannot retry it on login.
+touch "$QUEUED_STAGING_ATTEMPT_RECEIPT"
 
 cd "$PROJECT_ROOT"
 
@@ -97,6 +101,8 @@ source "$SCRIPT_DIRECTORY/lib/common_qdrant.sh"
 ./scripts/fetch_all_docs.sh --doc-sets="$QUEUED_DOCUMENTATION_SOURCES"
 
 acquire_qdrant_writer_lease
-echo "QUEUED_PLATFORM_STAGING_START $(date -u '+%Y-%m-%dT%H:%M:%SZ') SETS=all"
-./scripts/process_all_to_qdrant.sh --doc-sets=all
+echo "QUEUED_PLATFORM_STAGING_START $(date -u '+%Y-%m-%dT%H:%M:%SZ') SETS=current_then_java26"
+./scripts/process_all_to_qdrant.sh --doc-sets="$QUEUED_DOCUMENTATION_SOURCES"
+./scripts/fetch_all_docs.sh --doc-sets="$FINAL_JAVA_DOCUMENTATION_SOURCE"
+./scripts/process_all_to_qdrant.sh --doc-sets="$FINAL_JAVA_DOCUMENTATION_SOURCE"
 echo "QUEUED_PLATFORM_STAGING_COMPLETE $(date -u '+%Y-%m-%dT%H:%M:%SZ')"

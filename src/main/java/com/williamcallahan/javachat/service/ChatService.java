@@ -13,6 +13,7 @@ import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.domain.prompt.SystemSegment;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.support.DocumentContentAdapter;
+import com.williamcallahan.javachat.util.QueryVersionExtractor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -126,7 +127,7 @@ public class ChatService {
         SystemSegment systemSegment = new SystemSegment(completePrompt, estimateTokens(completePrompt));
 
         List<ContextDocumentSegment> contextSegments =
-                buildContextSegments(contextDocs != null ? contextDocs : List.of());
+                buildContextSegments(contextDocs != null ? contextDocs : List.of(), latestUserMessage);
 
         List<ConversationTurnSegment> conversationSegments = buildConversationSegments(history);
 
@@ -208,7 +209,7 @@ public class ChatService {
         // Build structured segments
         SystemSegment systemSegment = new SystemSegment(systemPromptText, estimateTokens(systemPromptText));
 
-        List<ContextDocumentSegment> contextSegments = buildContextSegments(contextDocs);
+        List<ContextDocumentSegment> contextSegments = buildContextSegments(contextDocs, latestUserMessage);
         List<ConversationTurnSegment> conversationSegments = buildConversationSegments(history);
 
         CurrentQuerySegment querySegment =
@@ -273,8 +274,12 @@ public class ChatService {
     /**
      * Builds context document segments from retrieved documents.
      */
-    private List<ContextDocumentSegment> buildContextSegments(List<Document> contextDocuments) {
+    private List<ContextDocumentSegment> buildContextSegments(
+            List<Document> contextDocuments, String latestUserMessage) {
         List<ContextDocumentSegment> segments = new ArrayList<>();
+        List<String> requestedJavaVersions = QueryVersionExtractor.extractVersionNumbers(latestUserMessage);
+        List<DocsSourceRegistry.VersionedDocumentationEvidence> dependencyEvidence =
+                DocsSourceRegistry.versionedDocumentationEvidenceAll(latestUserMessage);
         for (int documentIndex = 0; documentIndex < contextDocuments.size(); documentIndex++) {
             Document document = contextDocuments.get(documentIndex);
             String rawUrl = DocumentFactory.metadataText(document, QdrantPayloadFieldSchema.URL_FIELD);
@@ -283,7 +288,10 @@ public class ChatService {
                     .trim();
             String documentationSet = DocumentFactory.metadataText(document, QdrantPayloadFieldSchema.DOC_SET_FIELD)
                     .trim();
-            String sourceFamily = sourceName.isBlank() ? documentationSet : sourceName;
+            String registeredSourceFamily = DocsSourceRegistry.documentationSourceFamily(documentationSet);
+            String sourceFamily = registeredSourceFamily.isBlank()
+                    ? (sourceName.isBlank() ? documentationSet : sourceName)
+                    : registeredSourceFamily;
             if (sourceFamily.isBlank()) {
                 sourceFamily = UNSPECIFIED_SOURCE_RECORD_FIELD;
             }
@@ -292,8 +300,36 @@ public class ChatService {
             if (sourceVersion.isBlank()) {
                 sourceVersion = UNSPECIFIED_SOURCE_RECORD_FIELD;
             }
-            String sourceRecordHeader =
-                    "[SOURCE RECORD family=\"" + sourceFamily + "\" version=\"" + sourceVersion + "\"]";
+            String resolvedSourceFamily = sourceFamily;
+            String resolvedSourceVersion = sourceVersion;
+            List<String> adjacentRequestedVersions = "java".equals(resolvedSourceFamily)
+                    ? requestedJavaVersions.stream()
+                            .filter(requestedVersion -> !requestedVersion.equals(resolvedSourceVersion))
+                            .filter(requestedVersion ->
+                                    DocsSourceRegistry.javaApiDocumentationSourcesForRelease(requestedVersion).stream()
+                                            .anyMatch(source ->
+                                                    source.javaRelease().equals(resolvedSourceVersion)))
+                            .toList()
+                    : dependencyEvidence.stream()
+                            .filter(evidence -> evidence.sourceFamily().equals(resolvedSourceFamily))
+                            .filter(evidence -> !evidence.requestedVersion().equals(resolvedSourceVersion))
+                            .filter(evidence -> evidence.sources().stream()
+                                    .anyMatch(source -> source.docSet().equals(documentationSet)
+                                            && source.docVersion().equals(resolvedSourceVersion)))
+                            .map(DocsSourceRegistry.VersionedDocumentationEvidence::requestedVersion)
+                            .toList();
+            String adjacentEvidenceFields = adjacentRequestedVersions.isEmpty()
+                    ? ""
+                    : " requestedVersions=\""
+                            + String.join(",", adjacentRequestedVersions)
+                            + "\" evidenceRelation=\"adjacent-same-family\"";
+            String sourceRecordHeader = "[SOURCE RECORD family=\""
+                    + sourceFamily
+                    + "\" version=\""
+                    + sourceVersion
+                    + "\""
+                    + adjacentEvidenceFields
+                    + "]";
             String documentContent = document.getText();
             String documentText = sourceRecordHeader + "\n" + (documentContent == null ? "" : documentContent);
 

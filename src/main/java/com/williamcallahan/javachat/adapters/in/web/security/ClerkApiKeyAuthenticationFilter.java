@@ -14,6 +14,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,9 +44,8 @@ public final class ClerkApiKeyAuthenticationFilter extends OncePerRequestFilter 
     private static final int CLERK_VERIFICATION_MAXIMUM_REQUESTS_PER_MINUTE = 20;
     private static final int CLERK_VERIFICATION_CLIENT_BUDGET_MAXIMUM_ENTRIES = 10_000;
     private static final java.time.Duration CLERK_VERIFICATION_WINDOW = java.time.Duration.ofMinutes(1);
-    private static final String AUTHENTICATED_USER_PATH = "/api/me";
-    private static final String API_KEY_REVOCATION_PATH = "/api/me/api-key";
-    private static final String CHAT_STREAM_PATH = "/api/chat/stream";
+    private static final Set<String> API_KEY_PATHS =
+            Set.of("/api/me", "/api/me/api-key", "/api/chat/stream", "/api/knowledge/groups");
     private static final String REJECTED_KEY_MESSAGE = "API key is invalid, revoked, or expired.";
     private static final String VERIFICATION_UNAVAILABLE_MESSAGE =
             "API key verification is temporarily unavailable. Please retry.";
@@ -135,9 +135,7 @@ public final class ClerkApiKeyAuthenticationFilter extends OncePerRequestFilter 
     }
 
     private static Optional<String> presentedApiKey(HttpServletRequest request) {
-        if (!AUTHENTICATED_USER_PATH.equals(request.getRequestURI())
-                && !API_KEY_REVOCATION_PATH.equals(request.getRequestURI())
-                && !CHAT_STREAM_PATH.equals(request.getRequestURI())) {
+        if (!API_KEY_PATHS.contains(request.getRequestURI())) {
             return Optional.empty();
         }
         String bearerToken = BEARER_TOKEN_RESOLVER.resolve(request);

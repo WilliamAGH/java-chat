@@ -16,6 +16,7 @@ alwaysApply: true
 ## Rule Summary [SUM]
 
 - [ZA1a-c] Zero Tolerance Policy (zero assumptions, validation workflow, forbidden practices)
+- [VG1a-e] Version-Gap Answers (same-family adjacent evidence, never answer denial)
 - [GT1a-p] Git, history safety, hooks/signing, dirty paths, worktrees, and clean commits
 - [DP1a-e] Deployment ownership (Dokploy only; dev/main push routing; no Coolify triggers)
 - [CC1a-d] Clean Code & DDD (Mandatory)
@@ -46,6 +47,14 @@ alwaysApply: true
 - [ZA1e] **Mandatory Research**: You MUST research dependency questions and correct usage. Never use legacy or `@deprecated` usage from dependencies. Ensure correct usage by reviewing related code directly in `node_modules` or Gradle caches and using online tool calls.
 - [ZA1f] **Dependency Search**: To search `node_modules` efficiently with `ast-grep`, target specific packages: `ast-grep run --pattern '...' frontend/node_modules/<package>`. Do NOT scan the entire `node_modules` folder.
 - [ZA1g] No empty confirmations ("You're right", "Absolutely") before investigation; verify then cite evidence
+
+## [VG1] Version-Gap Answers
+
+- [VG1a] **Never Deny For An Index Gap**: Never refuse, reject, or error an in-scope question solely because the exact requested version of a dependency, framework, SDK, tool, language, platform, or Java release is absent from the indexed corpus.
+- [VG1b] **Same-Family Evidence Only**: Use exact same-family evidence when available. Otherwise resolve to the nearest indexed lower and higher versions of that same source family; at either edge, use the nearest available version. Never substitute a different dependency or related project.
+- [VG1c] **Name Evidence Versions**: State the requested version and every adjacent version used as evidence. Never present adjacent-version evidence as exact-version documentation; explain documented differences across the span.
+- [VG1d] **Answer The Uncovered Delta**: Use clearly labeled general knowledge for the uncovered version delta. Missing evidence changes provenance, never answer availability.
+- [VG1e] **Executable Enforcement**: Keep code and tests proving an interior gap such as Java 22 answers from Java 21 and Java 25, plus prompt tests covering arbitrary versioned dependencies. Delete unsupported-version exception paths and error mappings; a prose promise or error-message rewrite does not satisfy this rule.
 
 ## [GT1] Git, History, Hooks, Lock Files
 

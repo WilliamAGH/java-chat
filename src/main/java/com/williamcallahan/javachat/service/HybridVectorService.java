@@ -13,11 +13,14 @@ import io.qdrant.client.WithVectorsSelectorFactory;
 import io.qdrant.client.grpc.Common.Filter;
 import io.qdrant.client.grpc.Common.PointId;
 import io.qdrant.client.grpc.JsonWithInt.Value;
+import io.qdrant.client.grpc.Points.FacetCounts;
+import io.qdrant.client.grpc.Points.FacetHit;
 import io.qdrant.client.grpc.Points.RetrievedPoint;
 import io.qdrant.client.grpc.Points.ScrollPoints;
 import io.qdrant.client.grpc.Points.ScrollResponse;
 import io.qdrant.client.grpc.Points.UpsertPoints;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -48,7 +51,10 @@ public class HybridVectorService {
     private static final long COUNT_TIMEOUT_SECONDS = 15;
     private static final long SCROLL_TIMEOUT_SECONDS = 30;
     private static final long SET_PAYLOAD_TIMEOUT_SECONDS = 30;
+    private static final long FACET_TIMEOUT_SECONDS = 15;
     private static final int SCROLL_PAGE_LIMIT = 256;
+    static final int FACET_VALUE_LIMIT = 256;
+    static final int FACET_REQUEST_LIMIT = FACET_VALUE_LIMIT + 1;
     private static final String NULL_MESSAGE_COLLECTION_KIND = "collectionKind";
     private static final String NULL_MESSAGE_COLLECTION_NAME = "collectionName";
 
@@ -226,6 +232,57 @@ public class HybridVectorService {
             throw new IllegalArgumentException("collectionName must not be blank");
         }
         return doCountPointsForUrl(collectionName, url);
+    }
+
+    /**
+     * Counts points per distinct string value of one payload field in a collection.
+     *
+     * <p>Server-side faceting answers "which values exist and how much carries each" without
+     * scrolling the collection, which is what knowledge-base inventory reads need. Counts are
+     * exact and capped at {@value #FACET_VALUE_LIMIT} distinct values per field.</p>
+     *
+     * @param collectionName target Qdrant collection name
+     * @param payloadField keyword-indexed payload field to facet
+     * @return distinct string values with their exact point counts, sorted by value
+     * @throws IllegalStateException if Qdrant returns a non-string value for the field, or the
+     *     distinct-value count exceeds {@value #FACET_VALUE_LIMIT}
+     */
+    public List<PayloadValueCount> facetPayloadValues(String collectionName, String payloadField) {
+        Objects.requireNonNull(collectionName, NULL_MESSAGE_COLLECTION_NAME);
+        Objects.requireNonNull(payloadField, "payloadField");
+        if (collectionName.isBlank()) {
+            throw new IllegalArgumentException("collectionName must not be blank");
+        }
+        if (payloadField.isBlank()) {
+            throw new IllegalArgumentException("payloadField must not be blank");
+        }
+
+        List<FacetHit> facetHits = RetrySupport.executeWithRetry(
+                () -> QdrantFutureAwaiter.awaitFuture(
+                        qdrantClient.facetAsync(FacetCounts.newBuilder()
+                                .setCollectionName(collectionName)
+                                .setKey(payloadField)
+                                .setExact(true)
+                                .setLimit(FACET_REQUEST_LIMIT)
+                                .build()),
+                        FACET_TIMEOUT_SECONDS),
+                "Qdrant facet payload values");
+
+        if (facetHits.size() > FACET_VALUE_LIMIT) {
+            throw new IllegalStateException("Qdrant facet on '" + payloadField + "' in '" + collectionName
+                    + "' reached the " + FACET_VALUE_LIMIT + "-value limit; the inventory would be incomplete");
+        }
+
+        List<PayloadValueCount> payloadValueCounts = new ArrayList<>(facetHits.size());
+        for (FacetHit facetHit : facetHits) {
+            if (!facetHit.getValue().hasStringValue()) {
+                throw new IllegalStateException("Qdrant facet on '" + payloadField + "' in '" + collectionName
+                        + "' returned a non-string value");
+            }
+            payloadValueCounts.add(new PayloadValueCount(facetHit.getValue().getStringValue(), facetHit.getCount()));
+        }
+        payloadValueCounts.sort(Comparator.comparing(PayloadValueCount::payloadValue));
+        return List.copyOf(payloadValueCounts);
     }
 
     /**

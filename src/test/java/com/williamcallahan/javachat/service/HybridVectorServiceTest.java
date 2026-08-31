@@ -30,11 +30,15 @@ import io.grpc.Status;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.grpc.Common.Filter;
 import io.qdrant.client.grpc.Common.PointId;
+import io.qdrant.client.grpc.Points.FacetCounts;
+import io.qdrant.client.grpc.Points.FacetHit;
+import io.qdrant.client.grpc.Points.FacetValue;
 import io.qdrant.client.grpc.Points.RetrievedPoint;
 import io.qdrant.client.grpc.Points.ScrollPoints;
 import io.qdrant.client.grpc.Points.ScrollResponse;
 import io.qdrant.client.grpc.Points.UpdateResult;
 import io.qdrant.client.grpc.Points.UpsertPoints;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -265,6 +269,78 @@ class HybridVectorServiceTest {
         verify(qdrantClient, never()).scrollAsync(any(ScrollPoints.class));
         verify(qdrantClient, never()).upsertAsync(any(UpsertPoints.class));
         verify(qdrantClient, never()).deleteAsync(eq(COLLECTION_NAME), anyList());
+    }
+
+    @Test
+    void facetPayloadValuesReturnsExactCountsSortedByValue() {
+        ArgumentCaptor<FacetCounts> facetRequest = ArgumentCaptor.forClass(FacetCounts.class);
+        when(qdrantClient.facetAsync(facetRequest.capture()))
+                .thenReturn(Futures.immediateFuture(
+                        List.of(facetHit("oracle/javase/25/api", 9L), facetHit("jetbrains/idea/2025/09", 3L))));
+
+        List<PayloadValueCount> payloadValueCounts =
+                hybridVectorService.facetPayloadValues(COLLECTION_NAME, QdrantPayloadFieldSchema.DOC_SET_FIELD);
+
+        assertEquals(COLLECTION_NAME, facetRequest.getValue().getCollectionName());
+        assertEquals(
+                QdrantPayloadFieldSchema.DOC_SET_FIELD, facetRequest.getValue().getKey());
+        assertTrue(facetRequest.getValue().getExact());
+        assertEquals(
+                HybridVectorService.FACET_REQUEST_LIMIT, facetRequest.getValue().getLimit());
+        assertEquals(
+                List.of(
+                        new PayloadValueCount("jetbrains/idea/2025/09", 3L),
+                        new PayloadValueCount("oracle/javase/25/api", 9L)),
+                payloadValueCounts);
+    }
+
+    @Test
+    void facetPayloadValuesRejectsNonStringValues() {
+        when(qdrantClient.facetAsync(any(FacetCounts.class)))
+                .thenReturn(Futures.immediateFuture(List.of(FacetHit.newBuilder()
+                        .setValue(FacetValue.newBuilder().setIntegerValue(7L))
+                        .setCount(2L)
+                        .build())));
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> hybridVectorService.facetPayloadValues(COLLECTION_NAME, QdrantPayloadFieldSchema.DOC_SET_FIELD));
+    }
+
+    @Test
+    void facetPayloadValuesAcceptsTheCompleteValueLimit() {
+        List<FacetHit> fullPage = new ArrayList<>();
+        for (int valueIndex = 0; valueIndex < HybridVectorService.FACET_VALUE_LIMIT; valueIndex++) {
+            fullPage.add(facetHit("docSet-" + valueIndex, 1L));
+        }
+        when(qdrantClient.facetAsync(any(FacetCounts.class))).thenReturn(Futures.immediateFuture(fullPage));
+
+        assertEquals(
+                HybridVectorService.FACET_VALUE_LIMIT,
+                hybridVectorService
+                        .facetPayloadValues(COLLECTION_NAME, QdrantPayloadFieldSchema.DOC_SET_FIELD)
+                        .size());
+    }
+
+    @Test
+    void facetPayloadValuesFailsLoudlyAboveTheValueLimit() {
+        List<FacetHit> overflowPage = new ArrayList<>();
+        for (int valueIndex = 0; valueIndex < HybridVectorService.FACET_REQUEST_LIMIT; valueIndex++) {
+            overflowPage.add(facetHit("docSet-" + valueIndex, 1L));
+        }
+        when(qdrantClient.facetAsync(any(FacetCounts.class))).thenReturn(Futures.immediateFuture(overflowPage));
+
+        IllegalStateException truncation = assertThrows(
+                IllegalStateException.class,
+                () -> hybridVectorService.facetPayloadValues(COLLECTION_NAME, QdrantPayloadFieldSchema.DOC_SET_FIELD));
+        assertTrue(truncation.getMessage().contains("incomplete"));
+    }
+
+    private static FacetHit facetHit(String payloadValue, long pointCount) {
+        return FacetHit.newBuilder()
+                .setValue(FacetValue.newBuilder().setStringValue(payloadValue))
+                .setCount(pointCount)
+                .build();
     }
 
     private void configureReplacementEmbedding() {

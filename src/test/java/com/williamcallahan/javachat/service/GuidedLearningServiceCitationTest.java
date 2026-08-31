@@ -272,30 +272,30 @@ class GuidedLearningServiceCitationTest {
                 .text("Java 21 String documentation")
                 .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "21")
                 .build();
-        Document java24Document = Document.builder()
-                .id("java-24-string")
-                .text("Java 24 String documentation")
-                .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "24")
+        Document java26Document = Document.builder()
+                .id("java-26-string")
+                .text("Java 26 String documentation")
+                .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "26")
                 .build();
         when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class), any(), anyLong()))
-                .thenReturn(List.of(java21Document, java24Document));
+                .thenReturn(List.of(java21Document, java26Document));
         ChatService chatService = mock(ChatService.class);
         when(chatService.buildStructuredPromptWithContextAndGuidance(any(), anyString(), any(), anyString()))
                 .thenReturn(StructuredPrompt.fromRawPrompt("guided comparison", 1));
         GuidedLearningService guidedLearningService = guidedLearningService(
                 tocProvider, retrievalService, mock(EnrichmentService.class), chatService, systemPromptConfig());
-        String comparisonQuestion = "Compare Java 21 and Java 24 String methods";
+        String comparisonQuestion = "Compare Java 21 and Java 26 String methods";
 
         GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
                 guidedLearningService.buildStructuredGuidedPromptWithContext(
                         List.of(), LESSON_SLUG, comparisonQuestion);
 
-        assertEquals(List.of(java21Document, java24Document), promptOutcome.lessonContextDocuments());
+        assertEquals(List.of(java21Document, java26Document), promptOutcome.lessonContextDocuments());
         ArgumentCaptor<RetrievalConstraint> retrievalConstraintCaptor =
                 ArgumentCaptor.forClass(RetrievalConstraint.class);
         verify(retrievalService).retrieve(anyString(), retrievalConstraintCaptor.capture(), any(), anyLong());
         assertEquals(
-                List.of("java/java21-complete", "java/java24-complete"),
+                List.of("java/java21-complete", "java/java26-complete"),
                 retrievalConstraintCaptor.getValue().docSet());
         ArgumentCaptor<String> guidanceCaptor = ArgumentCaptor.forClass(String.class);
         verify(chatService)
@@ -306,10 +306,10 @@ class GuidedLearningServiceCitationTest {
                                 promptContextDocuments,
                                 LESSON_SLUG,
                                 readCuratedLessonMarkdownUnchecked(LESSON_SLUG),
-                                List.of(java21Document, java24Document))),
+                                List.of(java21Document, java26Document))),
                         guidanceCaptor.capture());
         assertTrue(guidanceCaptor.getValue().contains("java/java21-complete"));
-        assertTrue(guidanceCaptor.getValue().contains("java/java24-complete"));
+        assertTrue(guidanceCaptor.getValue().contains("java/java26-complete"));
         assertFalse(guidanceCaptor.getValue().contains("java/java25-complete"));
         assertFalse(guidanceCaptor.getValue().contains("dev-java"));
         assertTrue(guidanceCaptor.getValue().contains("for pedagogical structure only"));
@@ -318,22 +318,31 @@ class GuidedLearningServiceCitationTest {
     }
 
     @Test
-    void unsupportedJavaReleaseFailsBeforeRetrievalOrPromptConstruction() {
+    void missingJavaReleaseUsesNearestOlderAndNewerDocumentation() {
         GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
         RetrievalService retrievalService = mock(RetrievalService.class);
+        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class), any(), anyLong()))
+                .thenReturn(List.of());
         ChatService chatService = mock(ChatService.class);
+        when(chatService.buildStructuredPromptWithContextAndGuidance(any(), anyString(), any(), anyString()))
+                .thenReturn(StructuredPrompt.fromRawPrompt("adjacent release evidence", 1));
         GuidedLearningService guidedLearningService = guidedLearningService(
                 tocProvider, retrievalService, mock(EnrichmentService.class), chatService, systemPromptConfig());
 
-        GuidedLearningService.UnsupportedJavaDocumentationReleaseException unsupportedReleaseFailure = assertThrows(
-                GuidedLearningService.UnsupportedJavaDocumentationReleaseException.class,
-                () -> guidedLearningService.buildStructuredGuidedPromptWithContext(
-                        List.of(), LESSON_SLUG, "How does this work in Java 22?"));
+        guidedLearningService.buildStructuredGuidedPromptWithContext(
+                List.of(), LESSON_SLUG, "How does this work in Java 22?");
 
+        ArgumentCaptor<RetrievalConstraint> retrievalConstraintCaptor =
+                ArgumentCaptor.forClass(RetrievalConstraint.class);
+        verify(retrievalService).retrieve(anyString(), retrievalConstraintCaptor.capture(), any(), anyLong());
         assertEquals(
-                "Java 22 is not supported. Supported Java documentation releases: 21, 24, 25.",
-                unsupportedReleaseFailure.getMessage());
-        verifyNoInteractions(retrievalService, chatService);
+                List.of("java/java21-complete", "java/java25-complete"),
+                retrievalConstraintCaptor.getValue().docSet());
+        ArgumentCaptor<String> guidanceCaptor = ArgumentCaptor.forClass(String.class);
+        verify(chatService)
+                .buildStructuredPromptWithContextAndGuidance(any(), anyString(), any(), guidanceCaptor.capture());
+        assertTrue(guidanceCaptor.getValue().contains("clearly labeled version delta"));
+        assertTrue(guidanceCaptor.getValue().contains("adjacent same-family evidence"));
     }
 
     @Test

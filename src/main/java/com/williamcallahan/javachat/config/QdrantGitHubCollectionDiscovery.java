@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.config;
 
+import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.ListenableFuture;
 import com.williamcallahan.javachat.service.EmbeddingClient;
 import com.williamcallahan.javachat.service.QdrantPayloadFieldSchema;
 import io.grpc.Status;
@@ -14,7 +16,7 @@ import io.qdrant.client.grpc.Collections.SparseVectorParams;
 import io.qdrant.client.grpc.Collections.VectorParams;
 import io.qdrant.client.grpc.Collections.VectorParamsMap;
 import io.qdrant.client.grpc.Collections.VectorsConfig;
-import java.util.ArrayList;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -51,6 +53,7 @@ public final class QdrantGitHubCollectionDiscovery {
     private static final String GITHUB_COLLECTION_PREFIX = "github-qwen3-embedding-4b-2560-";
     private static final long GRPC_TIMEOUT_SECONDS = 10;
     private static final long DISCOVERY_RETRY_MILLIS = 30_000L;
+    private static final int COLLECTION_VALIDATION_BATCH_SIZE = 8;
     private static final Map<String, PayloadSchemaType> REQUIRED_PAYLOAD_INDEXES = Map.ofEntries(
             Map.entry(QdrantPayloadFieldSchema.URL_FIELD, PayloadSchemaType.Keyword),
             Map.entry(QdrantPayloadFieldSchema.HASH_FIELD, PayloadSchemaType.Keyword),
@@ -80,6 +83,9 @@ public final class QdrantGitHubCollectionDiscovery {
     private final AtomicReference<List<String>> discoveredCollections = new AtomicReference<>(List.of());
     private final AtomicReference<GitHubDiscoveryState> discoveryState =
             new AtomicReference<>(GitHubDiscoveryState.PENDING);
+    private List<String> currentInventoryCollections = List.of();
+    private long inventoryRefreshSucceededNanos = Long.MIN_VALUE;
+    private long inventoryRefreshFailedNanos = Long.MIN_VALUE;
 
     /**
      * Wires Qdrant gRPC client and embedding client for collection discovery and validation.
@@ -118,39 +124,17 @@ public final class QdrantGitHubCollectionDiscovery {
             return;
         }
         try {
-            List<String> allCollectionNames =
-                    qdrantClient.listCollectionsAsync().get(GRPC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-
-            List<String> gitHubCandidates = allCollectionNames.stream()
-                    .filter(name -> name.startsWith(generationCollectionPrefix))
-                    .toList();
-
+            List<String> gitHubCandidates = loadValidatedGitHubCollections();
+            discoveredCollections.set(gitHubCandidates);
+            discoveryState.set(GitHubDiscoveryState.READY);
             if (gitHubCandidates.isEmpty()) {
-                discoveryState.set(GitHubDiscoveryState.READY);
                 log.info(
                         "[QDRANT] No GitHub collections found for shared-generation prefix '{}'",
                         generationCollectionPrefix);
                 return;
             }
 
-            int expectedDimensions = embeddingClient.dimensions();
-            String denseVectorName = appProperties.getQdrant().getDenseVectorName();
-            String sparseVectorName = appProperties.getQdrant().getSparseVectorName();
-
-            List<String> validatedCollections = new ArrayList<>();
-            for (String candidateCollection : gitHubCandidates) {
-                validateGitHubCollection(candidateCollection, expectedDimensions, denseVectorName, sparseVectorName);
-                validatedCollections.add(candidateCollection);
-            }
-
-            discoveredCollections.set(List.copyOf(validatedCollections));
-            discoveryState.set(GitHubDiscoveryState.READY);
-            if (!validatedCollections.isEmpty()) {
-                log.info(
-                        "[QDRANT] Discovered {} GitHub collection(s): {}",
-                        validatedCollections.size(),
-                        validatedCollections);
-            }
+            log.info("[QDRANT] Discovered {} GitHub collection(s): {}", gitHubCandidates.size(), gitHubCandidates);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             log.debug("[QDRANT] GitHub collection discovery interrupted while pending");
@@ -170,6 +154,50 @@ public final class QdrantGitHubCollectionDiscovery {
                     schemaException.getMessage(),
                     schemaException);
         }
+    }
+
+    private List<String> loadValidatedGitHubCollections()
+            throws InterruptedException, ExecutionException, TimeoutException {
+        ListenableFuture<List<String>> collectionNamesRequest =
+                qdrantClient.listCollectionsAsync(Duration.ofSeconds(GRPC_TIMEOUT_SECONDS));
+        List<String> allCollectionNames;
+        try {
+            allCollectionNames = collectionNamesRequest.get(GRPC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } finally {
+            if (!collectionNamesRequest.isDone()) {
+                collectionNamesRequest.cancel(true);
+            }
+        }
+        List<String> gitHubCandidates = allCollectionNames.stream()
+                .filter(name -> name.startsWith(generationCollectionPrefix))
+                .toList();
+        if (gitHubCandidates.isEmpty()) {
+            return List.of();
+        }
+
+        int expectedDimensions = embeddingClient.dimensions();
+        String denseVectorName = appProperties.getQdrant().getDenseVectorName();
+        String sparseVectorName = appProperties.getQdrant().getSparseVectorName();
+        for (List<String> candidateBatch : Lists.partition(gitHubCandidates, COLLECTION_VALIDATION_BATCH_SIZE)) {
+            List<ListenableFuture<CollectionInfo>> collectionInfoRequests = candidateBatch.stream()
+                    .map(qdrantClient::getCollectionInfoAsync)
+                    .toList();
+            try {
+                for (int collectionIndex = 0; collectionIndex < candidateBatch.size(); collectionIndex++) {
+                    validateGitHubCollection(
+                            candidateBatch.get(collectionIndex),
+                            collectionInfoRequests.get(collectionIndex),
+                            expectedDimensions,
+                            denseVectorName,
+                            sparseVectorName);
+                }
+            } finally {
+                collectionInfoRequests.stream()
+                        .filter(collectionInfoRequest -> !collectionInfoRequest.isDone())
+                        .forEach(collectionInfoRequest -> collectionInfoRequest.cancel(true));
+            }
+        }
+        return gitHubCandidates;
     }
 
     private void handleDiscoveryExecutionFailure(ExecutionException executionException, boolean startupAttempt) {
@@ -207,6 +235,41 @@ public final class QdrantGitHubCollectionDiscovery {
         return discoveredCollections.get();
     }
 
+    /**
+     * Refreshes and returns the validated GitHub collection set for a live inventory read.
+     *
+     * <p>Repository ingestion can create or remove collections after application startup. Inventory
+     * callers therefore need a current snapshot rather than the retrieval fan-out's startup cache.</p>
+     */
+    public List<String> refreshDiscoveredCollections() {
+        long inventoryRequestStartedNanos = System.nanoTime();
+        synchronized (this) {
+            long latestInventoryRefreshNanos = Math.max(inventoryRefreshSucceededNanos, inventoryRefreshFailedNanos);
+            if (latestInventoryRefreshNanos >= inventoryRequestStartedNanos) {
+                if (inventoryRefreshFailedNanos > inventoryRefreshSucceededNanos) {
+                    throw new IllegalStateException("Concurrent GitHub collection discovery failed");
+                }
+                return List.copyOf(currentInventoryCollections);
+            }
+            try {
+                currentInventoryCollections = loadValidatedGitHubCollections();
+                inventoryRefreshSucceededNanos = System.nanoTime();
+                return List.copyOf(currentInventoryCollections);
+            } catch (InterruptedException interruptedFailure) {
+                Thread.currentThread().interrupt();
+                inventoryRefreshFailedNanos = System.nanoTime();
+                throw new IllegalStateException(
+                        "Current GitHub collection discovery was interrupted", interruptedFailure);
+            } catch (ExecutionException | TimeoutException discoveryFailure) {
+                inventoryRefreshFailedNanos = System.nanoTime();
+                throw new IllegalStateException("Current GitHub collection discovery is unavailable", discoveryFailure);
+            } catch (IllegalStateException discoveryFailure) {
+                inventoryRefreshFailedNanos = System.nanoTime();
+                throw discoveryFailure;
+            }
+        }
+    }
+
     Health discoveryHealth() {
         return switch (discoveryState.get()) {
             case READY ->
@@ -223,11 +286,13 @@ public final class QdrantGitHubCollectionDiscovery {
     }
 
     private void validateGitHubCollection(
-            String collectionName, int expectedDimensions, String denseVectorName, String sparseVectorName) {
+            String collectionName,
+            ListenableFuture<CollectionInfo> collectionInfoRequest,
+            int expectedDimensions,
+            String denseVectorName,
+            String sparseVectorName) {
         try {
-            CollectionInfo collectionInfo = qdrantClient
-                    .getCollectionInfoAsync(Objects.requireNonNull(collectionName))
-                    .get(GRPC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            CollectionInfo collectionInfo = collectionInfoRequest.get(GRPC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             VectorsConfig vectorsConfig = collectionInfo.getConfig().getParams().getVectorsConfig();
             if (!vectorsConfig.hasParamsMap()) {
@@ -322,7 +387,7 @@ public final class QdrantGitHubCollectionDiscovery {
     }
 
     /** Signals a retryable Qdrant transport failure without disguising schema defects. */
-    private static final class GitHubDiscoveryUnavailableException extends RuntimeException {
+    private static final class GitHubDiscoveryUnavailableException extends IllegalStateException {
         private GitHubDiscoveryUnavailableException(String message, Throwable cause) {
             super(message, cause);
         }

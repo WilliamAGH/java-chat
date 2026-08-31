@@ -92,6 +92,14 @@ curl -N -H "Content-Type: application/json" \
 - GET `/api/enrich?q=...`
 - GET `/api/chat/enrich?q=...` (alias)
 
+## Knowledge base inventory
+
+- GET `/api/knowledge/groups` — lists every ingested document group (documentation-set
+  tokens for the books/docs/articles/PDFs collections, repository URLs for indexed GitHub
+  collections) with its chunk count. Requires authentication (Clerk session or `ak_` API key);
+  the response is `{groups: [{collection, kind, name, chunks}], totalChunks}`. A backing-store
+  failure or facet overflow returns HTTP 502 instead of an incomplete inventory.
+
 ## Ingestion
 
 - Available only outside the `prod` profile.
