@@ -23,6 +23,8 @@ if [[ ! "$EXPECTED_STAGING_INVOCATION_ID" =~ ^[0-9a-f]{32}$ ]]; then
     echo "Invalid staging systemd invocation identifier" >&2
     exit 1
 fi
+# Record every valid one-shot invocation before preflight so an old enabled unit cannot retry it on login.
+touch "$QUEUED_STAGING_ATTEMPT_RECEIPT"
 
 cd "$PROJECT_ROOT"
 
@@ -92,7 +94,6 @@ if ! expected_staging_invocation_journal | grep -Fq 'LOCAL_STAGING_COMPLETE'; th
 fi
 printf '%s\n' "$EXPECTED_STAGING_INVOCATION_ID" > "$STAGING_INVOCATION_RECEIPT.next"
 mv -- "$STAGING_INVOCATION_RECEIPT.next" "$STAGING_INVOCATION_RECEIPT"
-touch "$QUEUED_STAGING_ATTEMPT_RECEIPT"
 
 # shellcheck source=lib/common_qdrant.sh
 source "$SCRIPT_DIRECTORY/lib/common_qdrant.sh"

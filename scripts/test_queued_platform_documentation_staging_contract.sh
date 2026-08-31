@@ -25,6 +25,28 @@ queued_launcher_line() {
 }
 
 bash -n "$queued_launcher"
+attempt_probe_root="$(mktemp -d)"
+trap 'rm -rf "$attempt_probe_root"' EXIT
+mkdir -p "$attempt_probe_root/bin" "$attempt_probe_root/home/.local/state/java-chat"
+cat > "$attempt_probe_root/bin/systemctl" <<'EOF'
+#!/bin/bash
+if [[ "$*" == *"--property=ActiveState"* ]]; then
+    printf 'inactive\n'
+else
+    printf '\n'
+fi
+EOF
+cat > "$attempt_probe_root/bin/journalctl" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+chmod +x "$attempt_probe_root/bin/systemctl" "$attempt_probe_root/bin/journalctl"
+if HOME="$attempt_probe_root/home" PATH="$attempt_probe_root/bin:$PATH" \
+    "$queued_launcher" --after-invocation=00000000000000000000000000000000 >/dev/null 2>&1; then
+    fail_queued_platform_test "queued launcher unexpectedly passed without predecessor completion"
+fi
+test -f "$attempt_probe_root/home/.local/state/java-chat/queued-platform-documentation-staging.attempted" \
+    || fail_queued_platform_test "failed preflight did not persist the one-shot attempt receipt"
 grep -Fq 'ConditionPathExists=!%h/.local/state/java-chat/local-embedding-staging.complete' "$local_unit" \
     || fail_queued_platform_test "completed local backlog can restart on a later login"
 grep -Fq 'ExecStartPre=/usr/bin/mkdir -p %h/.local/state/java-chat' "$local_unit" \
@@ -106,14 +128,14 @@ source_refresh_line="$(queued_launcher_line './scripts/fetch_all_docs.sh --doc-s
 ingestion_start_line="$(queued_launcher_line './scripts/process_all_to_qdrant.sh --doc-sets="$QUEUED_DOCUMENTATION_SOURCES"')"
 java26_fetch_line="$(queued_launcher_line './scripts/fetch_all_docs.sh --doc-sets="$FINAL_JAVA_DOCUMENTATION_SOURCE"')"
 java26_ingestion_line="$(queued_launcher_line './scripts/process_all_to_qdrant.sh --doc-sets="$FINAL_JAVA_DOCUMENTATION_SOURCE"')"
-if [ "$completion_gate_line" -ge "$invocation_receipt_line" ] \
-    || [ "$invocation_receipt_line" -ge "$attempt_receipt_line" ] \
-    || [ "$attempt_receipt_line" -ge "$source_refresh_line" ] \
-    || [ "$source_refresh_line" -ge "$writer_lease_line" ] \
-    || [ "$writer_lease_line" -ge "$ingestion_start_line" ] \
-    || [ "$ingestion_start_line" -ge "$java26_fetch_line" ] \
-    || [ "$java26_fetch_line" -ge "$java26_ingestion_line" ]; then
-    fail_queued_platform_test "queued ingestion can start before the current completion gate"
+if (( attempt_receipt_line >= completion_gate_line \
+    || completion_gate_line >= invocation_receipt_line \
+    || invocation_receipt_line >= source_refresh_line \
+    || source_refresh_line >= writer_lease_line \
+    || writer_lease_line >= ingestion_start_line \
+    || ingestion_start_line >= java26_fetch_line \
+    || java26_fetch_line >= java26_ingestion_line )); then
+    fail_queued_platform_test "queued attempt or ingestion ordering is unsafe"
 fi
 
 printf 'PASS: Remaining documentation stays queued behind the active sole writer.\n'
