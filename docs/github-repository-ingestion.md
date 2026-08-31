@@ -96,13 +96,13 @@ An embedding or upsert failure leaves the prior complete page and its marker int
 
 ## Failure diagnostics and retry behavior
 
-- GitHub ingestion fails fast when embedding or vector writes fail.
+- GitHub ingestion fails fast on terminal embedding or vector-write failures.
 - Preflight validates the gateway model alias and `X-Tier: batch` embedding batches of 1 and 4 before ingestion starts.
 - When null/invalid vectors are detected, diagnostics now state likely causes explicitly:
   - wrong endpoint (must resolve to `/v1/embeddings`)
   - non-embedding model
   - provider payload bug
-- Batch ingestion requests perform one provider attempt so a failed batch cannot silently become partial success.
+- Batch ingestion requests retry classified transient embedding-provider failures before the Qdrant mutation boundary, so a failed batch cannot silently become partial success.
 - On terminal failure, `scripts/process_github_repo.sh` prints a failure summary extracted from `process_github_repo.log`, including:
   - failure source classification (`AI Embedding API`, `Qdrant API`, `GitHub API`, or `Application/Unknown`),
   - explicit rate-limit diagnosis (`No rate limit detected` or detected API + evidence),
