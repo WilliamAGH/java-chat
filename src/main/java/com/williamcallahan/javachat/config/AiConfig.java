@@ -5,9 +5,7 @@ import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
-import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.netty.http.client.HttpClient;
 
@@ -38,19 +36,5 @@ public class AiConfig {
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, CONNECT_TIMEOUT_MILLIS);
 
         return WebClient.builder().clientConnector(new ReactorClientHttpConnector(httpClient));
-    }
-
-    /**
-     * Configures the shared RestClient builder for AI calls.
-     *
-     * @return configured RestClient builder
-     */
-    @Bean
-    public RestClient.Builder restClientBuilder() {
-        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        requestFactory.setConnectTimeout(CONNECT_TIMEOUT_MILLIS);
-        requestFactory.setReadTimeout(
-                (int) Duration.ofMinutes(RESPONSE_TIMEOUT_MINUTES).toMillis());
-        return RestClient.builder().requestFactory(requestFactory);
     }
 }
