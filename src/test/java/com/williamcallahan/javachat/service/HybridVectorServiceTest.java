@@ -286,6 +286,8 @@ class HybridVectorServiceTest {
                 QdrantPayloadFieldSchema.DOC_SET_FIELD, facetRequest.getValue().getKey());
         assertTrue(facetRequest.getValue().getExact());
         assertEquals(
+                HybridVectorService.FACET_REQUEST_LIMIT, facetRequest.getValue().getLimit());
+        assertEquals(
                 List.of(
                         new PayloadValueCount("jetbrains/idea/2025/09", 3L),
                         new PayloadValueCount("oracle/javase/25/api", 9L)),
@@ -306,12 +308,27 @@ class HybridVectorServiceTest {
     }
 
     @Test
-    void facetPayloadValuesFailsLoudlyAtTheValueLimit() {
+    void facetPayloadValuesAcceptsTheCompleteValueLimit() {
         List<FacetHit> fullPage = new ArrayList<>();
-        for (int valueIndex = 0; valueIndex < 256; valueIndex++) {
+        for (int valueIndex = 0; valueIndex < HybridVectorService.FACET_VALUE_LIMIT; valueIndex++) {
             fullPage.add(facetHit("docSet-" + valueIndex, 1L));
         }
         when(qdrantClient.facetAsync(any(FacetCounts.class))).thenReturn(Futures.immediateFuture(fullPage));
+
+        assertEquals(
+                HybridVectorService.FACET_VALUE_LIMIT,
+                hybridVectorService
+                        .facetPayloadValues(COLLECTION_NAME, QdrantPayloadFieldSchema.DOC_SET_FIELD)
+                        .size());
+    }
+
+    @Test
+    void facetPayloadValuesFailsLoudlyAboveTheValueLimit() {
+        List<FacetHit> overflowPage = new ArrayList<>();
+        for (int valueIndex = 0; valueIndex < HybridVectorService.FACET_REQUEST_LIMIT; valueIndex++) {
+            overflowPage.add(facetHit("docSet-" + valueIndex, 1L));
+        }
+        when(qdrantClient.facetAsync(any(FacetCounts.class))).thenReturn(Futures.immediateFuture(overflowPage));
 
         IllegalStateException truncation = assertThrows(
                 IllegalStateException.class,

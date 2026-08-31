@@ -53,7 +53,8 @@ public class HybridVectorService {
     private static final long SET_PAYLOAD_TIMEOUT_SECONDS = 30;
     private static final long FACET_TIMEOUT_SECONDS = 15;
     private static final int SCROLL_PAGE_LIMIT = 256;
-    private static final int FACET_VALUE_LIMIT = 256;
+    static final int FACET_VALUE_LIMIT = 256;
+    static final int FACET_REQUEST_LIMIT = FACET_VALUE_LIMIT + 1;
     private static final String NULL_MESSAGE_COLLECTION_KIND = "collectionKind";
     private static final String NULL_MESSAGE_COLLECTION_NAME = "collectionName";
 
@@ -244,8 +245,7 @@ public class HybridVectorService {
      * @param payloadField keyword-indexed payload field to facet
      * @return distinct string values with their exact point counts, sorted by value
      * @throws IllegalStateException if Qdrant returns a non-string value for the field, or the
-     *     distinct-value count reaches {@value #FACET_VALUE_LIMIT} so the inventory might be
-     *     truncated (Qdrant exposes no overflow marker, so a full page fails loudly)
+     *     distinct-value count exceeds {@value #FACET_VALUE_LIMIT}
      */
     public List<PayloadValueCount> facetPayloadValues(String collectionName, String payloadField) {
         Objects.requireNonNull(collectionName, NULL_MESSAGE_COLLECTION_NAME);
@@ -263,15 +263,12 @@ public class HybridVectorService {
                                 .setCollectionName(collectionName)
                                 .setKey(payloadField)
                                 .setExact(true)
-                                .setLimit(FACET_VALUE_LIMIT)
+                                .setLimit(FACET_REQUEST_LIMIT)
                                 .build()),
                         FACET_TIMEOUT_SECONDS),
                 "Qdrant facet payload values");
 
-        // Qdrant reports no overflow marker: a full page is the only visible sign that the
-        // inventory may be truncated, and an inventory that silently omits groups is worse
-        // than no answer at all.
-        if (facetHits.size() >= FACET_VALUE_LIMIT) {
+        if (facetHits.size() > FACET_VALUE_LIMIT) {
             throw new IllegalStateException("Qdrant facet on '" + payloadField + "' in '" + collectionName
                     + "' reached the " + FACET_VALUE_LIMIT + "-value limit; the inventory would be incomplete");
         }
