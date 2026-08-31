@@ -267,7 +267,7 @@ set +a
 
 # With doc set filtering
 DOCS_DIR=/absolute/path/to/docs DOCS_SETS=spring-framework-reference \
-  java -Dspring.profiles.active=cli -jar "$app_jar" \
+  java -Dspring.profiles.active="cli,$SPRING_PROFILE" -jar "$app_jar" \
   --spring.main.web-application-type=none --server.port=0
 ```
 
