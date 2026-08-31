@@ -22,7 +22,7 @@ metadata required for incremental synchronization.
 
 ## Commands
 
-All GitHub ingestion commands run in headless CLI mode (`spring.main.web-application-type=none`), so they do not bind an HTTP port and can run concurrently with the main app or other ingestion jobs. Each CLI invocation runs in its own short-lived JVM process and exits automatically after completion.
+All GitHub ingestion commands run in headless CLI mode (`spring.main.web-application-type=none`), so they do not bind an HTTP port and can run concurrently with the main app; a shared Qdrant writer lease allows only one CLI ingestion job at a time. Each CLI invocation runs in its own short-lived JVM process and exits automatically after completion.
 
 Runtime configuration precedence for this pipeline:
 
