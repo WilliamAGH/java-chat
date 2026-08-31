@@ -300,36 +300,6 @@ class GuidedLearningControllerStreamingFailureTest {
     }
 
     @Test
-    void unsupportedJavaReleaseProducesActionableNonRetryableError() throws JsonProcessingException {
-        String unsupportedReleaseMessage =
-                "Java 22 is not supported. Supported Java documentation releases: 21, 24, 25.";
-        when(streamingService.canAttemptRequest()).thenReturn(true);
-        when(streamingService.isAvailable()).thenReturn(true);
-        when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
-        when(guidedLearningService.buildStructuredGuidedPromptWithContext(
-                        anyList(), eq(LESSON_SLUG), eq(USER_QUERY), any(), anyLong()))
-                .thenThrow(new GuidedLearningService.UnsupportedJavaDocumentationReleaseException(
-                        "22", List.of("21", "24", "25")));
-
-        List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
-                guidedController.stream(
-                                new GuidedStreamRequest(SESSION_ID, LESSON_SLUG, USER_QUERY),
-                                new MockHttpServletResponse())
-                        .collectList()
-                        .block(),
-                "guided stream events");
-
-        assertEquals(2, streamEvents.size());
-        assertEquals(EVENT_STATUS, streamEvents.getFirst().event());
-        SseSupport.SseEventPayload unsupportedReleaseError =
-                objectMapper.readValue(serializedErrorEvent(streamEvents), SseSupport.SseEventPayload.class);
-        assertEquals(unsupportedReleaseMessage, unsupportedReleaseError.message());
-        assertEquals(Boolean.FALSE, unsupportedReleaseError.retryable());
-        assertEquals(0, controllerErrorCount());
-        verify(streamingService, never()).streamResponse(any(StructuredPrompt.class), anyDouble());
-    }
-
-    @Test
     void guidedChatKeepsNonTerminalExceptionTypeInStructuredLogOnly() throws JsonProcessingException {
         IllegalStateException upstreamFailure = new IllegalStateException(UPSTREAM_SECRET_MESSAGE);
         when(streamingService.canAttemptRequest()).thenReturn(true);

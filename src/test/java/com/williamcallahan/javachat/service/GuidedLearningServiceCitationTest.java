@@ -318,22 +318,43 @@ class GuidedLearningServiceCitationTest {
     }
 
     @Test
-    void unsupportedJavaReleaseFailsBeforeRetrievalOrPromptConstruction() {
+    void unindexedJavaReleaseUsesAdjacentEvidenceAndNamesItInGuidance() {
         GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
         RetrievalService retrievalService = mock(RetrievalService.class);
+        Document java21Document = Document.builder()
+                .id("java-21-adjacent")
+                .text("Java 21 adjacent evidence")
+                .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "21")
+                .build();
+        Document java24Document = Document.builder()
+                .id("java-24-adjacent")
+                .text("Java 24 adjacent evidence")
+                .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "24")
+                .build();
+        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class), any(), anyLong()))
+                .thenReturn(List.of(java21Document, java24Document));
         ChatService chatService = mock(ChatService.class);
+        when(chatService.buildStructuredPromptWithContextAndGuidance(any(), anyString(), any(), anyString()))
+                .thenReturn(StructuredPrompt.fromRawPrompt("guided adjacent evidence", 1));
         GuidedLearningService guidedLearningService = guidedLearningService(
                 tocProvider, retrievalService, mock(EnrichmentService.class), chatService, systemPromptConfig());
 
-        GuidedLearningService.UnsupportedJavaDocumentationReleaseException unsupportedReleaseFailure = assertThrows(
-                GuidedLearningService.UnsupportedJavaDocumentationReleaseException.class,
-                () -> guidedLearningService.buildStructuredGuidedPromptWithContext(
-                        List.of(), LESSON_SLUG, "How does this work in Java 22?"));
+        GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
+                guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        List.of(), LESSON_SLUG, "How does this work in Java 22?");
 
+        assertEquals(List.of(java21Document, java24Document), promptOutcome.lessonContextDocuments());
+        ArgumentCaptor<RetrievalConstraint> retrievalConstraintCaptor =
+                ArgumentCaptor.forClass(RetrievalConstraint.class);
+        verify(retrievalService).retrieve(anyString(), retrievalConstraintCaptor.capture(), any(), anyLong());
         assertEquals(
-                "Java 22 is not supported. Supported Java documentation releases: 21, 24, 25.",
-                unsupportedReleaseFailure.getMessage());
-        verifyNoInteractions(retrievalService, chatService);
+                List.of("java/java21-complete", "java/java24-complete"),
+                retrievalConstraintCaptor.getValue().docSet());
+        ArgumentCaptor<String> guidanceCaptor = ArgumentCaptor.forClass(String.class);
+        verify(chatService)
+                .buildStructuredPromptWithContextAndGuidance(any(), anyString(), any(), guidanceCaptor.capture());
+        assertTrue(guidanceCaptor.getValue().contains("requested Java 22"));
+        assertTrue(guidanceCaptor.getValue().contains("evidence from Java 21, 24"));
     }
 
     @Test
@@ -571,8 +592,12 @@ class GuidedLearningServiceCitationTest {
 
     private static SystemPromptConfig systemPromptConfig() {
         SystemPromptConfig systemPromptConfig = mock(SystemPromptConfig.class);
+        SystemPromptConfig versionEvidencePromptOwner = new SystemPromptConfig(new AppProperties());
         when(systemPromptConfig.getCoreSystemPrompt()).thenReturn("Teach Java from authoritative sources.");
         when(systemPromptConfig.getGuidedLearningPrompt()).thenReturn("Teach this lesson progressively.");
+        when(systemPromptConfig.getVersionEvidencePrompt(any()))
+                .thenAnswer(promptInvocation ->
+                        versionEvidencePromptOwner.getVersionEvidencePrompt(promptInvocation.getArgument(0)));
         when(systemPromptConfig.buildFullPrompt(anyString(), anyString()))
                 .thenAnswer(promptInvocation -> promptInvocation.getArgument(0));
         return systemPromptConfig;

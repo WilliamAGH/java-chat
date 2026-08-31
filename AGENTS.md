@@ -254,6 +254,7 @@ alwaysApply: true
 - [LM1g] **Errors**: `onErrorContinue` for partial failures; never drop entire response on single failure.
 - [LM1h] **Heartbeats**: Maintain connection with periodic events during long operations.
 - [LM1i] **GitHub Models Prohibited**: Never add GitHub Models provider selection, endpoints, credentials, SDKs, tests, documentation, or fallback behavior. Preserve unrelated GitHub repository ingestion, citations, source links, and Actions.
+- [LM1j] **Version Evidence Gaps**: Never reject an in-scope versioned question solely because its exact same-family corpus is absent. Use the nearest indexed same-family versions below and above the request, or the nearest available edge; tell the model the requested and evidence versions, and label only the uncovered gap as general knowledge.
 
 ## [MD1] Markdown & Parsing
 

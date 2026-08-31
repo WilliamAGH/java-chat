@@ -57,7 +57,7 @@ For multi-release comparison queries such as `Java 21 vs 24`, each requested rel
 
 `extractVersionNumbers()` returns every requested Java release in encounter order, expanding comparison shorthand such as `Java 21/24` or `JDK 21 vs 24` against the configured Java API release list.
 
-For each requested release, `RetrievalService` builds a `RetrievalConstraint` whose `docVersions` is an any-of `docVersion` keyword filter pushed to Qdrant server-side via `QdrantRetrievalConstraintBuilder` (`matchKeywords`). Multi-release queries fan out one exact-`docVersion` search per requested release; each release must return at least one official documentation hit or retrieval fails fast. There is no client-side URL/title post-filter fallback.
+For each requested release, `QueryVersionExtractor.resolveEvidenceVersions()` selects the exact indexed Java release when present. A gap selects the nearest indexed release below and above the request; a request outside the indexed range selects the nearest available edge. `RetrievalService` builds one `RetrievalConstraint` per selected evidence release and pushes its exact `docVersion` keyword filter to Qdrant via `QdrantRetrievalConstraintBuilder` (`matchKeywords`). Every selected evidence release must return at least one official documentation hit. The prompt keeps the learner's requested release and each retrieved evidence version distinct so the model attributes claims precisely and labels only an uncovered gap as general knowledge. There is no client-side URL/title post-filter fallback.
 
 ---
 

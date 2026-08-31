@@ -2,7 +2,9 @@ package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -77,6 +79,7 @@ class ChatServiceTest {
         SystemPromptConfig systemPromptConfig = mock(SystemPromptConfig.class);
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         when(systemPromptConfig.getCoreSystemPrompt()).thenReturn("You are a Java tutor.");
+        when(systemPromptConfig.getVersionEvidencePrompt(any())).thenReturn("");
         when(retrievalService.retrieveWithLimitOutcome(
                         eq(VERSIONED_CONTEXT_QUERY),
                         eq(ModelConfiguration.RAG_LIMIT_CONSTRAINED),
@@ -110,6 +113,7 @@ class ChatServiceTest {
         RetrievalService retrievalService = mock(RetrievalService.class);
         SystemPromptConfig systemPromptConfig = mock(SystemPromptConfig.class);
         when(systemPromptConfig.getCoreSystemPrompt()).thenReturn("Use exact source records.");
+        when(systemPromptConfig.getVersionEvidencePrompt(any())).thenReturn("");
         Document springReference = Document.builder()
                 .id("spring-reference-707")
                 .text("Transaction behavior")
@@ -137,5 +141,26 @@ class ChatServiceTest {
                         + "[SOURCE RECORD family=\"Spring Framework Reference\" version=\"unspecified\"]\n"
                         + "Transaction behavior",
                 promptOutcome.structuredPrompt().contextDocuments().getFirst().content());
+    }
+
+    @Test
+    void ordinaryPromptNamesEvidenceForEachRequestedVersionGap() {
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        when(retrievalService.retrieveWithLimitOutcome(
+                        anyString(), anyInt(), anyInt(), any(RetrievalConstraint.class), any(), anyLong()))
+                .thenReturn(new RetrievalService.RetrievalOutcome(List.of(), List.of()));
+        AppProperties appProperties = new AppProperties();
+        ChatService chatService = new ChatService(
+                mock(OpenAIStreamingService.class),
+                retrievalService,
+                new SystemPromptConfig(appProperties),
+                appProperties);
+
+        ChatService.StructuredPromptOutcome promptOutcome =
+                chatService.buildStructuredPromptWithContextOutcome(List.of(), "Compare Java 22 vs Java 26 records");
+
+        String systemPrompt = promptOutcome.structuredPrompt().system().content();
+        assertTrue(systemPrompt.contains("requested Java 22; use same-family evidence from Java 21, 24"));
+        assertTrue(systemPrompt.contains("requested Java 26; use same-family evidence from Java 25"));
     }
 }

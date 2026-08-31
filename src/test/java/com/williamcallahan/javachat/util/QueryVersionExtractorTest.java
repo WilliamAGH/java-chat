@@ -34,6 +34,12 @@ class QueryVersionExtractorTest {
         assertEquals(
                 List.of("21", "24", "25"),
                 QueryVersionExtractor.extractVersionNumbers("Java 21/24/25 streams", SUPPORTED_JAVA_RELEASES));
+        assertEquals(
+                List.of("21", "22"),
+                QueryVersionExtractor.extractVersionNumbers("Java 21 vs 22 records", SUPPORTED_JAVA_RELEASES));
+        assertEquals(
+                List.of("21", "22"),
+                QueryVersionExtractor.extractVersionNumbers("Java 21/22 records", SUPPORTED_JAVA_RELEASES));
     }
 
     @Test
@@ -65,5 +71,26 @@ class QueryVersionExtractorTest {
                 "JDK 21 Java SE 21 Java 21 release documentation; "
                         + "JDK 24 Java SE 24 Java 24 release documentation: Compare Java 21 and Java 24",
                 QueryVersionExtractor.boostQueryWithVersionContext("Compare Java 21 and Java 24", List.of("21", "24")));
+    }
+
+    @Test
+    void resolvesExactAdjacentAndRangeEdgeEvidence() {
+        assertEquals(
+                List.of("21", "25"), QueryVersionExtractor.resolveEvidenceVersions(List.of("22"), List.of("21", "25")));
+        assertEquals(
+                List.of("21"), QueryVersionExtractor.resolveEvidenceVersions(List.of("17"), SUPPORTED_JAVA_RELEASES));
+        assertEquals(
+                List.of("25"), QueryVersionExtractor.resolveEvidenceVersions(List.of("30"), SUPPORTED_JAVA_RELEASES));
+        assertEquals(
+                List.of("24"), QueryVersionExtractor.resolveEvidenceVersions(List.of("24"), SUPPORTED_JAVA_RELEASES));
+    }
+
+    @Test
+    void preservesEvidenceForEachRequestedRelease() {
+        assertEquals(
+                List.of(
+                        new QueryVersionExtractor.VersionEvidence("22", List.of("21", "24")),
+                        new QueryVersionExtractor.VersionEvidence("26", List.of("25"))),
+                QueryVersionExtractor.resolveVersionEvidence(List.of("22", "26"), SUPPORTED_JAVA_RELEASES));
     }
 }

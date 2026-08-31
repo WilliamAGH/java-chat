@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.williamcallahan.javachat.util.QueryVersionExtractor;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -118,6 +120,19 @@ class SystemPromptConfigTest {
         String corePrompt = systemPromptConfig.getCoreSystemPrompt();
 
         assertTrue(corePrompt.contains("Java " + TEST_DOCUMENTATION_JDK_VERSION));
+    }
+
+    @Test
+    void shouldPreserveEachRequestedReleaseEvidenceMapping() {
+        String versionEvidencePrompt = systemPromptConfig.getVersionEvidencePrompt(List.of(
+                new QueryVersionExtractor.VersionEvidence("22", List.of("21", "24")),
+                new QueryVersionExtractor.VersionEvidence("26", List.of("25"))));
+
+        assertAll(
+                () -> assertTrue(
+                        versionEvidencePrompt.contains("requested Java 22; use same-family evidence from Java 21, 24")),
+                () -> assertTrue(
+                        versionEvidencePrompt.contains("requested Java 26; use same-family evidence from Java 25")));
     }
 
     @Test

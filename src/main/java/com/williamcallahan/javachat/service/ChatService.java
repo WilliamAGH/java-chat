@@ -13,6 +13,7 @@ import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.domain.prompt.SystemSegment;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.support.DocumentContentAdapter;
+import com.williamcallahan.javachat.util.QueryVersionExtractor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -32,6 +33,10 @@ import reactor.core.publisher.Flux;
 public class ChatService {
     private static final Logger logger = LoggerFactory.getLogger(ChatService.class);
     private static final String UNSPECIFIED_SOURCE_RECORD_FIELD = "unspecified";
+    private static final List<String> SUPPORTED_JAVA_API_VERSIONS =
+            DocsSourceRegistry.javaApiDocumentationSources().stream()
+                    .map(DocsSourceRegistry.JavaApiDocumentationSource::javaRelease)
+                    .toList();
 
     private final OpenAIStreamingService openAIStreamingService;
     private final RetrievalService retrievalService;
@@ -197,6 +202,13 @@ public class ChatService {
 
         // Build system prompt with search quality context
         StringBuilder systemPromptBuilder = new StringBuilder(systemPromptConfig.getCoreSystemPrompt());
+        List<String> requestedVersions =
+                QueryVersionExtractor.extractVersionNumbers(latestUserMessage, SUPPORTED_JAVA_API_VERSIONS);
+        String versionEvidencePrompt = systemPromptConfig.getVersionEvidencePrompt(
+                QueryVersionExtractor.resolveVersionEvidence(requestedVersions, SUPPORTED_JAVA_API_VERSIONS));
+        if (!versionEvidencePrompt.isEmpty()) {
+            systemPromptBuilder.append("\n\nVERSION EVIDENCE: ").append(versionEvidencePrompt);
+        }
         if (!searchQualityNote.isEmpty()) {
             systemPromptBuilder.append("\n\nSEARCH CONTEXT: ").append(searchQualityNote);
             if (searchQualityNote.contains("less relevant") || searchQualityNote.contains("keyword search")) {

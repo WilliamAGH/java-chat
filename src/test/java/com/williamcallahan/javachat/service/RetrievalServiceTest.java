@@ -274,6 +274,62 @@ class RetrievalServiceTest {
     }
 
     @Test
+    void unindexedJavaReleaseSearchesNearestLowerAndHigherEvidence() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        AppProperties appProperties = new AppProperties();
+        appProperties.getRag().setSearchReturnK(1);
+        RetrievalService retrievalService =
+                new RetrievalService(hybridSearchService, appProperties, rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint java21Constraint = officialDocumentationConstraint.withDocVersions(List.of("21"));
+        RetrievalConstraint java24Constraint = officialDocumentationConstraint.withDocVersions(List.of("24"));
+        Document java21Document = versionedDocument("java-21-adjacent", "21", "hash-21-adjacent");
+        Document java24Document = versionedDocument("java-24-adjacent", "24", "hash-24-adjacent");
+        when(hybridSearchService.searchOutcomes(
+                        anyString(), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong()))
+                .thenReturn(List.of(
+                        new HybridSearchService.SearchOutcome(List.of(java21Document), List.of()),
+                        new HybridSearchService.SearchOutcome(List.of(java24Document), List.of())));
+        when(rerankerService.rerank(anyString(), anyList(), eq(2), anyLong()))
+                .thenReturn(List.of(java21Document, java24Document));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome("How do records work in Java 22?", officialDocumentationConstraint);
+
+        assertEquals(
+                List.of("21", "24"),
+                retrievalOutcome.documents().stream()
+                        .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD))
+                        .toList());
+        verify(hybridSearchService)
+                .searchOutcomes(anyString(), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong());
+    }
+
+    @Test
+    void callerVersionConstraintNarrowsAdjacentEvidenceBeforeFanOut() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint java21Constraint = RetrievalConstraint.forOfficialDocSets(
+                        OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES)
+                .withDocVersions(List.of("21"));
+        Document java21Document = versionedDocument("java-21-constrained", "21", "hash-21-constrained");
+        when(hybridSearchService.searchOutcomes(anyString(), eq(10), eq(List.of(java21Constraint)), anyLong()))
+                .thenReturn(List.of(new HybridSearchService.SearchOutcome(List.of(java21Document), List.of())));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
+                .thenReturn(List.of(java21Document));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome("How do records work in Java 22?", java21Constraint);
+
+        assertEquals(List.of(java21Document), retrievalOutcome.documents());
+        verify(hybridSearchService).searchOutcomes(anyString(), eq(10), eq(List.of(java21Constraint)), anyLong());
+    }
+
+    @Test
     void citationDiscoveryLimitsAfterFinalUrlAndAnchorDeduplication() {
         HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         RerankerService rerankerService = mock(RerankerService.class);

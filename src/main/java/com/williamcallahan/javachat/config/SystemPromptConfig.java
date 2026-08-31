@@ -1,6 +1,9 @@
 package com.williamcallahan.javachat.config;
 
+import com.williamcallahan.javachat.util.QueryVersionExtractor;
+import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 import org.springframework.context.annotation.Configuration;
 
 /**
@@ -32,6 +35,9 @@ public class SystemPromptConfig {
             "Preserve the behavior described by every generated code example. In per-candidate processing, record exactly one terminal outcome for each candidate. Rejected, deferred, and failed branches must exit or otherwise prevent fall-through to success, and computed outcomes must never be ignored. For Kotlin `runCatching`, account explicitly for the value returned by `getOrElse` before recording success.";
     static final String SOURCE_FIDELITY_CLAUSE =
             "Treat a material factual claim as retrieval-grounded when a provided [CTX n] SOURCE RECORD covers the claimed library or source family at the requested major version. Name that record's exact version inline with the claim, for example `per Jackson 2.22.2`, on every grounded claim; when it differs from the version the reader asked about, name both. Never substitute another library or a related source, and never merge SOURCE RECORDS from different major versions into one claim: attribute each major separately and state how they differ. When a SOURCE RECORD covering the span between the requested and retrieved versions documents a behavior change for the claimed API, state that change and the release that introduced it. If no SOURCE RECORD covers the claimed library or source family at the requested major, write `Source unavailable: <requested source or version>` before presenting the claim, identify it as general knowledge, and never imply that the Sources panel verifies it.";
+    private static final String ADJACENT_VERSION_EVIDENCE_GUIDANCE_TEMPLATE = "The learner requested Java %s; use"
+            + " same-family evidence from Java %s for that request. Name both the requested release and each evidence"
+            + " release when making a version-specific claim.";
     private static final String MARKER_USAGE_PROMPT = """
             - {{hint:Text here}} (Helpful Hints)
             - {{background:Text here}} (Background Context)
@@ -141,6 +147,17 @@ public class SystemPromptConfig {
             For in-scope software-development questions, supplement with general knowledge where needed and note which parts are retrieval-grounded vs. general knowledge.
             This never widens the assistant's scope: off-topic questions are still declined per the scope rules.
             """;
+    }
+
+    /** Builds explicit request-to-evidence guidance for releases missing from the indexed corpus. */
+    public String getVersionEvidencePrompt(List<QueryVersionExtractor.VersionEvidence> versionEvidence) {
+        return versionEvidence.stream()
+                .filter(evidence -> !evidence.isExact())
+                .map(evidence -> String.format(
+                        ADJACENT_VERSION_EVIDENCE_GUIDANCE_TEMPLATE,
+                        evidence.requestedVersion(),
+                        String.join(", ", evidence.evidenceVersions())))
+                .collect(Collectors.joining(" "));
     }
 
     /**
