@@ -24,6 +24,7 @@ JavaChat deployment.
 - `javachat login` / `javachat logout` — authorize or remove this machine's credential.
 - `javachat whoami` — show who the stored key belongs to.
 - `javachat knowledge` — list the document groups ingested in the knowledge base
-  (documentation sets, books, articles, PDFs, and indexed GitHub repositories, with chunk counts).
+  (documentation sets, books, articles, PDFs, and indexed GitHub repositories, with per-group and
+  total chunk counts).
 
 Run `javachat --help` for options.

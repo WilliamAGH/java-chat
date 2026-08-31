@@ -246,13 +246,13 @@ async function authorizeThroughBrowser(host, shouldOpenBrowser) {
 }
 
 async function commandLogin(host, options) {
-  const storedHosts = await readCredentials();
   if (env.JAVACHAT_API_KEY?.trim()) {
     stderr.write(
       `JAVACHAT_API_KEY is set and already authenticates requests to ${host}. Unset it to sign in with the browser instead.\n`,
     );
     return 0;
   }
+  const storedHosts = await readCredentials();
   if (storedHosts[host]?.apiKey) {
     stderr.write(`Already signed in to ${host}. Run "javachat logout" before replacing the key.\n`);
     return 0;
@@ -269,14 +269,14 @@ async function commandLogin(host, options) {
 }
 
 async function commandLogout(host) {
+  if (env.JAVACHAT_API_KEY?.trim()) {
+    stderr.write(
+      `Authentication for ${host} comes from JAVACHAT_API_KEY. Unset it, then run "javachat logout" again to remove any stored fallback credential.\n`,
+    );
+    return 0;
+  }
   const allHosts = await readCredentials();
   if (!allHosts[host]) {
-    if (env.JAVACHAT_API_KEY?.trim()) {
-      stderr.write(
-        `No stored credential for ${host}; authentication comes from JAVACHAT_API_KEY. Unset it to sign out.\n`,
-      );
-      return 0;
-    }
     stderr.write(`No stored credential for ${host}.\n`);
     return 0;
   }
@@ -352,7 +352,8 @@ async function commandKnowledge(host) {
       `HTTP ${groupsResponse.status} from ${host}${failureText ? `: ${failureText}` : ""}`,
     );
   }
-  const knowledgeGroups = parseKnowledgeGroups(await groupsResponse.json(), host);
+  const knowledgeInventory = parseKnowledgeInventory(await groupsResponse.json(), host);
+  const knowledgeGroups = knowledgeInventory.groups;
   if (knowledgeGroups.length === 0) {
     stdout.write(`No document groups are ingested in the knowledge base at ${host}.\n`);
     return 0;
@@ -373,16 +374,26 @@ async function commandKnowledge(host) {
   }
   const collectionCount = new Set(knowledgeGroups.map((knowledgeGroup) => knowledgeGroup.collection))
     .size;
-  stdout.write(`\n${knowledgeGroups.length} groups across ${collectionCount} collections.\n`);
+  const totalChunkNoun = knowledgeInventory.totalChunks === 1 ? "chunk" : "chunks";
+  stdout.write(
+    `\n${knowledgeInventory.totalChunks} ${totalChunkNoun} across ${knowledgeGroups.length} groups in ${collectionCount} collections.\n`,
+  );
   return 0;
 }
 
-/** Validates the server's group list; external data is untrusted until checked. */
-function parseKnowledgeGroups(rawKnowledgeGroups, host) {
-  if (!Array.isArray(rawKnowledgeGroups)) {
-    throw new Error(`JavaChat returned an invalid knowledge group list from ${host}.`);
+/** Validates the server's inventory; external data is untrusted until checked. */
+function parseKnowledgeInventory(rawKnowledgeInventory, host) {
+  if (
+    !rawKnowledgeInventory ||
+    typeof rawKnowledgeInventory !== "object" ||
+    Array.isArray(rawKnowledgeInventory) ||
+    !Array.isArray(rawKnowledgeInventory.groups) ||
+    !Number.isSafeInteger(rawKnowledgeInventory.totalChunks) ||
+    rawKnowledgeInventory.totalChunks < 0
+  ) {
+    throw new Error(`JavaChat returned an invalid knowledge inventory from ${host}.`);
   }
-  return rawKnowledgeGroups.map((rawKnowledgeGroup) => {
+  const groups = rawKnowledgeInventory.groups.map((rawKnowledgeGroup) => {
     if (
       !rawKnowledgeGroup ||
       typeof rawKnowledgeGroup !== "object" ||
@@ -394,7 +405,7 @@ function parseKnowledgeGroups(rawKnowledgeGroups, host) {
       typeof rawKnowledgeGroup.name !== "string" ||
       !rawKnowledgeGroup.name ||
       typeof rawKnowledgeGroup.chunks !== "number" ||
-      !Number.isInteger(rawKnowledgeGroup.chunks) ||
+      !Number.isSafeInteger(rawKnowledgeGroup.chunks) ||
       rawKnowledgeGroup.chunks < 0
     ) {
       throw new Error(`JavaChat returned a malformed knowledge group from ${host}.`);
@@ -406,6 +417,11 @@ function parseKnowledgeGroups(rawKnowledgeGroups, host) {
       chunks: rawKnowledgeGroup.chunks,
     };
   });
+  const groupChunkTotal = groups.reduce((total, group) => total + group.chunks, 0);
+  if (!Number.isSafeInteger(groupChunkTotal) || groupChunkTotal !== rawKnowledgeInventory.totalChunks) {
+    throw new Error(`JavaChat returned an inconsistent knowledge inventory from ${host}.`);
+  }
+  return { groups, totalChunks: rawKnowledgeInventory.totalChunks };
 }
 
 /**
@@ -621,8 +637,21 @@ Environment
   JAVACHAT_HOST      Default host when --host is absent
 `;
 
+const SUBCOMMANDS = new Map([
+  ["login", commandLogin],
+  ["logout", commandLogout],
+  ["whoami", commandWhoami],
+  ["knowledge", commandKnowledge],
+]);
+
 function parseArguments(rawArguments) {
-  const options = { verbose: false, newSession: false, noBrowser: false, help: false };
+  const options = {
+    verbose: false,
+    newSession: false,
+    noBrowser: false,
+    help: false,
+    version: false,
+  };
   let host = env.JAVACHAT_HOST?.trim() || DEFAULT_HOST;
   const positional = [];
   for (let index = 0; index < rawArguments.length; index += 1) {
@@ -642,35 +671,45 @@ function parseArguments(rawArguments) {
     else if (argument === "--new") options.newSession = true;
     else if (argument === "--no-browser") options.noBrowser = true;
     else if (argument === "--help" || argument === "-h") options.help = true;
+    else if (argument === "--version") options.version = true;
     else if (argument.startsWith("-")) {
       throw new Error(`Unknown option: ${argument}. Run "javachat --help" for usage.`);
-    } else positional.push(argument);
+    } else {
+      positional.push(argument);
+      const questionStarted =
+        (!SUBCOMMANDS.has(positional[0]) && positional[0] !== "ask" && positional[0] !== "help") ||
+        (positional[0] === "ask" && positional.length > 1);
+      if (questionStarted) {
+        positional.push(...rawArguments.slice(index + 1));
+        break;
+      }
+    }
   }
-  return { host: normalizeHost(host), options, positional };
+  return { host, options, positional };
 }
 
 async function main() {
   const rawArguments = argv.slice(2);
-  if (rawArguments.includes("--version")) {
+  const { host, options, positional } = parseArguments(rawArguments);
+  const [first, ...rest] = positional;
+
+  if (options.version) {
+    if (positional.length > 0) throw new Error("javachat --version takes no arguments.");
     stdout.write(`${packageMetadata.version}\n`);
     return 0;
   }
 
-  const { host, options, positional } = parseArguments(rawArguments);
-  const [first, ...rest] = positional;
-
+  const normalizedHost = normalizeHost(host);
   if (options.help || first === "help" || !first) {
     stdout.write(USAGE);
     return options.help || first ? 0 : 1;
   }
-  if (first === "login" || first === "logout" || first === "whoami" || first === "knowledge") {
+  const subcommand = SUBCOMMANDS.get(first);
+  if (subcommand) {
     if (rest.length > 0) {
       throw new Error(`javachat ${first} takes no arguments.`);
     }
-    if (first === "login") return await commandLogin(host, options);
-    if (first === "logout") return await commandLogout(host);
-    if (first === "whoami") return await commandWhoami(host);
-    return await commandKnowledge(host);
+    return await subcommand(normalizedHost, options);
   }
 
   const question = (first === "ask" ? rest : positional).join(" ").trim();
@@ -678,7 +717,7 @@ async function main() {
     stderr.write('Nothing to ask. Try: javachat "How do Java records work?"\n');
     return 1;
   }
-  return await commandAsk(host, question, options);
+  return await commandAsk(normalizedHost, question, options);
 }
 
 main()
