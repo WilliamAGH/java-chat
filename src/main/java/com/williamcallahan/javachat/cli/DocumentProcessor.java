@@ -469,13 +469,25 @@ public class DocumentProcessor {
         static EnvironmentConfig fromEnvironment() {
             return new EnvironmentConfig(
                     envOrDefault(ENV_DOCS_DIR, DOCS_DIR_DEFAULT),
-                    envOrDefault(ENV_DOCS_SETS, ""),
+                    optionalEnv(ENV_DOCS_SETS),
                     envBooleanOrDefault(ENV_DOCS_INCLUDE_QUICK, false));
         }
 
         private static String envOrDefault(final String key, final String fallbackText) {
             final String envSetting = System.getenv(key);
             return envSetting == null || envSetting.isBlank() ? fallbackText : envSetting;
+        }
+
+        /**
+         * Reads an optional selector that must stay null when unset so the caller can
+         * distinguish "no filter" from a blank (and therefore invalid) selector.
+         */
+        private static String optionalEnv(final String key) {
+            final String envSetting = System.getenv(key);
+            if (envSetting != null && envSetting.isBlank()) {
+                throw new DocumentProcessingException("DOCS_SETS contains a blank selector");
+            }
+            return envSetting;
         }
 
         private static boolean envBooleanOrDefault(final String key, final boolean fallbackValue) {
