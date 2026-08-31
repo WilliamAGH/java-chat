@@ -18,10 +18,10 @@ import static org.mockito.Mockito.when;
 
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.config.RetrievalAugmentationConfig;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
@@ -42,10 +42,13 @@ class RetrievalServiceTest {
             Set.copyOf(DocsSourceRegistry.javaApiDocumentationSources().stream()
                     .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
                     .toList());
-    private static final String CURRENT_JAVA_API_DOCUMENTATION_SOURCE_IDENTITY =
+    private static final String DEFAULT_JAVA_API_DOCUMENTATION_SOURCE_IDENTITY =
             DocsSourceRegistry.javaApiDocumentationSources().stream()
-                    .max(Comparator.comparingInt(source -> Integer.parseInt(source.javaRelease())))
+                    .filter(source -> Integer.toString(
+                                    new AppProperties().getDocs().getJdkVersion())
+                            .equals(source.javaRelease()))
                     .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
+                    .findFirst()
                     .orElseThrow();
     private static final int DOCUMENTATION_CITATION_CANDIDATE_LIMIT = 10;
     private static final String JAVA_21_RELEASE = "21";
@@ -67,14 +70,14 @@ class RetrievalServiceTest {
     private static final Duration STAGE_DEADLINE_ASSERTION_TOLERANCE = Duration.ofSeconds(1);
 
     @Test
-    void genericBroadOfficialScopeUsesCurrentJavaApiSourceAndRetainsEveryNonJavaSource() {
+    void genericBroadOfficialScopeUsesDefaultJavaApiSourceAndRetainsEveryNonJavaSource() {
         HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         RerankerService rerankerService = mock(RerankerService.class);
         RetrievalService retrievalService = new RetrievalService(
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint guidedConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        RetrievalConstraint expectedScopedConstraint = defaultJavaApiBroadOfficialConstraint();
         when(hybridSearchService.searchOutcome(anyString(), anyInt(), eq(expectedScopedConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(List.of(), List.of()));
         when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
@@ -85,7 +88,7 @@ class RetrievalServiceTest {
         verify(hybridSearchService).searchOutcome(anyString(), anyInt(), eq(expectedScopedConstraint), anyLong());
         assertEquals(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES, guidedConstraint.docSet());
         assertEquals(
-                List.of(CURRENT_JAVA_API_DOCUMENTATION_SOURCE_IDENTITY),
+                List.of(DEFAULT_JAVA_API_DOCUMENTATION_SOURCE_IDENTITY),
                 expectedScopedConstraint.docSet().stream()
                         .filter(JAVA_API_DOCUMENTATION_SOURCE_IDENTITIES::contains)
                         .toList());
@@ -106,7 +109,7 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        RetrievalConstraint expectedScopedConstraint = defaultJavaApiBroadOfficialConstraint();
         String memberQuery = "Explain Javadoc String.formatted";
         Document staticFormatDocument = apiDocumentationMemberCitationCandidate(
                 "static-format",
@@ -148,8 +151,13 @@ class RetrievalServiceTest {
                 .id("java-25-formatted")
                 .text("Formats this string with arguments.")
                 .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "25")
+                .metadata(
+                        QdrantPayloadFieldSchema.DOC_SET_FIELD,
+                        javaApiSource("25").relativeMirrorPath())
                 .metadata(QdrantPayloadFieldSchema.HASH_FIELD, "java-25-formatted-hash")
-                .metadata(QdrantPayloadFieldSchema.URL_FIELD, javaApiPageUrl("java.lang", "String.html"))
+                .metadata(
+                        QdrantPayloadFieldSchema.URL_FIELD,
+                        javaApiSource("25").remoteBaseUrl() + "java.base/java/lang/String.html")
                 .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
                 .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.lang")
                 .metadata(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, "String.html")
@@ -162,6 +170,9 @@ class RetrievalServiceTest {
         RetrievalService.RetrievalOutcome retrievalOutcome =
                 retrievalService.retrieveOutcome(memberQuery, officialDocumentationConstraint);
 
+        verify(hybridSearchService)
+                .searchDocumentationCitationsOutcomes(
+                        eq(memberQuery), eq(10), eq(List.of(java25Constraint)), anyLong());
         assertEquals(List.of(formattedDocument), retrievalOutcome.documents());
         verify(hybridSearchService, never())
                 .searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
@@ -176,7 +187,7 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        RetrievalConstraint expectedScopedConstraint = defaultJavaApiBroadOfficialConstraint();
         Document springDocument = versionedDocument("spring-application-run", "", "spring-run-hash");
         when(hybridSearchService.searchOutcome(
                         eq("Explain SpringApplication.run"), anyInt(), eq(expectedScopedConstraint), anyLong()))
@@ -210,7 +221,7 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint guidedConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        RetrievalConstraint expectedScopedConstraint = defaultJavaApiBroadOfficialConstraint();
         when(hybridSearchService.searchOutcome(anyString(), anyInt(), eq(expectedScopedConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(List.of(), List.of()));
         when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
@@ -274,7 +285,7 @@ class RetrievalServiceTest {
                 .searchOutcomes(anyString(), anyInt(), eq(List.of(expectedCombinedConstraint)), anyLong());
         assertEquals(List.of(REPRESENTED_JAVA_API_SOURCE.javaRelease()), expectedCombinedConstraint.docVersions());
         assertEquals("official", expectedCombinedConstraint.sourceKind());
-        assertEquals(officialDocumentationConstraint.docSet(), expectedCombinedConstraint.docSet());
+        assertEquals(List.of(REPRESENTED_JAVA_API_SOURCE.relativeMirrorPath()), expectedCombinedConstraint.docSet());
     }
 
     @Test
@@ -288,7 +299,7 @@ class RetrievalServiceTest {
                 new RetrievalService(hybridSearchService, appProperties, rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint guidedConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        RetrievalConstraint expectedScopedConstraint = defaultJavaApiBroadOfficialConstraint();
         String repeatedCitationUrl = "https://docs.example.test/String.html#substring(int,int)";
         String uniqueCitationUrl = "https://docs.example.test/List.html#get(int)";
         List<Document> citationCandidates = List.of(
@@ -335,7 +346,7 @@ class RetrievalServiceTest {
                 new RetrievalService(hybridSearchService, appProperties, rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        RetrievalConstraint expectedScopedConstraint = defaultJavaApiBroadOfficialConstraint();
         String citationQuery = "What does Javadoc List.of return?";
         String listPageUrl = javaApiPageUrl("java.util", "List.html");
         List<Document> qdrantCandidates = List.of(
@@ -416,8 +427,8 @@ class RetrievalServiceTest {
                         .toList());
         verify(hybridSearchService)
                 .searchOutcomes(anyString(), eq(10), eq(List.of(java21Constraint, java26Constraint)), anyLong());
-        assertEquals(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES, java21Constraint.docSet());
-        assertEquals(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES, java26Constraint.docSet());
+        assertEquals(List.of("java/java21-complete"), java21Constraint.docSet());
+        assertEquals(List.of("java/java26-complete"), java26Constraint.docSet());
     }
 
     @Test
@@ -460,13 +471,12 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        List<String> hikaricpDocSets = List.of("hikaricp/7.1.0/api", "hikaricp/7.0.2/api");
         RetrievalConstraint hikaricp702Constraint =
-                officialDocumentationConstraint.withDocSetScope(hikaricpDocSets).withDocVersions(List.of("7.0.2"));
+                documentationEvidenceConstraint("hikaricp/7.0.2/api", "api-docs", "7.0.2");
         RetrievalConstraint hikaricp710Constraint =
-                officialDocumentationConstraint.withDocSetScope(hikaricpDocSets).withDocVersions(List.of("7.1.0"));
-        Document hikaricp702Document = versionedDocument("hikaricp-702", "7.0.2", "hash-702");
-        Document hikaricp710Document = versionedDocument("hikaricp-710", "7.1.0", "hash-710");
+                documentationEvidenceConstraint("hikaricp/7.1.0/api", "api-docs", "7.1.0");
+        Document hikaricp702Document = versionedDocument("hikaricp-702", "7.0.2", "hash-702", "hikaricp/7.0.2/api");
+        Document hikaricp710Document = versionedDocument("hikaricp-710", "7.1.0", "hash-710", "hikaricp/7.1.0/api");
         when(hybridSearchService.searchOutcomes(
                         anyString(), eq(10), eq(List.of(hikaricp702Constraint, hikaricp710Constraint)), anyLong()))
                 .thenReturn(List.of(
@@ -511,17 +521,15 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        List<String> mixedDocSets =
-                List.of("hikaricp/7.1.0/api", "hikaricp/7.0.2/api", "java/java21-complete", "java/java25-complete");
         List<String> evidenceVersions = List.of("7.0.2", "7.1.0", "21", "25");
-        List<RetrievalConstraint> evidenceConstraints = evidenceVersions.stream()
-                .map(version -> officialDocumentationConstraint
-                        .withDocSetScope(mixedDocSets)
-                        .withDocVersions(List.of(version)))
-                .toList();
+        List<RetrievalConstraint> evidenceConstraints = List.of(
+                documentationEvidenceConstraint("hikaricp/7.0.2/api", "api-docs", "7.0.2"),
+                documentationEvidenceConstraint("hikaricp/7.1.0/api", "api-docs", "7.1.0"),
+                javaEvidenceConstraint(officialDocumentationConstraint, "21"),
+                javaEvidenceConstraint(officialDocumentationConstraint, "25"));
         List<Document> evidenceDocuments = List.of(
-                versionedDocument("hikaricp-702", "7.0.2", "hash-702"),
-                versionedDocument("hikaricp-710", "7.1.0", "hash-710"),
+                versionedDocument("hikaricp-702", "7.0.2", "hash-702", "hikaricp/7.0.2/api"),
+                versionedDocument("hikaricp-710", "7.1.0", "hash-710", "hikaricp/7.1.0/api"),
                 versionedDocument("java-21", "21", "hash-21"),
                 versionedDocument("java-25", "25", "hash-25"));
         when(hybridSearchService.searchOutcomes(anyString(), eq(10), eq(evidenceConstraints), anyLong()))
@@ -534,7 +542,10 @@ class RetrievalServiceTest {
         RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveOutcome(
                 "Does HikariCP 7.0.5 work with Java 22?", officialDocumentationConstraint);
         RetrievalService.RetrievalOutcome limitedOutcome = retrievalService.retrieveWithLimitOutcome(
-                "Does HikariCP 7.0.5 work with Java 22?", 4, 1_000, officialDocumentationConstraint);
+                "Does HikariCP 7.0.5 work with Java 22?",
+                ModelConfiguration.RAG_LIMIT_CONSTRAINED,
+                1_000,
+                officialDocumentationConstraint);
 
         assertEquals(
                 evidenceVersions,
@@ -548,6 +559,49 @@ class RetrievalServiceTest {
                         .toList());
         verify(hybridSearchService, org.mockito.Mockito.times(2))
                 .searchOutcomes(anyString(), eq(10), eq(evidenceConstraints), anyLong());
+    }
+
+    @Test
+    void multipleDependencyGapsRetainEveryDistinctEvidenceSource() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        List<RetrievalConstraint> evidenceConstraints = List.of(
+                documentationEvidenceConstraint("hikaricp/7.0.2/api", "api-docs", "7.0.2"),
+                documentationEvidenceConstraint("hikaricp/7.1.0/api", "api-docs", "7.1.0"),
+                documentationEvidenceConstraint("spring-ai-api-stable", "api-docs", "1.1.2"),
+                documentationEvidenceConstraint("spring-ai-reference", "framework-reference", "1.1.8"));
+        List<Document> evidenceDocuments = List.of(
+                versionedDocument("hikaricp-702", "7.0.2", "hash-702", "hikaricp/7.0.2/api"),
+                versionedDocument("hikaricp-710", "7.1.0", "hash-710", "hikaricp/7.1.0/api"),
+                versionedDocument("spring-ai-112", "1.1.2", "hash-ai-112", "spring-ai-api-stable"),
+                versionedDocument("spring-ai-118", "1.1.8", "hash-ai-118", "spring-ai-reference"));
+        when(hybridSearchService.searchOutcomes(anyString(), eq(10), eq(evidenceConstraints), anyLong()))
+                .thenReturn(evidenceDocuments.stream()
+                        .map(document -> new HybridSearchService.SearchOutcome(List.of(document), List.of()))
+                        .toList());
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
+                .thenReturn(evidenceDocuments.subList(0, ModelConfiguration.RAG_LIMIT_CONSTRAINED));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveWithLimitOutcome(
+                "Compare HikariCP 7.0.5 with Spring AI 1.1.5",
+                ModelConfiguration.RAG_LIMIT_CONSTRAINED,
+                1_000,
+                officialDocumentationConstraint);
+
+        assertEquals(
+                List.of(
+                        "hikaricp/7.0.2/api@7.0.2",
+                        "hikaricp/7.1.0/api@7.1.0",
+                        "spring-ai-api-stable@1.1.2",
+                        "spring-ai-reference@1.1.8"),
+                retrievalOutcome.documents().stream()
+                        .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.DOC_SET_FIELD) + "@"
+                                + document.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD))
+                        .toList());
     }
 
     @Test
@@ -578,8 +632,8 @@ class RetrievalServiceTest {
         RetrievalService retrievalService = new RetrievalService(
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint hikaricp702Constraint =
-                new RetrievalConstraint(List.of("7.0.2"), "official", "", "", List.of("hikaricp/7.0.2/api"));
-        Document hikaricp702Document = versionedDocument("hikaricp-702", "7.0.2", "hash-702");
+                documentationEvidenceConstraint("hikaricp/7.0.2/api", "api-docs", "7.0.2");
+        Document hikaricp702Document = versionedDocument("hikaricp-702", "7.0.2", "hash-702", "hikaricp/7.0.2/api");
         when(hybridSearchService.searchOutcomes(anyString(), eq(10), eq(List.of(hikaricp702Constraint)), anyLong()))
                 .thenReturn(List.of(new HybridSearchService.SearchOutcome(List.of(hikaricp702Document), List.of())));
         when(hybridSearchService.searchDocumentationCitationsOutcomes(
@@ -940,7 +994,7 @@ class RetrievalServiceTest {
                 new RetrievalService(hybridSearchService, appProperties, rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        RetrievalConstraint expectedScopedConstraint = defaultJavaApiBroadOfficialConstraint();
         List<Document> retrievedDocuments = List.of(
                 versionedDocument("document-a", "", "hash-a"),
                 versionedDocument("document-b", "", "hash-b"),
@@ -987,7 +1041,7 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint guidedConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        RetrievalConstraint expectedScopedConstraint = defaultJavaApiBroadOfficialConstraint();
         HybridSearchPartialFailureException.CollectionSearchFailure collectionFailure =
                 new HybridSearchPartialFailureException.CollectionSearchFailure(
                         "java-docs", "Timeout", "5s", HybridSearchPartialFailureException.FailureDisposition.TRANSIENT);
@@ -1019,7 +1073,7 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        RetrievalConstraint expectedScopedConstraint = defaultJavaApiBroadOfficialConstraint();
         Document genericDocument = versionedDocument("generic-member", "", "generic-member-hash");
         when(hybridSearchService.searchOutcome(eq(learnerQuery), anyInt(), eq(expectedScopedConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(List.of(genericDocument), List.of()));
@@ -1034,38 +1088,55 @@ class RetrievalServiceTest {
                 .searchDocumentationCitationsOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
     }
 
-    private static RetrievalConstraint currentJavaApiBroadOfficialConstraint() {
+    private static RetrievalConstraint defaultJavaApiBroadOfficialConstraint() {
         return RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES.stream()
                 .filter(sourceIdentity -> !JAVA_API_DOCUMENTATION_SOURCE_IDENTITIES.contains(sourceIdentity)
-                        || CURRENT_JAVA_API_DOCUMENTATION_SOURCE_IDENTITY.equals(sourceIdentity))
+                        || DEFAULT_JAVA_API_DOCUMENTATION_SOURCE_IDENTITY.equals(sourceIdentity))
                 .toList());
     }
 
     private static RetrievalConstraint javaEvidenceConstraint(
             RetrievalConstraint retrievalConstraint, String evidenceVersion) {
+        String documentationSet = javaApiSource(evidenceVersion).relativeMirrorPath();
         return new RetrievalConstraint(
                 List.of(evidenceVersion),
                 retrievalConstraint.sourceKind(),
                 DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE,
                 "oracle",
-                retrievalConstraint.docSet());
+                List.of(documentationSet));
+    }
+
+    private static RetrievalConstraint documentationEvidenceConstraint(
+            String documentationSet, String documentType, String documentVersion) {
+        return new RetrievalConstraint(
+                List.of(documentVersion), "official", documentType, documentationSet, List.of(documentationSet));
     }
 
     private static Document versionedDocument(String documentId, String documentVersion, String contentHash) {
+        String documentationSet =
+                documentVersion.isBlank() ? "" : javaApiSource(documentVersion).relativeMirrorPath();
+        return versionedDocument(documentId, documentVersion, contentHash, documentationSet);
+    }
+
+    private static Document versionedDocument(
+            String documentId, String documentVersion, String contentHash, String documentationSet) {
         return Document.builder()
                 .id(documentId)
                 .text("Java " + documentVersion + " documentation")
                 .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, documentVersion)
+                .metadata(QdrantPayloadFieldSchema.DOC_SET_FIELD, documentationSet)
                 .metadata(QdrantPayloadFieldSchema.HASH_FIELD, contentHash)
                 .metadata(QdrantPayloadFieldSchema.URL_FIELD, "https://docs.example.test/" + documentVersion + "/")
                 .build();
     }
 
     private static Document versionedCitationDocument(String documentId, String documentVersion, String contentHash) {
+        String documentationSet = javaApiSource(documentVersion).relativeMirrorPath();
         return Document.builder()
                 .id(documentId)
                 .text("Java " + documentVersion + " citation")
                 .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, documentVersion)
+                .metadata(QdrantPayloadFieldSchema.DOC_SET_FIELD, documentationSet)
                 .metadata(QdrantPayloadFieldSchema.HASH_FIELD, contentHash)
                 .metadata(
                         QdrantPayloadFieldSchema.URL_FIELD,
@@ -1074,15 +1145,12 @@ class RetrievalServiceTest {
     }
 
     private static Document exactListOfOverloadDocument(String documentId, String documentVersion, String contentHash) {
-        DocsSourceRegistry.JavaApiDocumentationSource documentationSource =
-                DocsSourceRegistry.javaApiDocumentationSources().stream()
-                        .filter(candidateSource -> documentVersion.equals(candidateSource.javaRelease()))
-                        .findFirst()
-                        .orElseThrow();
+        DocsSourceRegistry.JavaApiDocumentationSource documentationSource = javaApiSource(documentVersion);
         return Document.builder()
                 .id(documentId)
                 .text(EXACT_LIST_OVERLOAD_TEXT)
                 .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, documentVersion)
+                .metadata(QdrantPayloadFieldSchema.DOC_SET_FIELD, documentationSource.relativeMirrorPath())
                 .metadata(QdrantPayloadFieldSchema.HASH_FIELD, contentHash)
                 .metadata(
                         QdrantPayloadFieldSchema.URL_FIELD,
@@ -1095,15 +1163,12 @@ class RetrievalServiceTest {
     }
 
     private static Document exactThreadBuilderStartDocument() {
-        DocsSourceRegistry.JavaApiDocumentationSource documentationSource =
-                DocsSourceRegistry.javaApiDocumentationSources().stream()
-                        .filter(candidateSource -> "21".equals(candidateSource.javaRelease()))
-                        .findFirst()
-                        .orElseThrow();
+        DocsSourceRegistry.JavaApiDocumentationSource documentationSource = javaApiSource("21");
         return Document.builder()
                 .id("java-21-thread-builder-start")
                 .text("Thread start(Runnable task) Creates a new Thread and schedules it to execute")
                 .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "21")
+                .metadata(QdrantPayloadFieldSchema.DOC_SET_FIELD, documentationSource.relativeMirrorPath())
                 .metadata(QdrantPayloadFieldSchema.HASH_FIELD, "java-21-thread-builder-start-hash")
                 .metadata(
                         QdrantPayloadFieldSchema.URL_FIELD,
@@ -1113,6 +1178,13 @@ class RetrievalServiceTest {
                 .metadata(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, "Thread.Builder.html")
                 .metadata(QdrantPayloadFieldSchema.ANCHOR_FIELD, "start(java.lang.Runnable)")
                 .build();
+    }
+
+    private static DocsSourceRegistry.JavaApiDocumentationSource javaApiSource(String javaRelease) {
+        return DocsSourceRegistry.javaApiDocumentationSources().stream()
+                .filter(candidateSource -> javaRelease.equals(candidateSource.javaRelease()))
+                .findFirst()
+                .orElseThrow();
     }
 
     private static Document apiDocumentationCitationCandidate(
@@ -1321,7 +1393,7 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint guidedConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        RetrievalConstraint expectedScopedConstraint = defaultJavaApiBroadOfficialConstraint();
         Document stageDeadlineDocument = versionedDocument("stage-deadline", "", "stage-deadline-hash");
         long testStartNanos = System.nanoTime();
         AtomicLong capturedStageDeadlineNanos = new AtomicLong();
@@ -1355,7 +1427,7 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint guidedConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        RetrievalConstraint expectedScopedConstraint = defaultJavaApiBroadOfficialConstraint();
         Document deadlineDocument = versionedDocument("deadline-expired", "", "deadline-expired-hash");
         when(hybridSearchService.searchOutcome(anyString(), anyInt(), eq(expectedScopedConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(List.of(deadlineDocument), List.of()));

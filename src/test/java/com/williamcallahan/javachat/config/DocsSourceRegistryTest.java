@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.config;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationCitationPathStyle;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSource;
@@ -151,6 +152,45 @@ class DocsSourceRegistryTest {
         assertEquals(
                 List.of("1.1.2", "1.1.8"),
                 springAiEvidence.sources().stream()
+                        .map(DocumentationSource::docVersion)
+                        .toList());
+        assertEquals(
+                List.of("1.1.2", "1.1.8"),
+                DocsSourceRegistry.versionedDocumentationEvidence("Spring AI 1.1.5 examples")
+                        .orElseThrow()
+                        .sources()
+                        .stream()
+                        .map(DocumentationSource::docVersion)
+                        .toList());
+
+        assertTrue(DocsSourceRegistry.versionedDocumentationEvidence("Oracle 23 database")
+                .isEmpty());
+        assertTrue(DocsSourceRegistry.versionedDocumentationEvidence("IBM 24 database")
+                .isEmpty());
+        assertTrue(DocsSourceRegistry.versionedDocumentationEvidence("Python 100 examples")
+                .isEmpty());
+        assertEquals(
+                List.of("7.1.0"),
+                DocsSourceRegistry.versionedDocumentationEvidence("HikariCP 9 connection pooling")
+                        .orElseThrow()
+                        .sources()
+                        .stream()
+                        .map(DocumentationSource::docVersion)
+                        .toList());
+        assertEquals(
+                List.of("25"),
+                DocsSourceRegistry.versionedDocumentationEvidence("Oracle Java 25 release notes")
+                        .orElseThrow()
+                        .sources()
+                        .stream()
+                        .map(DocumentationSource::docVersion)
+                        .toList());
+        assertEquals(
+                List.of("3.16"),
+                DocsSourceRegistry.versionedDocumentationEvidence("Porkbun 3.16 DNS API")
+                        .orElseThrow()
+                        .sources()
+                        .stream()
                         .map(DocumentationSource::docVersion)
                         .toList());
     }

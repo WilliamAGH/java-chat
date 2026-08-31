@@ -66,6 +66,8 @@ public final class DocsSourceRegistry {
     private static final Pattern NUMERIC_DOCUMENTATION_VERSION_PATTERN =
             Pattern.compile("[0-9]+(?:\\.[0-9]{1,})*(?:[-+][A-Za-z0-9.]{1,})?");
     private static final Pattern NUMERIC_VERSION_PREFIX_PATTERN = Pattern.compile("^[0-9]+(?:\\.[0-9]{1,})*");
+    private static final Pattern AMBIGUOUS_VERSION_QUANTITY_SUFFIX_PATTERN =
+            Pattern.compile("^\\s+(?:examples?|ways?|tips?|items?)\\b");
     private static final String SPRING_FRAMEWORK_REFERENCE_URL_PREFIX =
             SPRING_DOCS_HTTPS_PREFIX + SPRING_FRAMEWORK_MARKER + "/reference";
     private static final String SPRING_FRAMEWORK_JAVADOC_URL_PREFIX =
@@ -318,11 +320,11 @@ public final class DocsSourceRegistry {
             new DocumentationSource(
                     "https://porkbun.com/api/json/v3/documentation",
                     "porkbun",
-                    "Porkbun API v3.15 Documentation",
+                    "Porkbun API v3.16 Documentation",
                     "porkbun",
                     OFFICIAL_DOCUMENTATION_SOURCE_KIND,
                     "api-docs",
-                    "3.15",
+                    "3.16",
                     DocumentationCitationPathStyle.SINGLE_DOCUMENT),
             new DocumentationSource(
                     "https://github.com/oborseth/Porkbun-MCP/blob/64e8b4f4caad75e99333733bca5f2987afee3c75/README.md",
@@ -610,11 +612,20 @@ public final class DocsSourceRegistry {
                     .sorted(Comparator.comparingInt(String::length).reversed())
                     .map(Pattern::quote)
                     .collect(java.util.stream.Collectors.joining("|"));
+            if (familyAliases.isBlank()) {
+                continue;
+            }
             Matcher requestedVersionMatcher = Pattern.compile(
                             "\\b(?:" + familyAliases + ")\\s+(\\d+(?:\\.\\d+){0,3})\\b")
                     .matcher(normalizedQuery);
             while (requestedVersionMatcher.find()) {
                 String requestedVersion = requestedVersionMatcher.group(1);
+                if (!requestedVersion.contains(".")
+                        && AMBIGUOUS_VERSION_QUANTITY_SUFFIX_PATTERN
+                                .matcher(normalizedQuery.substring(requestedVersionMatcher.end()))
+                                .find()) {
+                    continue;
+                }
                 List<DocumentationSource> exactSources = familySources.getValue().stream()
                         .filter(source -> source.docVersion().equals(requestedVersion)
                                 || source.docVersion().startsWith(requestedVersion + "-"))
@@ -624,18 +635,25 @@ public final class DocsSourceRegistry {
                             new VersionedDocumentationEvidence(familySources.getKey(), requestedVersion, exactSources));
                     continue;
                 }
-                Optional<String> lowerVersion = familySources.getValue().stream()
+                List<DocumentationSource> adjacentFamilySources = familySources.getValue().stream()
+                        .filter(source ->
+                                !"release-notes".equals(source.docType()) && !"article".equals(source.docType()))
+                        .toList();
+                if (adjacentFamilySources.isEmpty()) {
+                    continue;
+                }
+                Optional<String> lowerVersion = adjacentFamilySources.stream()
                         .map(DocumentationSource::docVersion)
                         .filter(version -> compareNumericVersions(version, requestedVersion) < 0)
                         .max(DocsSourceRegistry::compareNumericVersions);
-                Optional<String> higherVersion = familySources.getValue().stream()
+                Optional<String> higherVersion = adjacentFamilySources.stream()
                         .map(DocumentationSource::docVersion)
                         .filter(version -> compareNumericVersions(version, requestedVersion) > 0)
                         .min(DocsSourceRegistry::compareNumericVersions);
                 List<String> evidenceVersions = Stream.concat(lowerVersion.stream(), higherVersion.stream())
                         .toList();
                 List<DocumentationSource> evidenceSources = evidenceVersions.stream()
-                        .flatMap(evidenceVersion -> familySources.getValue().stream()
+                        .flatMap(evidenceVersion -> adjacentFamilySources.stream()
                                 .filter(source -> evidenceVersion.equals(source.docVersion())))
                         .toList();
                 resolvedEvidence.add(
@@ -666,8 +684,13 @@ public final class DocsSourceRegistry {
                 .toLowerCase(Locale.ROOT)
                 .replace('-', ' ')
                 .replace('_', ' ');
-        return Stream.of(familyAlias, displayAlias)
-                .filter(alias -> !alias.isBlank())
+        boolean sourceSpecificArticle = "release-notes".equals(documentationSource.docType())
+                || "article".equals(documentationSource.docType());
+        String sourceSpecificAlias =
+                displayAlias.startsWith(familyAlias + " ") ? displayAlias : familyAlias + " " + displayAlias;
+        Stream<String> aliases =
+                sourceSpecificArticle ? Stream.of(sourceSpecificAlias) : Stream.of(familyAlias, displayAlias);
+        return aliases.filter(alias -> !alias.isBlank())
                 .filter(alias -> !"java".equals(alias) && !"jdk".equals(alias))
                 .distinct()
                 .toList();
