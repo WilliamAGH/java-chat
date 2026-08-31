@@ -247,7 +247,7 @@ alwaysApply: true
 
 - [LM1a] **Settings**: Do not change any LLM settings without explicit written approval.
 - [LM1b] **No Fallback**: Do not auto-fallback or regress models across providers; surface error to user.
-- [LM1c] **Config**: Generative inference MUST use exact `gpt-5.4` through the shared OpenAI-compatible gateway. Its model/base-url/api-key MUST come from `.env`/environment variables (see [EV1d]). All other LLM settings MUST come from Spring property files and `@ConfigurationProperties`.
+- [LM1c] **Config**: Generative inference MUST go through the shared OpenAI-compatible gateway using a non-blank `OPENAI_MODEL` gateway alias (default `gpt-5.4`). Its model/base-url/api-key MUST come from `.env`/environment variables (see [EV1d]). All other LLM settings MUST come from Spring property files and `@ConfigurationProperties`.
 - [LM1d] **Behavior**: Allowed: logging diagnostics. Not allowed: silently changing LLM behavior.
 - [LM1e] **Streaming**: TTFB < 200ms, streaming start < 500ms.
 - [LM1f] **Events**: `text`, `citation`, `code`, `enrichment`, `suggestion`, `status`.
