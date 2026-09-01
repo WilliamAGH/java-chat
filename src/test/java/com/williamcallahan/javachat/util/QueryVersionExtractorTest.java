@@ -38,6 +38,21 @@ class QueryVersionExtractorTest {
     }
 
     @Test
+    void rejectsExplicitQuantityPhrasesWithoutSuppressingReleaseRequests() {
+        for (String quantityNoun : List.of(
+                "day", "days", "hour", "hours", "minute", "minutes", "second", "seconds", "times", "line", "lines")) {
+            assertEquals(
+                    List.of(),
+                    QueryVersionExtractor.extractVersionNumbers("Java 100 " + quantityNoun + " of practice"));
+        }
+        assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers("JDK-30-HOURS of video"));
+        assertEquals(List.of("5"), QueryVersionExtractor.extractVersionNumbers("Java 5"));
+        assertEquals(List.of("21"), QueryVersionExtractor.extractVersionNumbers("Java 21 time API"));
+        assertEquals(List.of("25"), QueryVersionExtractor.extractVersionNumbers("Java 25 examples"));
+        assertEquals(List.of("21"), QueryVersionExtractor.extractVersionNumbers("Java 100 days of code in Java 21"));
+    }
+
+    @Test
     void returnsEmptyVersionsForMissingQueries() {
         assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers(null));
         assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers("  "));

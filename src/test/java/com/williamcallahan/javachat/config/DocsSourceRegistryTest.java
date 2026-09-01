@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -86,6 +87,7 @@ class DocsSourceRegistryTest {
 
         assertEquals("hikaricp", evidence.sourceFamily());
         assertEquals("7.0.5", evidence.requestedVersion());
+        assertFalse(evidence.isExactVersion("7.0.2"));
         assertEquals(
                 List.of("7.0.2", "7.1.0"),
                 evidence.sources().stream().map(DocumentationSource::docVersion).toList());
@@ -95,6 +97,15 @@ class DocsSourceRegistryTest {
                         .orElseThrow()
                         .sources()
                         .stream()
+                        .map(DocumentationSource::docVersion)
+                        .toList());
+        DocsSourceRegistry.VersionedDocumentationEvidence shorthandEvidence =
+                DocsSourceRegistry.versionedDocumentationEvidence("HikariCP 7.1 connection pooling")
+                        .orElseThrow();
+        assertTrue(shorthandEvidence.isExactVersion("7.1.0"));
+        assertEquals(
+                List.of("7.1.0"),
+                shorthandEvidence.sources().stream()
                         .map(DocumentationSource::docVersion)
                         .toList());
         assertEquals(
@@ -193,6 +204,41 @@ class DocsSourceRegistryTest {
                         .stream()
                         .map(DocumentationSource::docVersion)
                         .toList());
+    }
+
+    @Test
+    void resolvesExactKotlinLanguageAndAdjacentApiLineEvidence() {
+        List<DocsSourceRegistry.VersionedDocumentationEvidence> kotlinEvidence =
+                DocsSourceRegistry.versionedDocumentationEvidenceAll("Kotlin 2.4.10 Nothing");
+
+        assertEquals(
+                List.of("kotlin@2.4.10@exact", "kotlin-api@2.4@adjacent"),
+                kotlinEvidence.stream()
+                        .flatMap(evidence -> evidence.sources().stream()
+                                .map(source -> source.docSet() + "@" + source.docVersion() + "@"
+                                        + (evidence.isExactVersion(source.docVersion()) ? "exact" : "adjacent")))
+                        .toList());
+    }
+
+    @Test
+    void registersKotlinNothingApiWithTruthfulProvenance() {
+        DocumentationSource kotlinApiSource = DocsSourceRegistry.documentationSources().stream()
+                .filter(source -> "kotlin-api".equals(source.docSet()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(
+                "https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-nothing/", kotlinApiSource.citationBaseUrl());
+        assertEquals("kotlin-api", kotlinApiSource.relativeMirrorPath());
+        assertEquals("2.4", kotlinApiSource.docVersion());
+        assertEquals("official", kotlinApiSource.sourceKind());
+        assertEquals("api-docs", kotlinApiSource.docType());
+        String kotlinLanguageMirror = DocsSourceRegistry.documentationSources().stream()
+                .filter(source -> "kotlin".equals(source.docSet()))
+                .map(DocumentationSource::relativeMirrorPath)
+                .findFirst()
+                .orElseThrow();
+        assertFalse(kotlinApiSource.relativeMirrorPath().startsWith(kotlinLanguageMirror + "/"));
     }
 
     @Test

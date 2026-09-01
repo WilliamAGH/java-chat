@@ -102,6 +102,72 @@ class RetrievalServiceTest {
     }
 
     @Test
+    void explicitQuantityPhraseUsesBroadOfficialScopeAndReturnsNonJavaEvidence() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint expectedScopedConstraint = defaultJavaApiBroadOfficialConstraint();
+        Document kotlinDocument = Document.builder()
+                .id("kotlin-days-of-code")
+                .text("Practice plan")
+                .metadata(QdrantPayloadFieldSchema.DOC_SET_FIELD, "kotlin")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, "https://kotlinlang.org/docs/basic-syntax.html")
+                .build();
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), eq(expectedScopedConstraint), anyLong()))
+                .thenReturn(new HybridSearchService.SearchOutcome(List.of(kotlinDocument), List.of()));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
+                .thenReturn(List.of(kotlinDocument));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome("Java 100 days of code", officialDocumentationConstraint);
+
+        assertEquals(List.of(kotlinDocument), retrievalOutcome.documents());
+    }
+
+    @Test
+    void configuredUnindexedJavaReleaseUsesBothAdjacentApiSources() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        AppProperties appProperties = new AppProperties();
+        appProperties.getDocs().setJdkVersion(24);
+        RetrievalService retrievalService =
+                new RetrievalService(hybridSearchService, appProperties, rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        List<String> adjacentJavaApiDocSets = DocsSourceRegistry.javaApiDocumentationSourcesForRelease("24").stream()
+                .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
+                .toList();
+        RetrievalConstraint expectedScopedConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES.stream()
+                        .filter(sourceIdentity -> !JAVA_API_DOCUMENTATION_SOURCE_IDENTITIES.contains(sourceIdentity)
+                                || adjacentJavaApiDocSets.contains(sourceIdentity))
+                        .toList());
+        Document kotlinDocument = Document.builder()
+                .id("kotlin-broad-scope")
+                .text("Kotlin documentation")
+                .metadata(QdrantPayloadFieldSchema.DOC_SET_FIELD, "kotlin")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, "https://kotlinlang.org/docs/home.html")
+                .build();
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), eq(expectedScopedConstraint), anyLong()))
+                .thenReturn(new HybridSearchService.SearchOutcome(List.of(kotlinDocument), List.of()));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
+                .thenReturn(List.of(kotlinDocument));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome("Java collections", officialDocumentationConstraint);
+
+        assertEquals(List.of(kotlinDocument), retrievalOutcome.documents());
+        assertEquals(
+                List.of("java/java21-complete", "java/java25-complete"),
+                expectedScopedConstraint.docSet().stream()
+                        .filter(JAVA_API_DOCUMENTATION_SOURCE_IDENTITIES::contains)
+                        .toList());
+    }
+
+    @Test
     void bareJavaMemberUsesDeterministicSparseEvidenceWithoutReranking() {
         HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         RerankerService rerankerService = mock(RerankerService.class);
@@ -598,6 +664,37 @@ class RetrievalServiceTest {
                         "hikaricp/7.1.0/api@7.1.0",
                         "spring-ai-api-stable@1.1.2",
                         "spring-ai-reference@1.1.8"),
+                retrievalOutcome.documents().stream()
+                        .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.DOC_SET_FIELD) + "@"
+                                + document.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD))
+                        .toList());
+    }
+
+    @Test
+    void exactKotlinRequestRetainsLanguageAndApiLineEvidence() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        List<RetrievalConstraint> evidenceConstraints = List.of(
+                documentationEvidenceConstraint("kotlin", "language-reference", "2.4.10"),
+                documentationEvidenceConstraint("kotlin-api", "api-docs", "2.4"));
+        Document languageDocument = versionedDocument("kotlin-language", "2.4.10", "kotlin-language-hash", "kotlin");
+        Document apiDocument = versionedDocument("kotlin-nothing-api", "2.4", "kotlin-api-hash", "kotlin-api");
+        when(hybridSearchService.searchOutcomes(anyString(), eq(10), eq(evidenceConstraints), anyLong()))
+                .thenReturn(List.of(
+                        new HybridSearchService.SearchOutcome(List.of(languageDocument), List.of()),
+                        new HybridSearchService.SearchOutcome(List.of(apiDocument), List.of())));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
+                .thenReturn(List.of(languageDocument, apiDocument));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome("Kotlin 2.4.10 Nothing", officialDocumentationConstraint);
+
+        assertEquals(
+                List.of("kotlin@2.4.10", "kotlin-api@2.4"),
                 retrievalOutcome.documents().stream()
                         .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.DOC_SET_FIELD) + "@"
                                 + document.getMetadata().get(QdrantPayloadFieldSchema.DOC_VERSION_FIELD))
