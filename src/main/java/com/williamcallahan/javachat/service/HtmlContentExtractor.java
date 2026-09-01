@@ -109,11 +109,23 @@ public class HtmlContentExtractor {
             contentElement = extractionDocument.body();
         }
 
+        removeSkipNavigationLinks(contentElement);
+
         // Extract and clean the text
         String text = extractTextFromElement(contentElement);
 
         // Filter out common noise patterns
         return filterNoise(text);
+    }
+
+    private static void removeSkipNavigationLinks(Element contentElement) {
+        contentElement.select("a[href^=#]").stream()
+                .filter(anchor -> {
+                    String normalizedAnchorText = AsciiTextNormalizer.toLowerAscii(anchor.text());
+                    return normalizedAnchorText.length() <= MIN_INLINE_TEXT_LENGTH
+                            && normalizedAnchorText.startsWith("skip to ");
+                })
+                .forEach(Element::remove);
     }
 
     private void removeNonContentElements(Element extractionElement) {
@@ -184,6 +196,9 @@ public class HtmlContentExtractor {
                 sb.append("\n");
             }
             case "table" -> appendTableContent(child, sb);
+            case String tag
+            when "a".equals(tag) && !child.attr("href").startsWith("#") ->
+                sb.append(" ").append(text);
             default -> {
                 if (!isNavigationElement(child) && text.length() > MIN_INLINE_TEXT_LENGTH) {
                     sb.append(" ").append(text);
