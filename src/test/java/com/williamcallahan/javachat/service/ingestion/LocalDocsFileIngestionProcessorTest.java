@@ -59,6 +59,8 @@ class LocalDocsFileIngestionProcessorTest {
     private static final int DOCUMENT_COUNT_SPANNING_TWO_EMBEDDING_BATCHES =
             LocalDocsFileIngestionProcessor.MAX_EMBEDDING_BATCH_DOCUMENTS + 1;
     private static final int EXPECTED_EMBEDDING_BATCH_COUNT = 2;
+    private static final int HALF_EMBEDDING_BATCH_DOCUMENTS =
+            LocalDocsFileIngestionProcessor.MAX_EMBEDDING_BATCH_DOCUMENTS / 2;
 
     private static final String JAVA_API_CLASS_NAME = "StringBuilder";
     private static final String JAVA_API_METHOD_SIGNATURE = "append(String text)";
@@ -245,6 +247,62 @@ class LocalDocsFileIngestionProcessorTest {
         verify(ingestionFixture.fileIngestionMarkerStore, never())
                 .markFileIngested(anyString(), any(FileIngestionRecord.class));
         verify(ingestionFixture.localStoreService, never()).markHashIngested(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void shouldCompleteStoredBatchMarkersBeforeStoppingLaterWork(@TempDir Path temporaryDirectory) throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        Path selectedDocumentationRoot =
+                temporaryDirectory.resolve("corpus").resolve(documentationSource.relativeMirrorPath());
+        Files.createDirectories(selectedDocumentationRoot);
+        Path firstDocumentationFile = selectedDocumentationRoot.resolve("first.html");
+        Path secondDocumentationFile = selectedDocumentationRoot.resolve("second.html");
+        Path laterDocumentationFile = selectedDocumentationRoot.resolve("later.html");
+        for (Path documentationFile :
+                List.of(firstDocumentationFile, secondDocumentationFile, laterDocumentationFile)) {
+            Files.writeString(documentationFile, javaApiHtml(), StandardCharsets.UTF_8);
+        }
+        String firstDocumentationUrl = DocsSourceRegistry.resolveMirroredPath(
+                        selectedDocumentationRoot, firstDocumentationFile)
+                .orElseThrow();
+        String laterDocumentationUrl = DocsSourceRegistry.resolveMirroredPath(
+                        selectedDocumentationRoot, laterDocumentationFile)
+                .orElseThrow();
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        when(ingestionFixture.chunkProcessingService.processAndStoreChunks(
+                        anyString(), anyString(), anyString(), anyString()))
+                .thenAnswer(invocation -> {
+                    String sourceUrl = invocation.getArgument(1, String.class);
+                    int documentCount = sourceUrl.equals(laterDocumentationUrl) ? 1 : HALF_EMBEDDING_BATCH_DOCUMENTS;
+                    List<Document> indexedDocuments = new ArrayList<>(documentCount);
+                    List<String> chunkHashes = new ArrayList<>(documentCount);
+                    for (int documentIndex = 0; documentIndex < documentCount; documentIndex++) {
+                        indexedDocuments.add(new Document(
+                                sourceUrl + "#" + documentIndex,
+                                "Documentation body " + documentIndex,
+                                new HashMap<>()));
+                        chunkHashes.add(sourceUrl + "-hash-" + documentIndex);
+                    }
+                    return new ChunkProcessingService.ChunkProcessingOutcome(
+                            indexedDocuments, chunkHashes, documentCount, 0);
+                });
+        doThrow(new IllegalStateException("marker write failed"))
+                .when(ingestionFixture.fileIngestionMarkerStore)
+                .markFileIngested(eq(firstDocumentationUrl), any(FileIngestionRecord.class));
+
+        List<LocalDocsFileOutcome> outcomes = ingestionFixture
+                .ingestionProcessor()
+                .processBatch(
+                        selectedDocumentationRoot,
+                        List.of(firstDocumentationFile, secondDocumentationFile, laterDocumentationFile));
+
+        assertEquals(2, outcomes.size());
+        assertEquals(
+                "marker-transition", outcomes.getFirst().failure().orElseThrow().phase());
+        assertTrue(outcomes.getLast().processed());
+        assertTrue(outcomes.getLast().failure().isEmpty());
     }
 
     @Test
