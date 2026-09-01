@@ -7,8 +7,27 @@ set -euo pipefail
 
 SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIRECTORY/.."
+readonly STAGED_SCRIPT_DIRECTORY_PREFIX=".local-embedding-staging-run."
 readonly EXPECTED_REPOSITORY_COUNT=23
 readonly DOCUMENTATION_SETS="jooq/3.21/manual,jooq/3.21/api,python/3.14,postgresql/17,postgresql/18,hikaricp/7.1.0/api,hikaricp/7.0.2/api,jackson/2.22.2/api,jackson/2.21.2/api,jackson/3.2.2/api,jackson/3.1.2/api,lombok/1.18.46/api,lombok/1.18.46/reference,anthropic/api,anthropic/claude-code,amp-code,tinker,docker,traefik,dokploy,infisical,doppler/docs,doppler/reference,doppler/changelog,spring-framework/7.0.7/api"
+
+cleanup_staged_scripts() {
+    local staged_directory="$1"
+    chmod -R u+w "$staged_directory" 2>/dev/null || true
+    rm -rf -- "$staged_directory"
+}
+
+if [[ "$(basename "$SCRIPT_DIRECTORY")" == "$STAGED_SCRIPT_DIRECTORY_PREFIX"* ]]; then
+    trap 'cleanup_staged_scripts "$SCRIPT_DIRECTORY"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+else
+    staged_script_directory="$(mktemp -d "$PROJECT_ROOT/$STAGED_SCRIPT_DIRECTORY_PREFIX"XXXXXX)"
+    trap 'cleanup_staged_scripts "$staged_script_directory"' EXIT
+    cp -R "$SCRIPT_DIRECTORY"/. "$staged_script_directory"/
+    chmod -R a-w "$staged_script_directory"
+    exec "$staged_script_directory/run_local_embedding_staging.sh" "$@"
+fi
 
 cd "$PROJECT_ROOT"
 
@@ -57,11 +76,11 @@ staging_timestamp() {
 }
 
 echo "LOCAL_STAGING_RESUME $(staging_timestamp) BATCH_SIZE=8 CONCURRENCY=8 DOCS=25 REPOS=$EXPECTED_REPOSITORY_COUNT"
-./scripts/process_all_to_qdrant.sh --doc-sets="$DOCUMENTATION_SETS"
+"$SCRIPT_DIRECTORY/process_all_to_qdrant.sh" --doc-sets="$DOCUMENTATION_SETS"
 
 for repository_path in "${repository_paths[@]}"; do
     echo "REPOSITORY_START $(staging_timestamp) $repository_path"
-    ./scripts/process_github_repo.sh --repo-path="$repository_path"
+    "$SCRIPT_DIRECTORY/process_github_repo.sh" --repo-path="$repository_path"
     echo "REPOSITORY_COMPLETE $(staging_timestamp) $repository_path"
 done
 

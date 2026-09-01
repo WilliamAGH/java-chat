@@ -76,6 +76,7 @@ bin/
 !cli/bin/**
 dogfood-output/
 lesson-curation-work/
+/.local-embedding-staging-run.*/
 
 ### Build artifacts (root level) ###
 BOOT-INF/
