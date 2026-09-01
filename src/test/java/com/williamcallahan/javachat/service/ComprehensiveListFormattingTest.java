@@ -254,8 +254,12 @@ class ComprehensiveListFormattingTest {
         assertTrue(html.contains("<ol>"), "Should contain ordered lists");
         assertTrue(html.contains("<ul>"), "Should contain unordered lists");
         assertTrue(html.contains("<li>Primitive types</li>"), "Should format main numbered list");
-        assertTrue(html.contains("<li>boolean</li>"), "Should format nested letter list");
-        assertTrue(html.contains("<li>byte</li>"), "Should continue letter list");
+        assertTrue(
+                html.contains("<li>boolean: true/false</li>"),
+                "Should preserve nested letter-list details after colons");
+        assertTrue(
+                html.contains("<li>byte: 8-bit</li>"),
+                "Should preserve subsequent nested letter-list details after colons");
         assertTrue(html.contains("<li>Reference types</li>"), "Should continue numbered list");
         assertTrue(html.contains("<li>Arrays</li>"), "Should format nested dash list");
         assertTrue(html.contains("<li>Classes</li>"), "Should continue dash list");
