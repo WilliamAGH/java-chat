@@ -2,18 +2,49 @@
 
 [![JavaChat application](src/main/resources/static/images/java-chat-app.png)](https://javachat.ai)
 
-JavaChat answers software-development questions from retrieved documentation and source code when
-supporting sources are available. It streams each answer as it is generated and shows the sources
-used. When retrieval cannot support a claim, JavaChat labels it source-unavailable rather than
-presenting it as grounded.
+JavaChat is a web application and command-line research assistant for software developers. It
+searches a version-aware library of technical documentation before generating an answer. Use it to
+learn an unfamiliar API, compare documented behavior across releases, or find the commands,
+configuration, and migration details needed to move development work forward. Answers can include
+links to the retrieved pages, and JavaChat is designed to make missing source coverage visible.
 
 Use JavaChat in whichever form fits your workflow:
 
 - **Web:** open [javachat.ai](https://javachat.ai) for chat and guided lessons.
-- **Terminal:** install the [JavaChat CLI](cli/README.md) to ask the same grounded questions from
-  any directory.
+- **Terminal:** install the [JavaChat CLI](cli/README.md) to research from any directory and receive
+  source links when retrieval finds supporting documentation.
 - **Self-hosted development:** run the Svelte and Spring Boot application locally and connect it to
   Qdrant and an OpenAI-compatible gateway.
+
+## What JavaChat helps you do
+
+- **Learn APIs and platforms:** request a focused explanation, short example, applicable version,
+  and source pages you can inspect.
+- **Research technical decisions:** investigate releases, migration paths, commands, configuration
+  rules, prerequisites, and operational caveats.
+- **Move real work forward:** keep the CLI beside your code while implementing an integration,
+  debugging a library, planning an upgrade, or configuring a deployment.
+- **See the source boundary:** JavaChat can retrieve the exact requested release or nearby releases
+  of the same technology when they are indexed, and can report when the requested evidence is absent.
+
+## Questions JavaChat can help research
+
+- “What does `Thread.ofVirtual()` return in Java 25, and what is the shortest documented example?”
+- “When should I use `MULTISET` instead of a flat join in jOOQ 3.21.7?”
+- “How do I add a 30-second delay between tasks in a Docker Swarm rolling update?”
+- “What defaults can I configure with Spring AI 1.1.2 `ChatClient.Builder`?”
+- “How does a Clerk session token differ from a backend Secret Key?”
+
+Representative coverage in the shared JavaChat knowledge index includes:
+
+- **Languages:** Java SE 21, 25, and 26; Kotlin 2.4.10; Groovy 5.0.7; Scala 3; and Python 3.14.7.
+- **Libraries:** Spring Framework 7.0.7; Spring AI 1.1.x; four indexed Jackson 2.x/3.x releases;
+  jOOQ 3.21.7; HikariCP 7.x; and Lombok 1.18.46.
+- **Platforms:** PostgreSQL 17/18, Docker, Cloudflare, Clerk, Dokploy, Traefik, Doppler, and Infisical.
+- **Repository snapshots:** OpenAI Java, Anthropic SDKs, Langfuse, Dokploy, Infisical, and Traefik.
+
+Run `javachat list all` for the complete current inventory. Chat retrieves supporting material from
+the documentation collections.
 
 ## Install the CLI
 
@@ -29,14 +60,17 @@ Use `javachat list all` to see the documentation packages, source repositories, 
 revisions available on the selected deployment. See the [CLI README](cli/README.md) for all
 commands, non-interactive authentication, local development, and package verification.
 
-## What JavaChat provides
+## How it works
 
-- Citation-backed chat streamed over Server-Sent Events
-- Guided lessons with separate, lesson-scoped conversations
-- Version-aware retrieval across documentation and indexed GitHub repositories
-- Exact source inventory, including canonical URLs and ingested versions or commit revisions
-- A documentation pipeline that fetches, chunks, embeds, deduplicates, and indexes source material
-- Hybrid Qdrant retrieval using dense and BM25 sparse vectors with reciprocal-rank fusion
+1. JavaChat searches the documentation index for material relevant to the question and requested
+   version.
+2. The strongest matches are supplied as context for the answer.
+3. The answer streams to the web app or CLI, with source links when retrieval returns citations.
+4. Guided lessons keep their own conversations, while ordinary chat can continue a prior session.
+
+The repository also contains the pipeline that fetches, chunks, embeds, deduplicates, and indexes
+the source material. See [Architecture](docs/architecture.md) for Qdrant, dense and sparse search,
+reciprocal-rank fusion, and streaming details.
 
 ## Run the application locally
 

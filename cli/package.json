@@ -1,7 +1,7 @@
 {
   "name": "@wcallahan/javachat-cli",
-  "version": "0.0.1",
-  "description": "Ask Java Chat from any terminal, with the same retrieval and citations as javachat.ai.",
+  "version": "0.0.2",
+  "description": "Research languages, libraries, SDKs, and development tasks with JavaChat's version-aware documentation.",
   "license": "SEE LICENSE IN LICENSE.md",
   "bin": {
     "javachat": "bin/javachat.js"
