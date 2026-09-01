@@ -558,11 +558,9 @@ if ! grep -Fxq 'https://quarkus.io/guides/aesh/' "$QUARKUS_SEED_OUTPUT" \
     fail_documentation_fetch_test "Quarkus extensionless guides did not project onto canonical directory URLs"
 fi
 
-assert_current_documentation_source_dispatch() {
+assert_documentation_source_dispatch() {
     local documentation_source_identifier="$1"
-    local expected_citation_base="$2"
-    local expected_mirror_path="$3"
-    local expected_discovery_url="$4"
+    shift
     if ! (
         set --
         # shellcheck source=fetch_all_docs.sh
@@ -575,16 +573,43 @@ assert_current_documentation_source_dispatch() {
         }
         fetch_named_official_source "$documentation_source_identifier"
     ); then
-        fail_documentation_fetch_test "current documentation source dispatch failed: $documentation_source_identifier"
+        fail_documentation_fetch_test "documentation source dispatch failed: $documentation_source_identifier"
     fi
-    if ! grep -Fxq -- "$expected_citation_base" "$ENVIRONMENT_OVERRIDE_CAPTURE" \
-        || ! grep -Fxq -- "$expected_mirror_path" "$ENVIRONMENT_OVERRIDE_CAPTURE" \
-        || ! grep -Fxq -- "$expected_discovery_url" "$ENVIRONMENT_OVERRIDE_CAPTURE"; then
-        fail_documentation_fetch_test "current documentation source dispatch lost its canonical boundary: $documentation_source_identifier"
-    fi
+    local expected_argument
+    for expected_argument in "$@"; do
+        if ! grep -Fxq -- "$expected_argument" "$ENVIRONMENT_OVERRIDE_CAPTURE"; then
+            fail_documentation_fetch_test \
+                "documentation source dispatch lost required evidence: $documentation_source_identifier $expected_argument"
+        fi
+    done
 }
 
-assert_current_documentation_source_dispatch \
+assert_documentation_source_dispatch \
+    javachat-cli \
+    "https://raw.githubusercontent.com/WilliamAGH/java-chat/8b26605fce3102f90b7c127284509528dc868fa7/cli/README.md" \
+    javachat-cli \
+    "@wcallahan/javachat-cli" \
+    "0.0.1-8b26605fce31" \
+    "--plain-text-document-url"
+assert_documentation_source_dispatch \
+    mintlify \
+    "https://www.mintlify.com/llms.txt" \
+    mintlify \
+    "https://www.mintlify.com/docs/llms.txt" \
+    "--plain-text-document-url"
+assert_documentation_source_dispatch \
+    fern \
+    "https://buildwithfern.com/llms.txt" \
+    fern \
+    "https://buildwithfern.com/learn/llms.txt" \
+    "--plain-text-document-url"
+assert_documentation_source_dispatch \
+    temporal \
+    "https://temporal.io/llms.txt" \
+    temporal \
+    "https://docs.temporal.io/llms.txt" \
+    "--plain-text-document-url"
+assert_documentation_source_dispatch \
     anthropic-api \
     "https://platform.claude.com/docs/en/" \
     "anthropic/api" \
@@ -592,7 +617,7 @@ assert_current_documentation_source_dispatch \
 if ! grep -Fxq -- '^https://platform\.claude\.com/docs/en/home$' "$ENVIRONMENT_OVERRIDE_CAPTURE"; then
     fail_documentation_fetch_test "Anthropic API dispatch retained its non-content landing shell"
 fi
-assert_current_documentation_source_dispatch \
+assert_documentation_source_dispatch \
     claude-code \
     "https://code.claude.com/docs/en/" \
     "anthropic/claude-code" \
@@ -679,7 +704,7 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     "https://ampcode.com/manual/sdk/python" \
     --seed-url \
     "https://ampcode.com/manual/sdk/typescript"
-assert_current_documentation_source_dispatch \
+assert_documentation_source_dispatch \
     tinker \
     "https://tinker-docs.thinkingmachines.ai/" \
     tinker \
@@ -731,7 +756,7 @@ for required_porkbun_mcp_argument in \
         fail_documentation_fetch_test "Porkbun MCP dispatch lost pinned official coverage: $required_porkbun_mcp_argument"
     fi
 done
-assert_current_documentation_source_dispatch \
+assert_documentation_source_dispatch \
     cloudflare \
     "https://developers.cloudflare.com/" \
     cloudflare \
@@ -811,7 +836,7 @@ assert_rejected_selector "kotlin,kotlin"
 assert_rejected_selector "kotlin,,java/java25-complete"
 assert_rejected_selector "all,kotlin"
 
-assert_current_documentation_source_dispatch \
+assert_documentation_source_dispatch \
     lombok-1.18.46-reference \
     "https://projectlombok.org/features/" \
     "lombok/1.18.46/reference" \

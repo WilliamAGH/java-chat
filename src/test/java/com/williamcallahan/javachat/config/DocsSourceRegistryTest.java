@@ -370,6 +370,18 @@ class DocsSourceRegistryTest {
     @Test
     void preservesCanonicalUrlsForSingleDocumentMirrors() {
         assertEquals(
+                "https://www.npmjs.com/package/@wcallahan/javachat-cli",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/javachat-cli/index.html"));
+        assertEquals(
+                "https://www.mintlify.com/llms.txt",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/mintlify/index.html"));
+        assertEquals(
+                "https://buildwithfern.com/llms.txt",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/fern/index.html"));
+        assertEquals(
+                "https://temporal.io/llms.txt",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/temporal/index.html"));
+        assertEquals(
                 "https://porkbun.com/api/json/v3/documentation",
                 DocsSourceRegistry.normalizeDocUrl("file:///data/docs/porkbun/index.html"));
         assertEquals(
