@@ -49,6 +49,21 @@ make dev          # bootstraps missing schemas only on loopback Qdrant
 
 Open `http://localhost:8085/`.
 
+### CLI development
+
+The CLI is its own npm package under `cli/`. Install it and run the source entrypoint from that
+directory:
+
+```bash
+cd cli
+npm install
+npm run dev -- --help
+npm run dev -- --host http://localhost:8085 "How do Java records work?"
+```
+
+See the **[CLI README](cli/README.md)** for authentication, production dogfood, packaged-artifact
+checks, and the npm release procedure.
+
 ## Index documentation (RAG)
 
 ```bash

@@ -1,6 +1,6 @@
 {
-  "name": "@williamcallahan/javachat-cli",
-  "version": "0.1.0",
+  "name": "@wcallahan/javachat-cli",
+  "version": "0.0.1",
   "description": "Ask Java Chat from any terminal, with the same retrieval and citations as javachat.ai.",
   "license": "SEE LICENSE IN LICENSE.md",
   "bin": {
@@ -18,7 +18,15 @@
   "publishConfig": {
     "access": "public"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WilliamAGH/java-chat.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/WilliamAGH/java-chat/tree/dev/cli#readme",
+  "bugs": "https://github.com/WilliamAGH/java-chat/issues",
   "scripts": {
+    "dev": "node bin/javachat.js",
     "test": "node --test",
     "pack:check": "npm pack --dry-run"
   },
