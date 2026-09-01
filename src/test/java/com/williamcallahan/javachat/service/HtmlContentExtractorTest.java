@@ -191,7 +191,6 @@ class HtmlContentExtractorTest {
               <frameset cols="20%,80%">
                 <frame src="overview-frame.html">
                 <frame src="overview-summary.html">
-                <noframes><p>Link to <a href="overview-summary.html">Non-frame version</a>.</p></noframes>
               </frameset>
             </html>
             """);

@@ -149,6 +149,7 @@ public class DocumentFactory {
         var doc = createDocument(text, url, title, chunkIndex, packageName, hash);
         doc.getMetadata().put(QdrantPayloadFieldSchema.PAGE_START_FIELD, pageStart);
         doc.getMetadata().put(QdrantPayloadFieldSchema.PAGE_END_FIELD, pageEnd);
+        doc.getMetadata().put(QdrantPayloadFieldSchema.ANCHOR_FIELD, "page=" + pageStart);
         return doc;
     }
 

@@ -72,6 +72,8 @@ class LocalDocsFileIngestionProcessorTest {
     private static final String JAVA_API_DESCRIPTION =
             "Detailed Java API documentation explains mutability, character sequences, and method contracts. "
                     .repeat(JAVA_API_DESCRIPTION_REPEAT_COUNT);
+    private static final String PDF_MARKER_WITHOUT_PAGE_ANCHOR_SEMANTICS_VERSION =
+            "utf8-document-extraction-provenance-v5";
     private static final long METADATA_ONLY_MODIFIED_TIME_OFFSET_MILLIS = 1_000L;
 
     @Test
@@ -530,6 +532,67 @@ class LocalDocsFileIngestionProcessorTest {
     }
 
     @Test
+    void shouldReplacePdfWhenStoredMarkerUsesPreviousExtractionSemantics(@TempDir Path temporaryDirectory)
+            throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        Path localDocsRoot = temporaryDirectory.resolve("data").resolve("docs");
+        Path pdfFile =
+                localDocsRoot.resolve(documentationSource.relativeMirrorPath()).resolve("reference.pdf");
+        Files.createDirectories(Objects.requireNonNull(pdfFile.getParent(), "pdfFile parent"));
+        Files.writeString(pdfFile, "%PDF-1.7", StandardCharsets.UTF_8);
+
+        String expectedPdfUrl = documentationSource.citationBaseUrl() + "reference.pdf";
+        ContentHasher contentHasher = new ContentHasher();
+        IngestionProvenanceDeriver.IngestionProvenance ingestionProvenance =
+                new IngestionProvenanceDeriver().derive(localDocsRoot, pdfFile, expectedPdfUrl);
+        String matchingIngestionFingerprint =
+                contentHasher.sha256(ingestionProvenance.fingerprintInput(contentHasher.sha256(pdfFile)));
+        FileIngestionRecord stalePdfMarker = new FileIngestionRecord(
+                Files.size(pdfFile),
+                Files.getLastModifiedTime(pdfFile).toMillis(),
+                matchingIngestionFingerprint,
+                PDF_MARKER_WITHOUT_PAGE_ANCHOR_SEMANTICS_VERSION,
+                "documentation",
+                List.of("old-pdf-hash"));
+
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        Document replacementDocument = new Document("replacement-pdf-point", "Replacement PDF page", new HashMap<>());
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedPdfUrl))
+                .thenReturn(Optional.of(stalePdfMarker));
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        when(ingestionFixture.hybridVectorService.hasExactPointIdsForUrl(
+                        any(QdrantCollectionKind.class),
+                        eq(expectedPdfUrl),
+                        eq(List.of(contentHasher.uuidFromHash("old-pdf-hash")))))
+                .thenReturn(true);
+        when(ingestionFixture.chunkProcessingService.processPdfAndStoreWithPagesForce(
+                        eq(pdfFile), eq(expectedPdfUrl), isNull(), eq("")))
+                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(
+                        List.of(replacementDocument), List.of("current-pdf-hash"), 1, 0));
+
+        LocalDocsFileOutcome processingOutcome =
+                ingestionFixture.ingestionProcessor().process(localDocsRoot, pdfFile);
+
+        assertTrue(processingOutcome.processed());
+        verify(ingestionFixture.chunkProcessingService)
+                .processPdfAndStoreWithPagesForce(eq(pdfFile), eq(expectedPdfUrl), isNull(), eq(""));
+        verify(ingestionFixture.chunkProcessingService, never())
+                .processPdfAndStoreWithPages(any(), anyString(), any(), anyString());
+        verify(ingestionFixture.hybridVectorService)
+                .replaceUrlDocuments(
+                        any(QdrantCollectionKind.class), eq(expectedPdfUrl), eq(List.of(replacementDocument)));
+        verify(ingestionFixture.ingestedFilePruneService)
+                .pruneObsoleteLocalStateAfterReplacement(expectedPdfUrl, stalePdfMarker, List.of("current-pdf-hash"));
+        ArgumentCaptor<FileIngestionRecord> updatedMarkerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
+        verify(ingestionFixture.fileIngestionMarkerStore)
+                .markFileIngested(eq(expectedPdfUrl), updatedMarkerCaptor.capture());
+        assertEquals(
+                LocalDocsFileIngestionProcessor.LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
+                updatedMarkerCaptor.getValue().extractionSemanticsVersion());
+    }
+
+    @Test
     void shouldReplaceChangedJavadocBeforePruningObsoleteStateWhenChunkCountShrinks(@TempDir Path temporaryDirectory)
             throws IOException {
         JavaApiDocumentationSource javaApiDocumentationSource =
@@ -869,7 +932,6 @@ class LocalDocsFileIngestionProcessorTest {
                   <frameset cols="20%,80%">
                     <frame src="overview-frame.html">
                     <frame src="overview-summary.html">
-                    <noframes>Link to the non-frame overview.</noframes>
                   </frameset>
                 </html>
                 """, StandardCharsets.UTF_8);

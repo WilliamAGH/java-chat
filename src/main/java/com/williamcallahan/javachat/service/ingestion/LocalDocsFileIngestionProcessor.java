@@ -44,12 +44,11 @@ public class LocalDocsFileIngestionProcessor {
 
     private static final String FILE_URL_PREFIX = "file://";
     private static final String NAVIGATION_FRAMESET_SELECTOR = "frameset";
-    private static final String NAVIGATION_NOFRAMES_SELECTOR = "noframes";
     private static final String INTERACTIVE_API_REFERENCE_SELECTOR = "main > article.redoc-container > redoc[spec-url]";
     private static final String INTERACTIVE_API_ALTERNATE_SELECTOR =
             "head > link[rel=alternate][type=\"text/markdown\"], head > link[rel=alternate][type=\"application/yaml\"]";
     static final int MAX_EMBEDDING_BATCH_DOCUMENTS = 256;
-    static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v5";
+    static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v6";
 
     private final FileContentServices fileContentServices;
     private final IngestionStorageServices storage;
@@ -724,8 +723,7 @@ public class LocalDocsFileIngestionProcessor {
     }
 
     private static boolean isNavigationOnlyDocument(org.jsoup.nodes.Document parsedDocument) {
-        boolean navigationFrameset = parsedDocument.selectFirst(NAVIGATION_FRAMESET_SELECTOR) != null
-                && parsedDocument.selectFirst(NAVIGATION_NOFRAMES_SELECTOR) != null;
+        boolean navigationFrameset = parsedDocument.selectFirst(NAVIGATION_FRAMESET_SELECTOR) != null;
         boolean interactiveApiReferenceShell = parsedDocument.selectFirst(INTERACTIVE_API_REFERENCE_SELECTOR) != null
                 && parsedDocument.selectFirst(INTERACTIVE_API_ALTERNATE_SELECTOR) != null;
         return navigationFrameset || interactiveApiReferenceShell;
