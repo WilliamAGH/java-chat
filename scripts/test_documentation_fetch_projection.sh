@@ -324,6 +324,33 @@ assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
     "https://kotlinlang.org/docs/"
 
 if ! (
+    run_documentation_fetch --doc-sets=kotlin-api > /dev/null
+); then
+    fail_documentation_fetch_test "named Kotlin API selection did not complete"
+fi
+
+assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
+    --url \
+    "https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-nothing/" \
+    --mirror-path \
+    "kotlin-api" \
+    --name \
+    "Kotlin 2.4 Nothing API" \
+    --source-version \
+    "2.4" \
+    --identity-regex \
+    "kotlin-stdlib_2\\.4_latest" \
+    --required-identity-page \
+    "index.html" \
+    --required-identity-text \
+    "Nothing has no instances." \
+    --cut-directories \
+    5 \
+    --minimum-html-files \
+    1 \
+    --single-page
+
+if ! (
     run_documentation_fetch --doc-sets=docker > /dev/null
 ); then
     fail_documentation_fetch_test "named Docker selection did not complete"
@@ -789,6 +816,7 @@ if ! (
     grep -Fxq porkbun "$DEFAULT_SOURCE_CAPTURE" \
         && grep -Fxq porkbun-mcp "$DEFAULT_SOURCE_CAPTURE" \
         && grep -Fxq cloudflare "$DEFAULT_SOURCE_CAPTURE" \
+        && grep -Fxq kotlin-api "$DEFAULT_SOURCE_CAPTURE" \
         && grep -Fxq java/java21-complete "$DEFAULT_SOURCE_CAPTURE" \
         && grep -Fxq java/java25-complete "$DEFAULT_SOURCE_CAPTURE" \
         && grep -Fxq java/java26-complete "$DEFAULT_SOURCE_CAPTURE" \
@@ -1548,6 +1576,35 @@ if python3 "$SCRIPT_DIR/documentation_seed.py" \
     --required-text "The currently released version is 2.4.10, published on July 14, 2026." \
     > /dev/null 2>&1; then
     fail_documentation_fetch_test "a newer rolling Kotlin publication was accepted as 2.4.10"
+fi
+
+KOTLIN_API_PINNED_STAGE="$TEST_WORK_DIRECTORY/kotlin-api-pinned-stage"
+mkdir -p "$KOTLIN_API_PINNED_STAGE"
+printf '<html><body><div data-togglable=":kotlin-stdlib_2.4_latest/common">Nothing has no instances.</div></body></html>\n' \
+    > "$KOTLIN_API_PINNED_STAGE/index.html"
+if ! validate_staged_documentation_mirror \
+    "$KOTLIN_API_PINNED_STAGE" \
+    "Kotlin 2.4 Nothing API fixture" \
+    1 \
+    'kotlin-stdlib_2\.4_latest'; then
+    fail_documentation_fetch_test "Kotlin 2.4 API identity was rejected"
+fi
+if ! python3 "$SCRIPT_DIR/documentation_seed.py" \
+    --validate-published-identity \
+    --root "$KOTLIN_API_PINNED_STAGE" \
+    --required-page "index.html" \
+    --required-text "Nothing has no instances."; then
+    fail_documentation_fetch_test "Kotlin Nothing API definition was rejected"
+fi
+printf '<html><body><div data-togglable=":kotlin-stdlib_2.5_latest/common">Nothing has no instances.</div></body></html>\n' \
+    > "$KOTLIN_API_PINNED_STAGE/index.html"
+if validate_staged_documentation_mirror \
+    "$KOTLIN_API_PINNED_STAGE" \
+    "Kotlin 2.4 Nothing API fixture" \
+    1 \
+    'kotlin-stdlib_2\.4_latest' \
+    > /dev/null 2>&1; then
+    fail_documentation_fetch_test "a newer rolling Kotlin API page was accepted as 2.4"
 fi
 
 SPRING_AI_PINNED_STAGE="$TEST_WORK_DIRECTORY/spring-ai-pinned-stage"

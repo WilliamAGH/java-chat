@@ -1,7 +1,9 @@
 package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -141,9 +143,6 @@ class ChatServiceTest {
 
     @Test
     void structuredPromptLabelsAdjacentSameFamilyDependencyEvidence() {
-        RetrievalService retrievalService = mock(RetrievalService.class);
-        SystemPromptConfig systemPromptConfig = mock(SystemPromptConfig.class);
-        when(systemPromptConfig.getCoreSystemPrompt()).thenReturn("Use same-family source records.");
         Document hikaricpDocumentation = Document.builder()
                 .id("hikaricp-702")
                 .text("Connection timeout behavior")
@@ -152,27 +151,68 @@ class ChatServiceTest {
                 .metadata(QdrantPayloadFieldSchema.DOC_SET_FIELD, "hikaricp/7.0.2/api")
                 .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "7.0.2")
                 .build();
+
+        assertTrue(
+                sourceRecordFor("HikariCP 7.0.5 connection timeout", hikaricpDocumentation)
+                        .contains(
+                                "family=\"hikaricp\" version=\"7.0.2\" requestedVersions=\"7.0.5\" evidenceRelation=\"adjacent-same-family\""));
+    }
+
+    @Test
+    void structuredPromptRendersNumericEquivalentDependencyEvidenceAsExact() {
+        Document hikaricpDocumentation = Document.builder()
+                .id("hikaricp-710")
+                .text("Connection timeout behavior")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, "https://javadoc.io/doc/com.zaxxer/HikariCP/7.1.0/")
+                .metadata(QdrantPayloadFieldSchema.SOURCE_NAME_FIELD, "hikaricp/7.1.0/api")
+                .metadata(QdrantPayloadFieldSchema.DOC_SET_FIELD, "hikaricp/7.1.0/api")
+                .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "7.1.0")
+                .build();
+        String sourceRecord = sourceRecordFor("HikariCP 7.1 connection timeout", hikaricpDocumentation);
+
+        assertTrue(sourceRecord.contains("[SOURCE RECORD family=\"hikaricp\" version=\"7.1.0\"]"));
+        assertFalse(sourceRecord.contains("requestedVersions"));
+        assertFalse(sourceRecord.contains("evidenceRelation"));
+    }
+
+    @Test
+    void structuredPromptDoesNotTreatQuantityAsRequestedJavaRelease() {
+        Document javaDocumentation = Document.builder()
+                .id("java-26-days-of-code")
+                .text("Practice consistently")
+                .metadata(
+                        QdrantPayloadFieldSchema.URL_FIELD,
+                        "https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/lang/Object.html")
+                .metadata(QdrantPayloadFieldSchema.SOURCE_NAME_FIELD, "java/java26-complete")
+                .metadata(QdrantPayloadFieldSchema.DOC_SET_FIELD, "java/java26-complete")
+                .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "26")
+                .build();
+        String sourceRecord = sourceRecordFor("Java 100 days of code", javaDocumentation);
+
+        assertTrue(sourceRecord.contains("[SOURCE RECORD family=\"java\" version=\"26\"]"));
+        assertFalse(sourceRecord.contains("requestedVersions"));
+        assertFalse(sourceRecord.contains("evidenceRelation"));
+    }
+
+    private static String sourceRecordFor(String query, Document documentation) {
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        SystemPromptConfig systemPromptConfig = mock(SystemPromptConfig.class);
+        when(systemPromptConfig.getCoreSystemPrompt()).thenReturn("Use source records.");
         when(retrievalService.retrieveWithLimitOutcome(
-                        eq("HikariCP 7.0.5 connection timeout"),
+                        eq(query),
                         eq(ModelConfiguration.RAG_LIMIT_CONSTRAINED),
                         eq(ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED),
                         any(RetrievalConstraint.class),
                         any(),
                         anyLong()))
-                .thenReturn(new RetrievalService.RetrievalOutcome(List.of(hikaricpDocumentation), List.of()));
+                .thenReturn(new RetrievalService.RetrievalOutcome(List.of(documentation), List.of()));
         ChatService chatService = new ChatService(
                 mock(OpenAIStreamingService.class), retrievalService, systemPromptConfig, new AppProperties());
-
-        ChatService.StructuredPromptOutcome promptOutcome =
-                chatService.buildStructuredPromptWithContextOutcome(List.of(), "HikariCP 7.0.5 connection timeout");
-
-        org.junit.jupiter.api.Assertions.assertTrue(
-                promptOutcome
-                        .structuredPrompt()
-                        .contextDocuments()
-                        .getFirst()
-                        .content()
-                        .contains(
-                                "family=\"hikaricp\" version=\"7.0.2\" requestedVersions=\"7.0.5\" evidenceRelation=\"adjacent-same-family\""));
+        return chatService
+                .buildStructuredPromptWithContextOutcome(List.of(), query)
+                .structuredPrompt()
+                .contextDocuments()
+                .getFirst()
+                .content();
     }
 }

@@ -63,7 +63,7 @@ public final class RetrievalService {
     private final AppProperties appProperties;
     private final RerankerService rerankerService;
     private final DocumentFactory documentFactory;
-    private final String defaultJavaApiDocumentationDocSet;
+    private final List<String> defaultJavaApiDocumentationDocSets;
 
     /**
      * Creates a retrieval service backed by gRPC hybrid search with RRF fusion and a reranker.
@@ -83,12 +83,10 @@ public final class RetrievalService {
         this.rerankerService = rerankerService;
         this.documentFactory = documentFactory;
         String configuredJavaRelease = Integer.toString(appProperties.getDocs().getJdkVersion());
-        this.defaultJavaApiDocumentationDocSet = DocsSourceRegistry.javaApiDocumentationSources().stream()
-                .filter(source -> configuredJavaRelease.equals(source.javaRelease()))
-                .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException(
-                        "Configured Java release has no indexed API source: " + configuredJavaRelease));
+        this.defaultJavaApiDocumentationDocSets =
+                DocsSourceRegistry.javaApiDocumentationSourcesForRelease(configuredJavaRelease).stream()
+                        .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
+                        .toList();
     }
 
     /**
@@ -464,10 +462,10 @@ public final class RetrievalService {
     }
 
     /**
-     * Uses the configured default Java API source for a generic broad official-doc request.
+     * Uses the configured exact or adjacent Java API sources for a generic broad official-doc request.
      *
      * <p>Historical Java API mirrors contain near-duplicate API pages and dominate the broad
-     * documentation corpus. Generic requests therefore use the configured Java API source while
+     * documentation corpus. Generic requests therefore use the configured Java API evidence while
      * retaining every non-Java documentation set. Explicit release requests, caller-owned release
      * filters, and exact-overload lookups retain their full source scope for historical evidence.</p>
      */
@@ -483,7 +481,7 @@ public final class RetrievalService {
         }
         List<String> defaultJavaApiDocSets = retrievalConstraint.docSet().stream()
                 .filter(docSet -> !JAVA_API_DOCUMENTATION_DOC_SETS.contains(docSet)
-                        || defaultJavaApiDocumentationDocSet.equals(docSet))
+                        || defaultJavaApiDocumentationDocSets.contains(docSet))
                 .toList();
         return retrievalConstraint.withDocSetScope(defaultJavaApiDocSets);
     }

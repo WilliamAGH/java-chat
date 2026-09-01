@@ -312,10 +312,10 @@ public class ChatService {
                             .toList()
                     : dependencyEvidence.stream()
                             .filter(evidence -> evidence.sourceFamily().equals(resolvedSourceFamily))
-                            .filter(evidence -> !evidence.requestedVersion().equals(resolvedSourceVersion))
                             .filter(evidence -> evidence.sources().stream()
                                     .anyMatch(source -> source.docSet().equals(documentationSet)
                                             && source.docVersion().equals(resolvedSourceVersion)))
+                            .filter(evidence -> !evidence.isExactVersion(resolvedSourceVersion))
                             .map(DocsSourceRegistry.VersionedDocumentationEvidence::requestedVersion)
                             .toList();
             String adjacentEvidenceFields = adjacentRequestedVersions.isEmpty()

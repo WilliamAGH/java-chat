@@ -834,6 +834,7 @@ fetch_named_official_source() {
     case "$source_identifier" in
         dev-java) "$source_dispatch" fetch_source --url "https://dev.java/learn/" --mirror-path "dev-java" --name "Dev.java Learning" --source-version "stable-current" --identity-regex "Learn Java" --cut-directories 1 --minimum-html-files 40 ;;
         kotlin) "$source_dispatch" fetch_source --url "https://kotlinlang.org/docs/" --mirror-path "kotlin" --name "Kotlin 2.4.10 Documentation" --source-version "2.4.10" --identity-regex "2\\.4\\.10" --required-identity-page "faq.html" --required-identity-text "The currently released version is 2.4.10, published on July 14, 2026." --cut-directories 1 --minimum-html-files 250 --reject-regex "(^|/)(custom-frontend-app(/|$)|home\\.html$|multiplatform/(compose-multiplatform|get-started)\\.html$)|(^|/)([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(/|(-[^/]+)?\\.html$)|(^|/)[^/]*-([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(-[^/]+)?\\.html$" --seed-document-type xml-sitemap --seed-discovery-url "https://kotlinlang.org/sitemap.xml" --seed-source-prefix "https://kotlinlang.org/docs/" ;;
+        kotlin-api) "$source_dispatch" fetch_source --url "https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-nothing/" --mirror-path "kotlin-api" --name "Kotlin 2.4 Nothing API" --source-version "2.4" --identity-regex "kotlin-stdlib_2\\.4_latest" --required-identity-page "index.html" --required-identity-text "Nothing has no instances." --cut-directories 5 --minimum-html-files 1 --single-page ;;
         scala) "$source_dispatch" fetch_source --url "https://docs.scala-lang.org/scala3/reference/" --mirror-path "scala" --name "Scala 3 Documentation" --source-version "3-stable" --identity-regex "Scala 3" --cut-directories 2 --minimum-html-files 300 --seed-document-type html-links --seed-discovery-url "https://docs.scala-lang.org/scala3/reference/" --seed-source-prefix "https://docs.scala-lang.org/scala3/reference/" --seed-reject-regex "/index\\.html$" ;;
         groovy) "$source_dispatch" fetch_source --url "https://archive.apache.org/dist/groovy/5.0.7/distribution/apache-groovy-docs-5.0.7.zip" --mirror-path "groovy/5.0.7" --name "Groovy 5.0.7 Documentation" --source-version "5.0.7" --identity-regex "Groovy.*5\\.0\\.7|5\\.0\\.7.*Groovy" --required-identity-page "core-introduction.html" --required-identity-text "version 5.0.7" --cut-directories 0 --minimum-html-files 40 --archive-format zip --archive-publication-root "groovy-5.0.7/html/documentation" ;;
         clojure) "$source_dispatch" fetch_source --url "https://clojure.org/guides/" --mirror-path "clojure" --name "Clojure Guides" --source-version "stable-current" --identity-regex "Clojure" --cut-directories 1 --minimum-html-files 20 --reject-regex "/guides/guides$" --seed-document-type xml-sitemap --seed-discovery-url "https://clojure.org/sitemap.xml" --seed-source-prefix "https://clojure.org/guides/" ;;
@@ -926,7 +927,7 @@ fetch_selected_official_sources() {
 
 fetch_all_official_sources() {
     local source_identifier
-    for source_identifier in dev-java kotlin scala groovy clojure \
+    for source_identifier in dev-java kotlin kotlin-api scala groovy clojure \
         jooq-3.21-manual jooq-3.21-api python-3.14 postgresql-17 postgresql-18 \
         hikaricp-7.1.0-api hikaricp-spring-7.0.2-api \
         jackson-2.22.2-api jackson-spring-2.21.2-api \

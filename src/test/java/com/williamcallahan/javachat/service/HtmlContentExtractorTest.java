@@ -47,7 +47,9 @@ class HtmlContentExtractorTest {
                 <a href="#article">Skip to content</a>
                 <article id="article">
                   <h1>Show source citations in responses</h1>
-                  <p>Display source citations alongside generated answers.</p>
+                  <p>Display source citations alongside generated answers.
+                    <a href="/source">Show source</a>
+                  </p>
                 </article>
               </div>
             </main></body></html>
@@ -58,6 +60,45 @@ class HtmlContentExtractorTest {
 
         assertTrue(extractedText.contains("Show source citations in responses"));
         assertTrue(extractedText.contains("Display source citations alongside generated answers."));
+        assertTrue(extractedText.contains("Show source"));
+        assertFalse(extractedText.contains("Skip to content"));
+        assertEquals(2, document.select("a").size());
+        assertEquals("Skip to content", document.selectFirst("a[href=#article]").text());
+    }
+
+    @Test
+    void removesSkipLinkBeforeFlatteningDirectArticleContent() {
+        Document document = Jsoup.parse("""
+            <html><body><main>
+              <article id="article">
+                <a href="#article">Skip to main content</a>
+                <h1>Article heading</h1>
+                <p>Article body with <a href="/source">Show details</a>.</p>
+              </article>
+            </main></body></html>
+            """);
+        HtmlContentExtractor extractor = new HtmlContentExtractor();
+
+        String extractedText = extractor.extractCleanContent(document);
+
+        assertTrue(extractedText.contains("Article heading"));
+        assertTrue(extractedText.contains("Article body with Show details."));
+        assertFalse(extractedText.contains("Skip to main content"));
+        assertEquals(2, document.select("a").size());
+    }
+
+    @Test
+    void retainsShortDirectShowLink() {
+        Document document = Jsoup.parse("""
+            <html><body><main>
+              <h1>Source controls</h1>
+              <a href="/source">Show source</a>
+            </main></body></html>
+            """);
+
+        String extractedText = new HtmlContentExtractor().extractCleanContent(document);
+
+        assertTrue(extractedText.contains("Show source"));
     }
 
     @Test
