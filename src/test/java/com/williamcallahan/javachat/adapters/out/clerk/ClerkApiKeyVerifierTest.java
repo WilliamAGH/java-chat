@@ -249,14 +249,15 @@ class ClerkApiKeyVerifierTest {
         ClerkApiKeyVerifier verifier = new ClerkApiKeyVerifier(restClientBuilder.build(), CLERK_SECRET_KEY);
         clerkServer
                 .expect(once(), requestTo(CLERK_VERIFY_ENDPOINT))
-                .andRespond(withSuccess("""
-                        {
-                          "id": "ak_0123456789abcdef0123456789abcdef",
-                          "subject": "user_0123456789abcdefghijklmnopq",
-                          "revoked": %s,
-                          "expired": %s
-                        }
-                        """.formatted(revoked, expired), MediaType.APPLICATION_JSON));
+                .andRespond(withSuccess(
+                        ("{%n"
+                                        + "  \"id\": \"ak_0123456789abcdef0123456789abcdef\",%n"
+                                        + "  \"subject\": \"user_0123456789abcdefghijklmnopq\",%n"
+                                        + "  \"revoked\": %s,%n"
+                                        + "  \"expired\": %s%n"
+                                        + "}%n")
+                                .formatted(revoked, expired),
+                        MediaType.APPLICATION_JSON));
 
         assertTrue(verifier.isAvailable());
         assertTrue(verifier.isAvailable(), "the complete lifecycle response must not trigger another probe");
