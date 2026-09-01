@@ -27,7 +27,7 @@ Use JavaChat in whichever form fits your workflow:
 - **See the source boundary:** JavaChat can retrieve the exact requested release or nearby releases
   of the same technology when they are indexed, and can report when the requested evidence is absent.
 
-## Questions JavaChat can help research
+## Example queries possible with JavaChat
 
 - “What does `Thread.ofVirtual()` return in Java 25, and what is the shortest documented example?”
 - “When should I use `MULTISET` instead of a flat join in jOOQ 3.21.7?”
@@ -56,6 +56,9 @@ javachat auth login
 javachat ask "How do Java records work?"
 ```
 
+Upgrade an npm-installed copy with `javachat update`. The command updates the project-local package
+that owns the invoked binary, or the active global npm installation.
+
 Use `javachat list all` to see the documentation packages, source repositories, versions, and
 revisions available on the selected deployment. See the [CLI README](cli/README.md) for all
 commands, non-interactive authentication, local development, and package verification.
@@ -66,6 +69,8 @@ commands, non-interactive authentication, local development, and package verific
    version.
 2. The strongest matches are supplied as context for the answer.
 3. The answer streams to the web app or CLI, with source links when retrieval returns citations.
+   When matching source documents are absent, JavaChat still answers from the model's general
+   knowledge and labels that limitation in the answer.
 4. Guided lessons keep their own conversations, while ordinary chat can continue a prior session.
 
 The repository also contains the pipeline that fetches, chunks, embeds, deduplicates, and indexes
