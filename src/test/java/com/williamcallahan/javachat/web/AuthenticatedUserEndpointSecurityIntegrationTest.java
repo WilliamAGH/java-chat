@@ -1,5 +1,8 @@
 package com.williamcallahan.javachat.web;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -8,17 +11,23 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
 import com.williamcallahan.javachat.adapters.out.clerk.ClerkApiKeyVerifier;
+import com.williamcallahan.javachat.application.auth.ApiKeyOperationUnavailableException;
 import com.williamcallahan.javachat.application.auth.VerifiedApiKey;
 import com.williamcallahan.javachat.application.knowledge.KnowledgeBaseInventoryUseCase;
 import com.williamcallahan.javachat.domain.knowledge.KnowledgeGroup;
 import com.williamcallahan.javachat.domain.knowledge.KnowledgeInventory;
 import com.williamcallahan.javachat.service.EmbeddingClient;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import io.qdrant.client.QdrantClient;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.Answers;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -133,6 +142,35 @@ class AuthenticatedUserEndpointSecurityIntegrationTest {
                 .andExpect(status().isNoContent());
 
         verify(clerkApiKeyVerifier).revoke(CLERK_API_KEY_ID);
+    }
+
+    @Test
+    void unavailableApiKeyRevocationReturns503AndLogsOneFailure() throws Exception {
+        when(clerkApiKeyVerifier.verify(CLERK_API_KEY_SECRET))
+                .thenReturn(Optional.of(new VerifiedApiKey(CLERK_API_KEY_ID, CLERK_USER_ID)));
+        ApiKeyOperationUnavailableException revocationFailure =
+                new ApiKeyOperationUnavailableException("Clerk unavailable");
+        doThrow(revocationFailure).when(clerkApiKeyVerifier).revoke(CLERK_API_KEY_ID);
+        Logger controllerLogger = (Logger) LoggerFactory.getLogger(AuthenticatedUserController.class);
+
+        try (ExpectedLogEvents revocationLogEvents = ExpectedLogEvents.capture(controllerLogger)) {
+            mockMvc.perform(delete("/api/me/api-key").header("Authorization", "Bearer " + CLERK_API_KEY_SECRET))
+                    .andExpect(status().isServiceUnavailable())
+                    .andExpect(jsonPath("$.status").value("error"))
+                    .andExpect(jsonPath("$.message")
+                            .value("API key revocation is temporarily unavailable. Please retry."));
+
+            assertEquals(1, revocationLogEvents.events().size());
+            ILoggingEvent revocationLogEvent = revocationLogEvents.events().getFirst();
+            assertEquals(Level.ERROR, revocationLogEvent.getLevel());
+            assertEquals("Clerk API key revocation was unavailable", revocationLogEvent.getFormattedMessage());
+            assertEquals(
+                    ApiKeyOperationUnavailableException.class.getName(),
+                    revocationLogEvent.getThrowableProxy().getClassName());
+            assertFalse(revocationLogEvent.getFormattedMessage().contains(CLERK_API_KEY_SECRET));
+            assertFalse(revocationLogEvent.getFormattedMessage().contains(CLERK_API_KEY_ID));
+            assertFalse(revocationLogEvent.getFormattedMessage().contains(CLERK_USER_ID));
+        }
     }
 
     @Test
