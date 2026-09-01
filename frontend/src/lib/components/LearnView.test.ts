@@ -594,7 +594,7 @@ describe("LearnView guided chat streaming stability", () => {
   it("treats invisible guided chunks as an empty failed response", async () => {
     streamGuidedChatMock.mockImplementation(
       async (_sessionId, _lessonSlug, _message, callbacks) => {
-        callbacks.onChunk(" \t\n\u200B\uFEFF\u2060");
+        callbacks.onChunk(" \t\n\u061C\u202E\u2066\u{E0001}");
         throw new Error(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE);
       },
     );
@@ -610,7 +610,7 @@ describe("LearnView guided chat streaming stability", () => {
   it("keeps guided connecting indicators active for an unresolved invisible chunk", async () => {
     streamGuidedChatMock.mockImplementation(
       async (_sessionId, _lessonSlug, _message, callbacks) => {
-        callbacks.onChunk("\u200B\uFEFF\u2060");
+        callbacks.onChunk("\u061C\u202E\u2066\u{E0001}");
         return new Promise<void>(() => {});
       },
     );

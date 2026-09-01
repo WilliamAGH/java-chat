@@ -384,8 +384,9 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
       programmaticScrollActive = true;
       followedContainer.scrollTo({
         top: currentScrollHeight,
-        behavior: "auto",
+        behavior: "instant",
       });
+      programmaticScrollActive = false;
     } while (activeStreamFollowDirty);
   }
 

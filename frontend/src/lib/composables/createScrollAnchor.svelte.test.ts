@@ -248,14 +248,17 @@ describe("createScrollAnchor final content", () => {
 
     setScrollGeometry(scrollContainer, 3_457, 4_157, 200);
     await scrollAnchor.onContentAdded();
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ top: 4_157, behavior: "auto" });
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ top: 4_157, behavior: "instant" });
     expect(scrollAnchor.unseenCount).toBe(0);
     expect(scrollAnchor.showIndicator).toBe(false);
+
+    setScrollGeometry(scrollContainer, 3_957, 4_157, 200);
+    scrollAnchor.onUserScroll();
 
     vi.advanceTimersByTime(1_000);
     setScrollGeometry(scrollContainer, 3_957, 5_157, 200);
     await scrollAnchor.onContentAdded();
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ top: 5_157, behavior: "auto" });
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ top: 5_157, behavior: "instant" });
     expect(scrollAnchor.unseenCount).toBe(0);
     expect(scrollAnchor.showIndicator).toBe(false);
     scrollAnchor.cleanup();
@@ -275,6 +278,33 @@ describe("createScrollAnchor final content", () => {
     scrollContainer.dispatchEvent(new WheelEvent("wheel"));
     scrollAnchor.onUserScroll();
 
+    setScrollGeometry(scrollContainer, 2_000, 6_157, 200);
+    await scrollAnchor.onContentAdded();
+    vi.advanceTimersByTime(150);
+
+    expect(scrollToSpy).not.toHaveBeenCalled();
+    expect(scrollAnchor.unseenCount).toBe(1);
+    expect(scrollAnchor.showIndicator).toBe(true);
+    scrollAnchor.cleanup();
+  });
+
+  it("stops following after a native scrollbar-only scroll-away", async () => {
+    vi.useFakeTimers();
+    const scrollContainer = document.createElement("div");
+    setScrollGeometry(scrollContainer, 800, 3_657, 200);
+    const scrollToSpy = vi.spyOn(scrollContainer, "scrollTo");
+    const scrollAnchor = createScrollAnchor({ indicatorDelayMs: 150 });
+    scrollAnchor.attach(scrollContainer);
+    await scrollAnchor.jumpToBottom();
+    scrollToSpy.mockClear();
+
+    setScrollGeometry(scrollContainer, 3_457, 4_157, 200);
+    await scrollAnchor.onContentAdded();
+    expect(scrollToSpy).toHaveBeenCalledOnce();
+    scrollToSpy.mockClear();
+
+    setScrollGeometry(scrollContainer, 2_000, 5_157, 200);
+    scrollAnchor.onUserScroll();
     setScrollGeometry(scrollContainer, 2_000, 6_157, 200);
     await scrollAnchor.onContentAdded();
     vi.advanceTimersByTime(150);
@@ -324,12 +354,12 @@ describe("createScrollAnchor final content", () => {
     scrollContainer.dispatchEvent(new Event("pointerdown"));
     setScrollGeometry(scrollContainer, 3_457, 4_157, 200);
     await scrollAnchor.onContentAdded();
-    expect(scrollToSpy).toHaveBeenCalledWith({ top: 4_157, behavior: "auto" });
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: 4_157, behavior: "instant" });
 
     scrollToSpy.mockClear();
     setScrollGeometry(scrollContainer, 3_957, 4_657, 200);
     await scrollAnchor.onContentAdded();
-    expect(scrollToSpy).toHaveBeenCalledWith({ top: 4_657, behavior: "auto" });
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: 4_657, behavior: "instant" });
     scrollAnchor.cleanup();
   });
 
@@ -352,7 +382,7 @@ describe("createScrollAnchor final content", () => {
     await Promise.all([staleDesktopFollowScroll, mobileFollowScroll]);
 
     expect(desktopScrollToSpy).not.toHaveBeenCalled();
-    expect(mobileScrollToSpy).toHaveBeenCalledWith({ top: 4_000, behavior: "auto" });
+    expect(mobileScrollToSpy).toHaveBeenCalledWith({ top: 4_000, behavior: "instant" });
     expect(scrollAnchor.unseenCount).toBe(0);
     expect(scrollAnchor.showIndicator).toBe(false);
     scrollAnchor.cleanup();
@@ -375,7 +405,7 @@ describe("createScrollAnchor final content", () => {
     ]);
 
     expect(scrollToSpy).toHaveBeenCalledOnce();
-    expect(scrollToSpy).toHaveBeenCalledWith({ top: 4_157, behavior: "auto" });
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: 4_157, behavior: "instant" });
     expect(scrollAnchor.showIndicator).toBe(false);
     scrollAnchor.cleanup();
   });
@@ -399,7 +429,7 @@ describe("createScrollAnchor final content", () => {
     await lateContentFollow;
 
     expect(scrollToSpy).toHaveBeenCalledTimes(2);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ top: 4_657, behavior: "auto" });
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ top: 4_657, behavior: "instant" });
     scrollAnchor.cleanup();
   });
 
@@ -446,7 +476,7 @@ describe("createScrollAnchor final content", () => {
     setScrollGeometry(scrollContainer, 3_457, 4_157, 200);
     await scrollAnchor.onContentAdded();
 
-    expect(scrollToSpy).toHaveBeenCalledWith({ top: 4_157, behavior: "auto" });
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: 4_157, behavior: "instant" });
     expect(scrollAnchor.showIndicator).toBe(false);
     scrollAnchor.cleanup();
   });
