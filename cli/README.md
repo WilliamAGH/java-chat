@@ -23,11 +23,11 @@ JavaChat deployment.
 - `javachat ask "question"` — ask a question with the same retrieval and citations as the website.
 - `javachat auth login` / `javachat auth logout` — authorize or remove this machine's credential.
 - `javachat auth status` — show who the stored key belongs to.
-- `javachat knowledge` — list the document groups ingested in the knowledge base
-  (documentation sets, books, articles, PDFs, and indexed GitHub repositories, with per-group and
-  total chunk counts).
+- `javachat list all` — list every ingested source with canonical URLs, versions or revisions,
+  and chunk counts.
+- `javachat list knowledge` — alias for `javachat list all`.
 
-Run `javachat --help` for options.
+Run `javachat`, `javachat --help`, or `javachat -h` for the complete command list.
 
 ## Develop locally
 
@@ -64,7 +64,7 @@ keys in command arguments, package scripts, or committed files.
 Exercise the inventory and a fresh, citation-backed answer against the target deployment:
 
 ```bash
-npm run dev -- --host https://javachat.ai knowledge
+npm run dev -- --host https://javachat.ai list all
 npm run dev -- --host https://javachat.ai --new --verbose ask \
   "Compare HikariCP 7.0.5 with Spring AI 1.1.5 and name every indexed version used as evidence."
 ```
@@ -78,7 +78,7 @@ npm pack
 npm install --global ./wcallahan-javachat-cli-0.0.1.tgz
 javachat --version
 javachat --host https://javachat.ai auth status
-javachat --host https://javachat.ai knowledge
+javachat --host https://javachat.ai list knowledge
 ```
 
 The tarball-installed `javachat` command uses the same per-host credential file as the source

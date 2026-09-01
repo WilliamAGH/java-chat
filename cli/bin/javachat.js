@@ -339,7 +339,7 @@ async function commandStatus(host) {
  * collections, repository URLs for GitHub collections); the terminal's job is
  * only to validate and print that inventory.
  */
-async function commandKnowledge(host) {
+async function commandList(host) {
   const apiKey = await storedKeyFor(host);
   if (!apiKey) {
     stderr.write(`Not signed in to ${host}. Run "javachat auth login".\n`);
@@ -372,6 +372,12 @@ async function commandKnowledge(host) {
     const chunkNoun = knowledgeGroup.chunks === 1 ? "chunk" : "chunks";
     stdout.write(
       `  ${stripVTControlCharacters(knowledgeGroup.name)} (${knowledgeGroup.chunks} ${chunkNoun})\n`,
+    );
+    for (const canonicalUrl of knowledgeGroup.canonicalUrls) {
+      stdout.write(`    URL: ${stripVTControlCharacters(canonicalUrl)}\n`);
+    }
+    stdout.write(
+      `    Versions/revisions: ${knowledgeGroup.ingestedVersions.length > 0 ? knowledgeGroup.ingestedVersions.map(stripVTControlCharacters).join(", ") : "unversioned"}\n`,
     );
   }
   const collectionCount = new Set(knowledgeGroups.map((knowledgeGroup) => knowledgeGroup.collection))
@@ -406,16 +412,34 @@ function parseKnowledgeInventory(rawKnowledgeInventory, host) {
       !rawKnowledgeGroup.kind ||
       typeof rawKnowledgeGroup.name !== "string" ||
       !rawKnowledgeGroup.name ||
+      !Array.isArray(rawKnowledgeGroup.canonicalUrls) ||
+      rawKnowledgeGroup.canonicalUrls.length === 0 ||
+      !Array.isArray(rawKnowledgeGroup.ingestedVersions) ||
+      rawKnowledgeGroup.ingestedVersions.some(
+        (ingestedVersion) => typeof ingestedVersion !== "string" || !ingestedVersion,
+      ) ||
       typeof rawKnowledgeGroup.chunks !== "number" ||
       !Number.isSafeInteger(rawKnowledgeGroup.chunks) ||
       rawKnowledgeGroup.chunks < 0
     ) {
       throw new Error(`JavaChat returned a malformed knowledge group from ${host}.`);
     }
+    const canonicalUrls = rawKnowledgeGroup.canonicalUrls.map((canonicalUrl) => {
+      if (typeof canonicalUrl !== "string" || !canonicalUrl) {
+        throw new Error(`JavaChat returned a malformed knowledge group from ${host}.`);
+      }
+      const parsedUrl = URL.parse(canonicalUrl, host);
+      if (!parsedUrl || (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:")) {
+        throw new Error(`JavaChat returned a malformed knowledge group from ${host}.`);
+      }
+      return parsedUrl.href;
+    });
     return {
       collection: rawKnowledgeGroup.collection,
       kind: rawKnowledgeGroup.kind,
       name: rawKnowledgeGroup.name,
+      canonicalUrls,
+      ingestedVersions: rawKnowledgeGroup.ingestedVersions,
       chunks: rawKnowledgeGroup.chunks,
     };
   });
@@ -624,13 +648,15 @@ Usage
   javachat auth login                       Authorize this machine in your browser
   javachat auth logout                      Remove the local credential
   javachat auth status                      Show who the stored key belongs to
-  javachat knowledge                       List the document groups ingested in the knowledge base
+  javachat list all                        List every ingested source, URL, and version
+  javachat list knowledge                  Alias for list all
 
 Options
   --host <url>    Target a different deployment (default ${DEFAULT_HOST})
   --new           Start a fresh conversation instead of continuing the last one
   --verbose       Show retrieval progress on stderr
   --no-browser    Print the approval URL instead of opening a browser
+  --help, -h      Show this complete command reference
   --version       Show the installed CLI version
   --              Treat everything after it as question text (for questions starting with -)
 
@@ -654,6 +680,7 @@ function parseArguments(rawArguments) {
     version: false,
   };
   let host = env.JAVACHAT_HOST?.trim() || DEFAULT_HOST;
+  let hostOptionProvided = false;
   const positional = [];
   for (let index = 0; index < rawArguments.length; index += 1) {
     const argument = rawArguments[index];
@@ -667,6 +694,7 @@ function parseArguments(rawArguments) {
         throw new Error("--host requires a value, e.g. javachat --host https://javachat.ai");
       }
       host = hostValue;
+      hostOptionProvided = true;
       index += 1;
     } else if (argument === "--verbose" || argument === "-v") options.verbose = true;
     else if (argument === "--new") options.newSession = true;
@@ -684,12 +712,12 @@ function parseArguments(rawArguments) {
       }
     }
   }
-  return { host, options, positional };
+  return { host, hostOptionProvided, options, positional };
 }
 
 async function main() {
   const rawArguments = argv.slice(2);
-  const { host, options, positional } = parseArguments(rawArguments);
+  const { host, hostOptionProvided, options, positional } = parseArguments(rawArguments);
   const [first, ...rest] = positional;
 
   if (options.version) {
@@ -698,11 +726,12 @@ async function main() {
     return 0;
   }
 
-  const normalizedHost = normalizeHost(host);
   if (options.help || first === "help" || !first) {
+    if (hostOptionProvided) normalizeHost(host);
     stdout.write(USAGE);
-    return options.help || first ? 0 : 1;
+    return 0;
   }
+  const normalizedHost = normalizeHost(host);
   if (first === "auth") {
     const [authCommandName, ...authArguments] = rest;
     if (!authCommandName) {
@@ -719,11 +748,18 @@ async function main() {
     }
     return await authCommand(normalizedHost, options);
   }
-  if (first === "knowledge") {
-    if (rest.length > 0) {
-      throw new Error("javachat knowledge takes no arguments.");
+  if (first === "list") {
+    const [listTarget, ...listArguments] = rest;
+    if (!listTarget) {
+      throw new Error("javachat list requires a target: all or knowledge.");
     }
-    return await commandKnowledge(normalizedHost);
+    if (listTarget !== "all" && listTarget !== "knowledge") {
+      throw new Error(`Unknown list target: ${listTarget}. Run "javachat --help" for usage.`);
+    }
+    if (listArguments.length > 0) {
+      throw new Error(`javachat list ${listTarget} takes no arguments.`);
+    }
+    return await commandList(normalizedHost);
   }
   if (first !== "ask") {
     throw new Error(`Unknown command: ${first}. Run "javachat --help" for usage.`);

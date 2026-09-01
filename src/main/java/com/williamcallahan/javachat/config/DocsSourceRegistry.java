@@ -27,7 +27,7 @@ public final class DocsSourceRegistry {
     private static final String OFFICIAL_DOCUMENTATION_SOURCE_KIND = "official";
     private static final String LOCAL_DOCS_ROOT = "/data/docs/";
     private static final String LOCAL_DOCS_BOOKS = LOCAL_DOCS_ROOT + "books/";
-    private static final String PUBLIC_PDFS_BASE = "/pdfs/";
+    public static final String PUBLIC_PDFS_BASE = "/pdfs/";
     private static final String PDF_EXTENSION = ".pdf";
     private static final String HTML_EXTENSION = ".html";
     private static final String HTM_EXTENSION = ".htm";
@@ -802,6 +802,22 @@ public final class DocsSourceRegistry {
     /** Returns the non-Java documentation sources the JVM can recognize in already-mirrored content. */
     public static List<DocumentationSource> documentationSources() {
         return DOCUMENTATION_SOURCES;
+    }
+
+    /** Returns every canonical documentation root registered for an exact ingested document set. */
+    public static List<String> citationBasesForDocSet(String docSet) {
+        if (docSet == null || docSet.isBlank()) {
+            return List.of();
+        }
+        return Stream.concat(
+                        DOCUMENTATION_SOURCES.stream()
+                                .filter(source -> source.docSet().equals(docSet))
+                                .map(DocumentationSource::citationBaseUrl),
+                        JAVA_API_DOCUMENTATION_SOURCES.stream()
+                                .filter(source -> source.relativeMirrorPath().equals(docSet))
+                                .map(JavaApiDocumentationSource::remoteBaseUrl))
+                .distinct()
+                .toList();
     }
 
     /** Returns retrieval identities used by official-document filters. */

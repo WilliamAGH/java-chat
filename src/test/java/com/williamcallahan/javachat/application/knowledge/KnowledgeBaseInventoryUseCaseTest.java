@@ -47,30 +47,95 @@ class KnowledgeBaseInventoryUseCaseTest {
     }
 
     @Test
-    void composesCurrentGroupsAndAuthoritativeTotal() {
+    void composesCurrentGroupsWithOwnFilteredVersionsAndAuthoritativeTotal() {
         when(hybridVectorService.facetPayloadValues(DOCS_COLLECTION, QdrantPayloadFieldSchema.DOC_SET_FIELD))
-                .thenReturn(List.of(new PayloadValueCount("oracle/javase/25/api", 9)));
+                .thenReturn(List.of(new PayloadValueCount("kotlin", 9), new PayloadValueCount("groovy", 8)));
         when(hybridVectorService.facetPayloadValues(BOOKS_COLLECTION, QdrantPayloadFieldSchema.DOC_SET_FIELD))
                 .thenReturn(List.of(new PayloadValueCount("books/effective-java", 12)));
         when(hybridVectorService.facetPayloadValues(PDFS_COLLECTION, QdrantPayloadFieldSchema.DOC_SET_FIELD))
-                .thenReturn(List.of(new PayloadValueCount("specs/jls-25", 4)));
+                .thenReturn(List.of(new PayloadValueCount("java/java25-complete", 4)));
+        when(hybridVectorService.facetPayloadValues(
+                        DOCS_COLLECTION,
+                        QdrantPayloadFieldSchema.DOC_VERSION_FIELD,
+                        QdrantPayloadFieldSchema.DOC_SET_FIELD,
+                        "kotlin"))
+                .thenReturn(List.of(new PayloadValueCount("2.4.10", 9)));
+        when(hybridVectorService.facetPayloadValues(
+                        DOCS_COLLECTION,
+                        QdrantPayloadFieldSchema.DOC_VERSION_FIELD,
+                        QdrantPayloadFieldSchema.DOC_SET_FIELD,
+                        "groovy"))
+                .thenReturn(List.of(new PayloadValueCount("5.0.7", 8)));
+        when(hybridVectorService.facetPayloadValues(
+                        PDFS_COLLECTION,
+                        QdrantPayloadFieldSchema.DOC_VERSION_FIELD,
+                        QdrantPayloadFieldSchema.DOC_SET_FIELD,
+                        "java/java25-complete"))
+                .thenReturn(List.of(new PayloadValueCount("25", 4)));
         when(gitHubCollectionDiscovery.refreshDiscoveredCollections()).thenReturn(List.of(GITHUB_COLLECTION));
         when(hybridVectorService.facetPayloadValues(GITHUB_COLLECTION, QdrantPayloadFieldSchema.REPO_URL_FIELD))
                 .thenReturn(List.of(new PayloadValueCount("https://github.com/acme/widgets", 6)));
+        when(hybridVectorService.facetPayloadValues(
+                        GITHUB_COLLECTION,
+                        QdrantPayloadFieldSchema.COMMIT_HASH_FIELD,
+                        QdrantPayloadFieldSchema.REPO_URL_FIELD,
+                        "https://github.com/acme/widgets"))
+                .thenReturn(List.of(new PayloadValueCount("abc123", 6)));
 
         KnowledgeInventory inventory = new KnowledgeBaseInventoryUseCase(
                         hybridVectorService, Optional.of(gitHubCollectionDiscovery))
                 .listKnowledgeInventory();
 
-        assertEquals(31, inventory.totalChunks());
+        assertEquals(39, inventory.totalChunks());
         assertEquals(
                 List.of(
-                        new KnowledgeGroup(BOOKS_COLLECTION, KnowledgeGroup.Kind.BOOKS, "books/effective-java", 12),
-                        new KnowledgeGroup(DOCS_COLLECTION, KnowledgeGroup.Kind.DOCS, "oracle/javase/25/api", 9),
-                        new KnowledgeGroup(PDFS_COLLECTION, KnowledgeGroup.Kind.PDFS, "specs/jls-25", 4),
                         new KnowledgeGroup(
-                                GITHUB_COLLECTION, KnowledgeGroup.Kind.GITHUB, "https://github.com/acme/widgets", 6)),
+                                BOOKS_COLLECTION,
+                                KnowledgeGroup.Kind.BOOKS,
+                                "books/effective-java",
+                                List.of("/pdfs/"),
+                                List.of(),
+                                12),
+                        new KnowledgeGroup(
+                                DOCS_COLLECTION,
+                                KnowledgeGroup.Kind.DOCS,
+                                "kotlin",
+                                List.of("https://kotlinlang.org/docs/"),
+                                List.of("2.4.10"),
+                                9),
+                        new KnowledgeGroup(
+                                DOCS_COLLECTION,
+                                KnowledgeGroup.Kind.DOCS,
+                                "groovy",
+                                List.of("https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/"),
+                                List.of("5.0.7"),
+                                8),
+                        new KnowledgeGroup(
+                                PDFS_COLLECTION,
+                                KnowledgeGroup.Kind.PDFS,
+                                "java/java25-complete",
+                                List.of("https://docs.oracle.com/en/java/javase/25/docs/api/"),
+                                List.of("25"),
+                                4),
+                        new KnowledgeGroup(
+                                GITHUB_COLLECTION,
+                                KnowledgeGroup.Kind.GITHUB,
+                                "https://github.com/acme/widgets",
+                                List.of("https://github.com/acme/widgets"),
+                                List.of("abc123"),
+                                6)),
                 inventory.groups());
+    }
+
+    @Test
+    void rejectsAnIngestedDocumentationSetWithoutCanonicalSourceMetadata() {
+        when(hybridVectorService.facetPayloadValues(DOCS_COLLECTION, QdrantPayloadFieldSchema.DOC_SET_FIELD))
+                .thenReturn(List.of(new PayloadValueCount("unregistered", 1)));
+
+        KnowledgeBaseInventoryUseCase inventoryUseCase =
+                new KnowledgeBaseInventoryUseCase(hybridVectorService, Optional.of(gitHubCollectionDiscovery));
+
+        assertThrows(KnowledgeInventoryUnavailableException.class, inventoryUseCase::listKnowledgeInventory);
     }
 
     @Test

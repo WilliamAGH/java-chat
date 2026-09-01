@@ -39,15 +39,28 @@ class KnowledgeBaseControllerTest {
     void returnsGroupsAndAuthoritativeTotal() throws Exception {
         when(knowledgeBaseInventoryUseCase.listKnowledgeInventory())
                 .thenReturn(new KnowledgeInventory(List.of(
-                        new KnowledgeGroup("chat-docs", KnowledgeGroup.Kind.DOCS, "oracle/javase/25/api", 10),
                         new KnowledgeGroup(
-                                "chat-github-repo", KnowledgeGroup.Kind.GITHUB, "https://github.com/acme/repo", 7))));
+                                "chat-docs",
+                                KnowledgeGroup.Kind.DOCS,
+                                "kotlin",
+                                List.of("https://kotlinlang.org/docs/"),
+                                List.of("2.4.10"),
+                                10),
+                        new KnowledgeGroup(
+                                "chat-github-repo",
+                                KnowledgeGroup.Kind.GITHUB,
+                                "https://github.com/acme/repo",
+                                List.of("https://github.com/acme/repo"),
+                                List.of("abc123"),
+                                7))));
 
         mockMvc.perform(get("/api/knowledge/groups"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalChunks").value(17))
                 .andExpect(jsonPath("$.groups[0].kind").value("DOCS"))
                 .andExpect(jsonPath("$.groups[0].chunks").value(10))
+                .andExpect(jsonPath("$.groups[0].canonicalUrls[0]").value("https://kotlinlang.org/docs/"))
+                .andExpect(jsonPath("$.groups[0].ingestedVersions[0]").value("2.4.10"))
                 .andExpect(jsonPath("$.groups[1].kind").value("GITHUB"));
     }
 

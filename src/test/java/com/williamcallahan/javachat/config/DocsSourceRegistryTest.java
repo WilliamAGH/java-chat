@@ -282,6 +282,14 @@ class DocsSourceRegistryTest {
     }
 
     @Test
+    void resolvesCanonicalRootsByStoredDocumentSetRatherThanMirrorPath() {
+        assertEquals(
+                List.of("https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/"),
+                DocsSourceRegistry.citationBasesForDocSet("groovy"));
+        assertEquals(List.of(), DocsSourceRegistry.citationBasesForDocSet("groovy/5.0.7"));
+    }
+
+    @Test
     void assignsDistinctStorageUrlsToJavaPagesThatShareOneCanonicalSourceFile(@TempDir Path temporaryDirectory) {
         Path mirrorRoot = temporaryDirectory.resolve("jackson/2.22.2/api");
         Path outerTypePage = mirrorRoot.resolve("com/fasterxml/jackson/databind/ObjectMapper.html");

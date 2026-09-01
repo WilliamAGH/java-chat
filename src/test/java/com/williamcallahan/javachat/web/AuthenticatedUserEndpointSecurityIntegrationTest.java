@@ -79,14 +79,21 @@ class AuthenticatedUserEndpointSecurityIntegrationTest {
         when(clerkApiKeyVerifier.verify(CLERK_API_KEY_SECRET))
                 .thenReturn(Optional.of(new VerifiedApiKey(CLERK_API_KEY_ID, CLERK_USER_ID)));
         when(knowledgeBaseInventoryUseCase.listKnowledgeInventory())
-                .thenReturn(new KnowledgeInventory(List.of(
-                        new KnowledgeGroup("chat-docs", KnowledgeGroup.Kind.DOCS, "oracle/javase/25/api", 10))));
+                .thenReturn(new KnowledgeInventory(List.of(new KnowledgeGroup(
+                        "chat-docs",
+                        KnowledgeGroup.Kind.DOCS,
+                        "kotlin",
+                        List.of("https://kotlinlang.org/docs/"),
+                        List.of("2.4.10"),
+                        10))));
 
         mockMvc.perform(get("/api/knowledge/groups").header("Authorization", "Bearer " + CLERK_API_KEY_SECRET))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalChunks").value(10))
                 .andExpect(jsonPath("$.groups[0].collection").value("chat-docs"))
-                .andExpect(jsonPath("$.groups[0].name").value("oracle/javase/25/api"));
+                .andExpect(jsonPath("$.groups[0].name").value("kotlin"))
+                .andExpect(jsonPath("$.groups[0].canonicalUrls[0]").value("https://kotlinlang.org/docs/"))
+                .andExpect(jsonPath("$.groups[0].ingestedVersions[0]").value("2.4.10"));
     }
 
     @Test

@@ -61,8 +61,9 @@ npm run dev -- --help
 npm run dev -- --host http://localhost:8085 ask "How do Java records work?"
 ```
 
-See the **[CLI README](cli/README.md)** for authentication, production dogfood, packaged-artifact
-checks, and the npm release procedure.
+See the **[CLI README](cli/README.md)** for authentication, inventory, production dogfood,
+packaged-artifact checks, and the npm release procedure. Agents can reuse the repository's
+**[JavaChat skill](skills/javachat/SKILL.md)** for source-grounded documentation questions.
 
 ## Index documentation (RAG)
 
