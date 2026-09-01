@@ -4,17 +4,27 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
 
 const CLI_ENTRYPOINT = fileURLToPath(new URL("../bin/javachat.js", import.meta.url));
 const TEST_API_KEY = "ak_secret_0123456789abcdef0123456789abcdef";
 
-function runCli(argumentsList, environmentVariables = {}) {
+function runCli(argumentsList, environmentVariables = {}, entrypoint = CLI_ENTRYPOINT) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [CLI_ENTRYPOINT, ...argumentsList], {
+    const child = spawn(process.execPath, [entrypoint, ...argumentsList], {
       env: { ...process.env, ...environmentVariables },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -29,6 +39,44 @@ function runCli(argumentsList, environmentVariables = {}) {
     child.once("error", reject);
     child.once("close", (exitCode) => resolve({ exitCode, standardOutput, standardError }));
   });
+}
+
+async function createFakeNpm(testDirectory) {
+  const fakeBinDirectory = join(testDirectory, "fake-bin");
+  const invocationLog = join(testDirectory, "npm-invocations.jsonl");
+  const fakeNpm = join(fakeBinDirectory, "npm");
+  await mkdir(fakeBinDirectory, { recursive: true });
+  await writeFile(
+    fakeNpm,
+    `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+const argumentsList = process.argv.slice(2);
+if (argumentsList.join(" ") === "prefix --global") {
+  process.stdout.write(process.env.TEST_NPM_GLOBAL_PREFIX + "\\n");
+  process.exit(0);
+}
+appendFileSync(process.env.TEST_NPM_INVOCATION_LOG, JSON.stringify({ argumentsList, workingDirectory: process.cwd() }) + "\\n");
+process.exit(Number(process.env.TEST_NPM_EXIT_CODE || 0));
+`,
+  );
+  await chmod(fakeNpm, 0o755);
+  return { fakeBinDirectory, invocationLog };
+}
+
+async function createInstalledCli(packageRoot, binaryPath) {
+  await mkdir(join(packageRoot, "bin"), { recursive: true });
+  await mkdir(dirname(binaryPath), { recursive: true });
+  await copyFile(CLI_ENTRYPOINT, join(packageRoot, "bin", "javachat.js"));
+  await copyFile(new URL("../package.json", import.meta.url), join(packageRoot, "package.json"));
+  await symlink(join(packageRoot, "bin", "javachat.js"), binaryPath);
+}
+
+async function readNpmInvocations(invocationLog) {
+  return (await readFile(invocationLog, "utf8"))
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((invocation) => JSON.parse(invocation));
 }
 
 async function startBrowserLogin(host, configurationHome) {
@@ -98,6 +146,7 @@ test("prints usage without loading credentials", async () => {
     assert.match(helpExecution.standardOutput, /javachat auth login/);
     assert.match(helpExecution.standardOutput, /javachat auth logout/);
     assert.match(helpExecution.standardOutput, /javachat auth status/);
+    assert.match(helpExecution.standardOutput, /javachat update/);
     assert.match(helpExecution.standardOutput, /javachat list all/);
     assert.match(helpExecution.standardOutput, /javachat list knowledge/);
     assert.match(helpExecution.standardOutput, /--help, -h/);
@@ -105,6 +154,123 @@ test("prints usage without loading credentials", async () => {
   }
   assert.equal(helpExecutions[0].standardOutput, helpExecutions[1].standardOutput);
   assert.equal(helpExecutions[1].standardOutput, helpExecutions[2].standardOutput);
+});
+
+test("updates the global npm installation that owns the invoked command", async (testContext) => {
+  const testDirectory = await mkdtemp(join(tmpdir(), "javachat-cli-update-test-"));
+  testContext.after(() => rm(testDirectory, { recursive: true, force: true }));
+  const globalPrefix = join(testDirectory, "global-prefix");
+  const packageRoot = join(
+    globalPrefix,
+    "lib",
+    "node_modules",
+    "@wcallahan",
+    "javachat-cli",
+  );
+  const binaryPath = join(globalPrefix, "bin", "javachat");
+  await createInstalledCli(packageRoot, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(testDirectory);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      JAVACHAT_HOST: "not a URL",
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_GLOBAL_PREFIX: globalPrefix,
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.match(cliExecution.standardOutput, /JavaChat CLI update complete/);
+  assert.equal(cliExecution.standardError, "Updating @wcallahan/javachat-cli with npm...\n");
+  assert.deepEqual(await readNpmInvocations(invocationLog), [
+    {
+      argumentsList: ["install", "--global", "@wcallahan/javachat-cli@latest"],
+      workingDirectory: await realpath(globalPrefix),
+    },
+  ]);
+});
+
+test("updates a project that declares a local JavaChat dependency", async (testContext) => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "javachat-cli-project-test-"));
+  testContext.after(() => rm(projectRoot, { recursive: true, force: true }));
+  await writeFile(
+    join(projectRoot, "package.json"),
+    JSON.stringify({ dependencies: { "@wcallahan/javachat-cli": "0.0.2" } }),
+  );
+  const packageRoot = join(projectRoot, "node_modules", "@wcallahan", "javachat-cli");
+  const binaryPath = join(projectRoot, "node_modules", ".bin", "javachat");
+  await createInstalledCli(packageRoot, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(projectRoot);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.deepEqual(await readNpmInvocations(invocationLog), [
+    {
+      argumentsList: ["install", "@wcallahan/javachat-cli@latest"],
+      workingDirectory: await realpath(projectRoot),
+    },
+  ]);
+});
+
+test("refuses to update an npm link to the repository source", async (testContext) => {
+  const testDirectory = await mkdtemp(join(tmpdir(), "javachat-cli-source-update-test-"));
+  testContext.after(() => rm(testDirectory, { recursive: true, force: true }));
+  const globalPrefix = join(testDirectory, "global-prefix");
+  const binaryPath = join(globalPrefix, "bin", "javachat");
+  await mkdir(dirname(binaryPath), { recursive: true });
+  await symlink(CLI_ENTRYPOINT, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(testDirectory);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_GLOBAL_PREFIX: globalPrefix,
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /does not replace the repository checkout/);
+  await assert.rejects(readFile(invocationLog, "utf8"), { code: "ENOENT" });
+});
+
+test("propagates an npm update failure", async (testContext) => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "javachat-cli-update-failure-test-"));
+  testContext.after(() => rm(projectRoot, { recursive: true, force: true }));
+  await writeFile(
+    join(projectRoot, "package.json"),
+    JSON.stringify({ devDependencies: { "@wcallahan/javachat-cli": "0.0.2" } }),
+  );
+  const packageRoot = join(projectRoot, "node_modules", "@wcallahan", "javachat-cli");
+  const binaryPath = join(projectRoot, "node_modules", ".bin", "javachat");
+  await createInstalledCli(packageRoot, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(projectRoot);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_EXIT_CODE: "7",
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
+
+  assert.equal(cliExecution.exitCode, 7);
+  assert.doesNotMatch(cliExecution.standardOutput, /update complete/);
 });
 
 test("prints the installed version without loading credentials", async () => {
@@ -197,6 +363,31 @@ test("streams text and citations through the public API", async (testContext) =>
   assert.match(cliExecution.standardOutput, /https:\/\/docs\.example\/records/);
   assert.equal(cliExecution.standardError, "");
   assert.equal(identityRequestCount, 0);
+});
+
+test("prints a general-knowledge answer without inventing sources", async (testContext) => {
+  const apiServer = createServer((request, response) => {
+    assert.equal(request.url, "/api/chat/stream");
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end(
+      'event: text\ndata: {"text":"The API behaves this way.\\n\\nNote: Matching source documents for Example SDK 3 were not available to JavaChat, so this answer uses the model\'s general knowledge."}\n\n',
+    );
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const apiAddress = apiServer.address();
+  assert.equal(typeof apiAddress, "object");
+
+  const cliExecution = await runCli(
+    ["--host", `http://127.0.0.1:${apiAddress.port}`, "ask", "How does Example SDK 3 work?"],
+    { JAVACHAT_API_KEY: TEST_API_KEY },
+  );
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.match(cliExecution.standardOutput, /Matching source documents for Example SDK 3/);
+  assert.match(cliExecution.standardOutput, /model's general knowledge/);
+  assert.doesNotMatch(cliExecution.standardOutput, /Source unavailable:|Sources:/);
 });
 
 test("renders enrichment markers split across stream chunks", async (testContext) => {

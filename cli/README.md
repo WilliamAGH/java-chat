@@ -30,9 +30,9 @@ javachat ask "How do Java records work?"
 ```
 
 Answers stream to standard output. When retrieval supplies supporting sources, the answer ends with
-a `Sources:` section containing the cited documentation or source-repository URLs. Claims without
-retrieved support may be preceded by `Source unavailable:`; treat that material as uncited and
-verify it independently.
+a `Sources:` section containing the cited documentation URLs. When matching source documents are
+not available, JavaChat still answers from the model's general knowledge and states that the answer
+is not supported by JavaChat source links.
 
 ## What it helps you do
 
@@ -42,7 +42,7 @@ verify it independently.
 - Compare indexed releases without silently treating one version's behavior as another's.
 - Inspect the cited pages when retrieval supplies supporting sources.
 
-## Questions to try
+## Example queries possible with JavaChat
 
 - “What does `Thread.ofVirtual()` return in Java 25, and what is the shortest documented example?”
 - “When should I use `MULTISET` instead of a flat join in jOOQ 3.21.7?”
@@ -68,11 +68,27 @@ javachat ask "question"       Ask a research question
 javachat auth login           Authorize this machine in a browser
 javachat auth logout          Revoke and remove the stored credential
 javachat auth status          Show the account for the selected deployment
+javachat update               Update the npm installation that owns this command
 javachat list all             List every indexed source, URL, and version
 javachat list knowledge       Alias for list all
 ```
 
 Run `javachat`, `javachat --help`, or `javachat -h` for the complete command and option reference.
+
+### Update the CLI
+
+```bash
+javachat update
+```
+
+The command runs npm against the installation that owns the invoked `javachat` binary. A global
+install is upgraded with the equivalent of `npm install --global @wcallahan/javachat-cli@latest`.
+When `javachat` is a declared dependency in a project, the command instead runs the equivalent of
+`npm install @wcallahan/javachat-cli@latest` in that project. Direct source and temporary `npx`
+invocations are left unchanged.
+
+Versions before 0.0.3 do not contain `javachat update`. Upgrade those once with
+`npm install --global @wcallahan/javachat-cli@latest`; later releases can use the command.
 
 ### Inspect the available sources
 
@@ -161,8 +177,9 @@ Test the tarball rather than relying only on the source entrypoint:
 npm test
 npm run pack:check
 npm pack
-npm install --global ./wcallahan-javachat-cli-0.0.2.tgz
+npm install --global ./wcallahan-javachat-cli-0.0.3.tgz
 javachat --version
+javachat update
 javachat auth status
 javachat list knowledge
 ```

@@ -1,6 +1,6 @@
 {
   "name": "@wcallahan/javachat-cli",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Research languages, libraries, SDKs, and development tasks with JavaChat's version-aware documentation.",
   "license": "SEE LICENSE IN LICENSE.md",
   "bin": {
