@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -21,8 +23,11 @@ import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -158,6 +163,39 @@ class DocumentProcessorFailureContractTest {
         assertTrue(containsLogMessage(
                 "Failed to process documentation set (exceptionType=IngestionAlreadyRunningException)"));
         assertFalse(containsLogMessage(DOCUMENT_PROCESSING_COMPLETE));
+    }
+
+    @Test
+    void failsCliWhenFileEnumerationFails(@TempDir Path temporaryDirectory) throws IOException {
+        assumeTrue(
+                Files.getFileStore(temporaryDirectory).supportsFileAttributeView(PosixFileAttributeView.class),
+                "test requires POSIX file permissions");
+        String documentationDirectoryName = "unreadable-documentation-set";
+        Path documentationDirectory = Files.createDirectory(temporaryDirectory.resolve(documentationDirectoryName));
+        Path unreadableDirectory = Files.createDirectory(documentationDirectory.resolve("unreadable"));
+        Set<PosixFilePermission> originalPermissions = Files.getPosixFilePermissions(unreadableDirectory);
+        Files.setPosixFilePermissions(unreadableDirectory, Set.of());
+
+        try {
+            assumeFalse(Files.isReadable(unreadableDirectory), "test requires enforced POSIX file permissions");
+            LocalDocumentationIngestionUseCase ingestionService = mock(LocalDocumentationIngestionUseCase.class);
+            DocumentProcessor documentProcessor = new DocumentProcessor(ingestionService, mock(ProgressTracker.class));
+            DocumentationSet documentationSet = new DocumentationSet(
+                    "Unreadable documentation set", documentationDirectoryName, documentationDirectoryName);
+
+            DocumentProcessor.DocumentProcessingException thrown = assertThrows(
+                    DocumentProcessor.DocumentProcessingException.class,
+                    () -> documentProcessor.processDocumentationSets(temporaryDirectory, List.of(documentationSet)));
+
+            assertEquals("Document processing completed with 1 failed documentation set(s)", thrown.getMessage());
+            verify(ingestionService, never())
+                    .ingestLocalDirectory(documentationDirectory.toString(), EXPECTED_CLI_FILE_LIMIT);
+            assertTrue(containsLogMessage("Failed to process documentation set (exceptionType=UncheckedIOException)"));
+            assertTrue(containsLogMessage(DOCUMENT_PROCESSING_FAILED));
+            assertFalse(containsLogMessage(DOCUMENT_PROCESSING_COMPLETE));
+        } finally {
+            Files.setPosixFilePermissions(unreadableDirectory, originalPermissions);
+        }
     }
 
     private boolean containsLogMessage(final String expectedMessage) {
