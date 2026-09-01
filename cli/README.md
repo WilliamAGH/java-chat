@@ -1,8 +1,10 @@
 # JavaChat CLI
 
-Ask JavaChat from any terminal and receive the same retrieved evidence and citations as the web
-application. The CLI is useful when you want a documentation answer without leaving a repository,
-editor, or remote shell.
+JavaChat is a hosted research and learning assistant at [javachat.ai](https://javachat.ai) for
+software developers. It searches version-aware technical documentation before generating an
+answer. Use the `javachat` CLI to learn an API, compare documented behavior across releases, or
+find the commands, configuration, and migration details needed to move development work forward
+without leaving your terminal.
 
 ## Requirements
 
@@ -29,12 +31,40 @@ javachat ask "How do Java records work?"
 
 Answers stream to standard output. When retrieval supplies supporting sources, the answer ends with
 a `Sources:` section containing the cited documentation or source-repository URLs. Claims without
-retrieved support are labeled source-unavailable rather than presented as grounded.
+retrieved support may be preceded by `Source unavailable:`; treat that material as uncited and
+verify it independently.
+
+## What it helps you do
+
+- Learn unfamiliar languages, libraries, SDKs, and platforms from retrieved documentation.
+- Find APIs, commands, configuration rules, prerequisites, migration details, and operational
+  caveats while implementing, debugging, upgrading, or deploying software.
+- Compare indexed releases without silently treating one version's behavior as another's.
+- Inspect the cited pages when retrieval supplies supporting sources.
+
+## Questions to try
+
+- “What does `Thread.ofVirtual()` return in Java 25, and what is the shortest documented example?”
+- “When should I use `MULTISET` instead of a flat join in jOOQ 3.21.7?”
+- “How do I add a 30-second delay between tasks in a Docker Swarm rolling update?”
+- “What defaults can I configure with Spring AI 1.1.2 `ChatClient.Builder`?”
+- “How does a Clerk session token differ from a backend Secret Key?”
+
+Representative coverage in the shared JavaChat knowledge index includes:
+
+- **Languages:** Java SE 21, 25, and 26; Kotlin 2.4.10; Groovy 5.0.7; Scala 3; and Python 3.14.7.
+- **Libraries:** Spring Framework 7.0.7; Spring AI 1.1.x; four indexed Jackson 2.x/3.x releases;
+  jOOQ 3.21.7; HikariCP 7.x; and Lombok 1.18.46.
+- **Platforms:** PostgreSQL 17/18, Docker, Cloudflare, Clerk, Dokploy, Traefik, Doppler, and Infisical.
+- **Repository snapshots:** OpenAI Java, Anthropic SDKs, Langfuse, Dokploy, Infisical, and Traefik.
+
+Use `javachat list all` for the complete current inventory. Chat retrieves supporting material from
+the documentation collections.
 
 ## Commands
 
 ```text
-javachat ask "question"       Ask a grounded question
+javachat ask "question"       Ask a research question
 javachat auth login           Authorize this machine in a browser
 javachat auth logout          Revoke and remove the stored credential
 javachat auth status          Show the account for the selected deployment
@@ -131,7 +161,7 @@ Test the tarball rather than relying only on the source entrypoint:
 npm test
 npm run pack:check
 npm pack
-npm install --global ./wcallahan-javachat-cli-0.0.1.tgz
+npm install --global ./wcallahan-javachat-cli-0.0.2.tgz
 javachat --version
 javachat auth status
 javachat list knowledge
