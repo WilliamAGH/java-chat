@@ -33,7 +33,7 @@ describe("CLI authorization request", () => {
     const authorizationPage = render(CliAuthorizationPage);
 
     expect(authorizationPage.getByRole("alert")).toHaveTextContent(
-      "This authorization request is invalid",
+      "This authorization request is invalid. Return to your terminal and run javachat auth login again.",
     );
     expect(
       authorizationPage.queryByRole("button", { name: "Authorize terminal" }),

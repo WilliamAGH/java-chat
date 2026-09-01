@@ -58,7 +58,7 @@ directory:
 cd cli
 npm install
 npm run dev -- --help
-npm run dev -- --host http://localhost:8085 "How do Java records work?"
+npm run dev -- --host http://localhost:8085 ask "How do Java records work?"
 ```
 
 See the **[CLI README](cli/README.md)** for authentication, production dogfood, packaged-artifact

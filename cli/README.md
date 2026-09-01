@@ -6,11 +6,11 @@ Ask JavaChat from a terminal with the same retrieval and citations as the web ap
 
 ```bash
 npm install --global @wcallahan/javachat-cli
-javachat login
-javachat "How do Java records work?"
+javachat auth login
+javachat ask "How do Java records work?"
 ```
 
-`javachat login` opens JavaChat in a browser. After sign-in and approval, the CLI stores the
+`javachat auth login` opens JavaChat in a browser. After sign-in and approval, the CLI stores the
 personal Clerk API key in `$XDG_CONFIG_HOME/javachat/credentials.json` (or
 `~/.config/javachat/credentials.json`) with POSIX owner-only permissions. The package supports
 macOS and Linux.
@@ -20,9 +20,9 @@ JavaChat deployment.
 
 ## Commands
 
-- `javachat "question"` — ask a question with the same retrieval and citations as the website.
-- `javachat login` / `javachat logout` — authorize or remove this machine's credential.
-- `javachat whoami` — show who the stored key belongs to.
+- `javachat ask "question"` — ask a question with the same retrieval and citations as the website.
+- `javachat auth login` / `javachat auth logout` — authorize or remove this machine's credential.
+- `javachat auth status` — show who the stored key belongs to.
 - `javachat knowledge` — list the document groups ingested in the knowledge base
   (documentation sets, books, articles, PDFs, and indexed GitHub repositories, with per-group and
   total chunk counts).
@@ -52,12 +52,12 @@ npm run dev -- --host https://javachat.ai --help
 Credentials are stored separately for each host. Sign in to the host you intend to test:
 
 ```bash
-npm run dev -- --host https://javachat.ai login
-npm run dev -- --host https://javachat.ai whoami
+npm run dev -- --host https://javachat.ai auth login
+npm run dev -- --host https://javachat.ai auth status
 ```
 
-For headless environments, set `JAVACHAT_API_KEY` instead of running `login`. Do not put API keys
-in command arguments, package scripts, or committed files.
+For headless environments, set `JAVACHAT_API_KEY` instead of running `auth login`. Do not put API
+keys in command arguments, package scripts, or committed files.
 
 ## Dogfood the CLI
 
@@ -65,7 +65,7 @@ Exercise the inventory and a fresh, citation-backed answer against the target de
 
 ```bash
 npm run dev -- --host https://javachat.ai knowledge
-npm run dev -- --host https://javachat.ai --new --verbose \
+npm run dev -- --host https://javachat.ai --new --verbose ask \
   "Compare HikariCP 7.0.5 with Spring AI 1.1.5 and name every indexed version used as evidence."
 ```
 
@@ -77,7 +77,7 @@ npm run pack:check
 npm pack
 npm install --global ./wcallahan-javachat-cli-0.0.1.tgz
 javachat --version
-javachat --host https://javachat.ai whoami
+javachat --host https://javachat.ai auth status
 javachat --host https://javachat.ai knowledge
 ```
 

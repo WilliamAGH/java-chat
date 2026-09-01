@@ -34,7 +34,7 @@ function runCli(argumentsList, environmentVariables = {}) {
 async function startBrowserLogin(host, configurationHome) {
   const child = spawn(
     process.execPath,
-    [CLI_ENTRYPOINT, "login", "--host", host, "--no-browser"],
+    [CLI_ENTRYPOINT, "auth", "login", "--host", host, "--no-browser"],
     {
       env: { ...process.env, XDG_CONFIG_HOME: configurationHome },
       stdio: ["ignore", "pipe", "pipe"],
@@ -71,11 +71,25 @@ async function completeBrowserLogin(approvalUrl, apiKey = TEST_API_KEY) {
   });
 }
 
+async function writeStoredCredential(configurationHome, host, apiKey) {
+  const credentialDirectory = join(configurationHome, "javachat");
+  const credentialFile = join(credentialDirectory, "credentials.json");
+  await mkdir(credentialDirectory, { recursive: true });
+  await writeFile(
+    credentialFile,
+    JSON.stringify({ [host]: { apiKey, sessionId: "chat-stored" } }),
+  );
+  return credentialFile;
+}
+
 test("prints usage without loading credentials", async () => {
   const cliExecution = await runCli(["--help"]);
 
   assert.equal(cliExecution.exitCode, 0);
-  assert.match(cliExecution.standardOutput, /javachat login/);
+  assert.match(cliExecution.standardOutput, /javachat ask/);
+  assert.match(cliExecution.standardOutput, /javachat auth login/);
+  assert.match(cliExecution.standardOutput, /javachat auth logout/);
+  assert.match(cliExecution.standardOutput, /javachat auth status/);
   assert.equal(cliExecution.standardError, "");
 });
 
@@ -95,7 +109,7 @@ test("treats --version after -- as question text", async (testContext) => {
   const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
   testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
 
-  const cliExecution = await runCli(["--", "--version"], {
+  const cliExecution = await runCli(["ask", "--", "--version"], {
     JAVACHAT_API_KEY: "",
     XDG_CONFIG_HOME: configurationHome,
   });
@@ -158,7 +172,7 @@ test("streams text and citations through the public API", async (testContext) =>
   assert.equal(typeof address, "object");
 
   const cliExecution = await runCli(
-    ["--host", `http://127.0.0.1:${address.port}`, "How do records work?"],
+    ["--host", `http://127.0.0.1:${address.port}`, "ask", "How do records work?"],
     { JAVACHAT_API_KEY: TEST_API_KEY },
   );
 
@@ -193,7 +207,7 @@ test("renders enrichment markers split across stream chunks", async (testContext
   const address = apiServer.address();
 
   const cliExecution = await runCli(
-    ["--host", `http://127.0.0.1:${address.port}`, "What is a sealed interface?"],
+    ["--host", `http://127.0.0.1:${address.port}`, "ask", "What is a sealed interface?"],
     { JAVACHAT_API_KEY: TEST_API_KEY },
   );
 
@@ -223,7 +237,7 @@ test("releases an unterminated enrichment marker instead of swallowing it", asyn
   const address = apiServer.address();
 
   const cliExecution = await runCli(
-    ["--host", `http://127.0.0.1:${address.port}`, "Anything"],
+    ["--host", `http://127.0.0.1:${address.port}`, "ask", "Anything"],
     { JAVACHAT_API_KEY: TEST_API_KEY },
   );
 
@@ -250,7 +264,7 @@ test("rejects a successful non-SSE response", async (testContext) => {
   assert.equal(typeof address, "object");
 
   const cliExecution = await runCli(
-    ["--host", `http://127.0.0.1:${address.port}`, "How do records work?"],
+    ["--host", `http://127.0.0.1:${address.port}`, "ask", "How do records work?"],
     { JAVACHAT_API_KEY: TEST_API_KEY },
   );
 
@@ -344,6 +358,35 @@ test("rejects an unknown option instead of treating it as a question", async () 
   assert.match(cliExecution.standardError, /Unknown option: --hots/);
 });
 
+test("requires the ask command before question text", async () => {
+  const cliExecution = await runCli(["How do records work?"]);
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /Unknown command: How do records work\?/);
+});
+
+test("rejects removed flat authentication commands", async () => {
+  for (const flatCommand of ["login", "logout", "whoami"]) {
+    const cliExecution = await runCli([flatCommand]);
+    assert.equal(cliExecution.exitCode, 1);
+    assert.match(cliExecution.standardError, new RegExp(`Unknown command: ${flatCommand}`));
+  }
+});
+
+test("requires an authentication command", async () => {
+  const cliExecution = await runCli(["auth"]);
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /auth requires a command: login, logout, or status/);
+});
+
+test("rejects unknown authentication commands", async () => {
+  const cliExecution = await runCli(["auth", "whoami"]);
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /Unknown auth command: whoami/);
+});
+
 test("allows Java option tokens after question text begins", async (testContext) => {
   let receivedQuestion = "";
   const apiServer = createServer((request, response) => {
@@ -377,7 +420,7 @@ test("allows Java option tokens after question text begins", async (testContext)
 });
 
 test("rejects --host without a value", async () => {
-  const cliExecution = await runCli(["whoami", "--host"]);
+  const cliExecution = await runCli(["auth", "status", "--host"]);
 
   assert.equal(cliExecution.exitCode, 1);
   assert.match(cliExecution.standardError, /--host requires a value/);
@@ -391,17 +434,40 @@ test("describes the offending host value when it is not a URL", async () => {
 });
 
 test("rejects stray arguments on subcommands", async () => {
-  const cliExecution = await runCli(["whoami", "extra"]);
+  const cliExecution = await runCli(["auth", "status", "extra"]);
 
   assert.equal(cliExecution.exitCode, 1);
-  assert.match(cliExecution.standardError, /javachat whoami takes no arguments/);
+  assert.match(cliExecution.standardError, /javachat auth status takes no arguments/);
+});
+
+test("auth status shows the authenticated identity", async (testContext) => {
+  const apiServer = createServer((request, response) => {
+    assert.equal(request.url, "/api/me");
+    assert.equal(request.headers.authorization, `Bearer ${TEST_API_KEY}`);
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end('{"userId":"user_cli"}');
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const apiAddress = apiServer.address();
+  assert.equal(typeof apiAddress, "object");
+  const host = `http://127.0.0.1:${apiAddress.port}`;
+
+  const cliExecution = await runCli(["auth", "--host", host, "status"], {
+    JAVACHAT_API_KEY: TEST_API_KEY,
+  });
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.equal(cliExecution.standardOutput, `user_cli at ${host}\n`);
+  assert.equal(cliExecution.standardError, "");
 });
 
 test("login points at JAVACHAT_API_KEY when it provides the authentication", async (testContext) => {
   const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
   testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
 
-  const cliExecution = await runCli(["login", "--host", "https://javachat.ai"], {
+  const cliExecution = await runCli(["auth", "login", "--host", "https://javachat.ai"], {
     JAVACHAT_API_KEY: TEST_API_KEY,
     XDG_CONFIG_HOME: configurationHome,
   });
@@ -411,31 +477,58 @@ test("login points at JAVACHAT_API_KEY when it provides the authentication", asy
   assert.doesNotMatch(cliExecution.standardError, /logout/);
 });
 
+test("auth logout revokes and removes the stored credential", async (testContext) => {
+  const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
+  testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
+  const apiServer = createServer((request, response) => {
+    assert.equal(request.method, "DELETE");
+    assert.equal(request.url, "/api/me/api-key");
+    assert.equal(request.headers.authorization, `Bearer ${TEST_API_KEY}`);
+    response.writeHead(204).end();
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const apiAddress = apiServer.address();
+  assert.equal(typeof apiAddress, "object");
+  const host = `http://127.0.0.1:${apiAddress.port}`;
+  const credentialFile = await writeStoredCredential(configurationHome, host, TEST_API_KEY);
+
+  const cliExecution = await runCli(["auth", "logout", "--host", host], {
+    JAVACHAT_API_KEY: "",
+    XDG_CONFIG_HOME: configurationHome,
+  });
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.match(cliExecution.standardOutput, /Revoked and removed the local credential/);
+  assert.equal(cliExecution.standardError, "");
+  await assert.rejects(readFile(credentialFile, "utf8"), { code: "ENOENT" });
+});
+
 test("logout explains JAVACHAT_API_KEY when no credential is stored", async (testContext) => {
   const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
   testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
 
-  const cliExecution = await runCli(["logout", "--host", "https://javachat.ai"], {
+  const cliExecution = await runCli(["auth", "logout", "--host", "https://javachat.ai"], {
     JAVACHAT_API_KEY: TEST_API_KEY,
     XDG_CONFIG_HOME: configurationHome,
   });
 
   assert.equal(cliExecution.exitCode, 0);
   assert.match(cliExecution.standardError, /authentication.*JAVACHAT_API_KEY/i);
-  assert.match(cliExecution.standardError, /run "javachat logout" again/i);
+  assert.match(cliExecution.standardError, /run "javachat auth logout" again/i);
 });
 
 test("environment authentication takes precedence over a stored logout credential", async (testContext) => {
   const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
   testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
-  const credentialDirectory = join(configurationHome, "javachat");
-  await mkdir(credentialDirectory, { recursive: true });
-  await writeFile(
-    join(credentialDirectory, "credentials.json"),
-    JSON.stringify({ "https://javachat.ai": { apiKey: "ak_secret_stored", sessionId: "chat-stored" } }),
+  const credentialFile = await writeStoredCredential(
+    configurationHome,
+    "https://javachat.ai",
+    "ak_secret_stored",
   );
 
-  const cliExecution = await runCli(["logout", "--host", "https://javachat.ai"], {
+  const cliExecution = await runCli(["auth", "logout", "--host", "https://javachat.ai"], {
     JAVACHAT_API_KEY: TEST_API_KEY,
     XDG_CONFIG_HOME: configurationHome,
   });
@@ -444,9 +537,7 @@ test("environment authentication takes precedence over a stored logout credentia
   assert.match(cliExecution.standardError, /authentication.*JAVACHAT_API_KEY/i);
   assert.match(cliExecution.standardError, /stored fallback credential/i);
   assert.doesNotMatch(cliExecution.standardOutput, /Revoked/);
-  const storedCredentials = JSON.parse(
-    await readFile(join(credentialDirectory, "credentials.json"), "utf8"),
-  );
+  const storedCredentials = JSON.parse(await readFile(credentialFile, "utf8"));
   assert.equal(storedCredentials["https://javachat.ai"].apiKey, "ak_secret_stored");
 });
 

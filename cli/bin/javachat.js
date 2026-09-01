@@ -254,7 +254,9 @@ async function commandLogin(host, options) {
   }
   const storedHosts = await readCredentials();
   if (storedHosts[host]?.apiKey) {
-    stderr.write(`Already signed in to ${host}. Run "javachat logout" before replacing the key.\n`);
+    stderr.write(
+      `Already signed in to ${host}. Run "javachat auth logout" before replacing the key.\n`,
+    );
     return 0;
   }
   const apiKey = await authorizeThroughBrowser(host, !options.noBrowser);
@@ -271,7 +273,7 @@ async function commandLogin(host, options) {
 async function commandLogout(host) {
   if (env.JAVACHAT_API_KEY?.trim()) {
     stderr.write(
-      `Authentication for ${host} comes from JAVACHAT_API_KEY. Unset it, then run "javachat logout" again to remove any stored fallback credential.\n`,
+      `Authentication for ${host} comes from JAVACHAT_API_KEY. Unset it, then run "javachat auth logout" again to remove any stored fallback credential.\n`,
     );
     return 0;
   }
@@ -320,10 +322,10 @@ async function fetchIdentity(host, apiKey) {
   return identity.userId;
 }
 
-async function commandWhoami(host) {
+async function commandStatus(host) {
   const apiKey = await storedKeyFor(host);
   if (!apiKey) {
-    stderr.write(`Not signed in to ${host}. Run "javachat login".\n`);
+    stderr.write(`Not signed in to ${host}. Run "javachat auth login".\n`);
     return 1;
   }
   stdout.write(`${await fetchIdentity(host, apiKey)} at ${host}\n`);
@@ -340,7 +342,7 @@ async function commandWhoami(host) {
 async function commandKnowledge(host) {
   const apiKey = await storedKeyFor(host);
   if (!apiKey) {
-    stderr.write(`Not signed in to ${host}. Run "javachat login".\n`);
+    stderr.write(`Not signed in to ${host}. Run "javachat auth login".\n`);
     return 1;
   }
   const groupsResponse = await fetch(new URL("/api/knowledge/groups", host), {
@@ -499,7 +501,7 @@ async function commandAsk(host, question, options) {
   const allHosts = environmentApiKey ? {} : await readCredentials();
   const apiKey = environmentApiKey || allHosts[host]?.apiKey;
   if (!apiKey) {
-    throw new Error(`Not signed in to ${host}. Run "javachat login" first.`);
+    throw new Error(`Not signed in to ${host}. Run "javachat auth login" first.`);
   }
   const storedSessionId = allHosts[host]?.sessionId;
   const sessionId =
@@ -618,10 +620,10 @@ function decodeFrame(frame) {
 const USAGE = `javachat — ask Java Chat from your terminal
 
 Usage
-  javachat "How do Java records work?"     Ask a question
-  javachat login                           Authorize this machine in your browser
-  javachat logout                          Remove the local credential
-  javachat whoami                          Show who the stored key belongs to
+  javachat ask "How do records work?"       Ask a question
+  javachat auth login                       Authorize this machine in your browser
+  javachat auth logout                      Remove the local credential
+  javachat auth status                      Show who the stored key belongs to
   javachat knowledge                       List the document groups ingested in the knowledge base
 
 Options
@@ -637,11 +639,10 @@ Environment
   JAVACHAT_HOST      Default host when --host is absent
 `;
 
-const SUBCOMMANDS = new Map([
+const AUTH_COMMANDS = new Map([
   ["login", commandLogin],
   ["logout", commandLogout],
-  ["whoami", commandWhoami],
-  ["knowledge", commandKnowledge],
+  ["status", commandStatus],
 ]);
 
 function parseArguments(rawArguments) {
@@ -676,9 +677,7 @@ function parseArguments(rawArguments) {
       throw new Error(`Unknown option: ${argument}. Run "javachat --help" for usage.`);
     } else {
       positional.push(argument);
-      const questionStarted =
-        (!SUBCOMMANDS.has(positional[0]) && positional[0] !== "ask" && positional[0] !== "help") ||
-        (positional[0] === "ask" && positional.length > 1);
+      const questionStarted = positional[0] === "ask" && positional.length > 1;
       if (questionStarted) {
         positional.push(...rawArguments.slice(index + 1));
         break;
@@ -704,17 +703,34 @@ async function main() {
     stdout.write(USAGE);
     return options.help || first ? 0 : 1;
   }
-  const subcommand = SUBCOMMANDS.get(first);
-  if (subcommand) {
-    if (rest.length > 0) {
-      throw new Error(`javachat ${first} takes no arguments.`);
+  if (first === "auth") {
+    const [authCommandName, ...authArguments] = rest;
+    if (!authCommandName) {
+      throw new Error("javachat auth requires a command: login, logout, or status.");
     }
-    return await subcommand(normalizedHost, options);
+    const authCommand = AUTH_COMMANDS.get(authCommandName);
+    if (!authCommand) {
+      throw new Error(
+        `Unknown auth command: ${authCommandName}. Run "javachat --help" for usage.`,
+      );
+    }
+    if (authArguments.length > 0) {
+      throw new Error(`javachat auth ${authCommandName} takes no arguments.`);
+    }
+    return await authCommand(normalizedHost, options);
   }
-
-  const question = (first === "ask" ? rest : positional).join(" ").trim();
+  if (first === "knowledge") {
+    if (rest.length > 0) {
+      throw new Error("javachat knowledge takes no arguments.");
+    }
+    return await commandKnowledge(normalizedHost);
+  }
+  if (first !== "ask") {
+    throw new Error(`Unknown command: ${first}. Run "javachat --help" for usage.`);
+  }
+  const question = rest.join(" ").trim();
   if (!question) {
-    stderr.write('Nothing to ask. Try: javachat "How do Java records work?"\n');
+    stderr.write('Nothing to ask. Try: javachat ask "How do Java records work?"\n');
     return 1;
   }
   return await commandAsk(normalizedHost, question, options);
