@@ -1,97 +1,121 @@
-# Java Chat
+# JavaChat
 
-[![Java Chat Application](src/main/resources/static/images/java-chat-app.png)](https://javachat.ai)
+[![JavaChat application](src/main/resources/static/images/java-chat-app.png)](https://javachat.ai)
 
-Learn programming in Java and more with **streaming answers**, **citations**, and **guided lessons** grounded with a deep knowledge base of ingested documentation (RAG).
+JavaChat answers software-development questions from retrieved documentation and source code. It
+streams each answer as it is generated and shows the sources used, so you can verify the result
+instead of accepting an uncited response.
 
-Built with Spring Boot + WebFlux, Svelte, and Qdrant.
+Use JavaChat in whichever form fits your workflow:
 
-## Features
+- **Web:** open [javachat.ai](https://javachat.ai) for chat and guided lessons.
+- **Terminal:** install the [JavaChat CLI](cli/README.md) to ask the same grounded questions from
+  any directory.
+- **Self-hosted development:** run the Svelte and Spring Boot application locally and connect it to
+  Qdrant and an OpenAI-compatible gateway.
 
-- Streaming chat over SSE (`/api/chat/stream`) with a final `citation` event
-- Guided learning mode (`/learn`) with lesson-scoped chat (`/api/guided/*`)
-- Documentation ingestion pipeline (fetch → chunk → embed → dedupe → index)
-- Chunking uses JTokkit's CL100K_BASE tokenizer (GPT-3.5/4 style) for token counting
-- Embeddings use strict provider selection and fail fast when the provider is unavailable (no runtime fallbacks)
+## Install the CLI
 
-## Quick start
+The CLI supports macOS and Linux and requires Node.js 24.18 or newer.
+
+```bash
+npm install --global @wcallahan/javachat-cli
+javachat auth login
+javachat ask "How do Java records work?"
+```
+
+Use `javachat list all` to see the documentation packages, source repositories, versions, and
+revisions available on the selected deployment. See the [CLI README](cli/README.md) for all
+commands, non-interactive authentication, local development, and package verification.
+
+## What JavaChat provides
+
+- Citation-backed chat streamed over Server-Sent Events
+- Guided lessons with separate, lesson-scoped conversations
+- Version-aware retrieval across documentation and indexed GitHub repositories
+- Exact source inventory, including canonical URLs and ingested versions or commit revisions
+- A documentation pipeline that fetches, chunks, embeds, deduplicates, and indexes source material
+- Hybrid Qdrant retrieval using dense and BM25 sparse vectors with reciprocal-rank fusion
+
+## Run the application locally
 
 ### Prerequisites
 
-This project uses **Gradle Toolchains** with **BellSoft Liberica JDK 25** and **mise** (or **asdf**) for reproducible builds.
+- BellSoft Liberica JDK 25
+- Node.js 24.18
+- Docker, when running the local Qdrant service
+- `mise` or another Java version manager for the pinned development toolchain
 
-#### Option 1: Using mise (recommended)
+Install the pinned Java version:
 
 ```bash
-# Install mise if you don't have it: https://mise.jdnow.dev/
 mise install
 ```
 
-#### Option 2: Using asdf
+Install and select the frontend's pinned Node.js version with `nvm`:
 
 ```bash
-# Install asdf if you don't have it: https://asdf-vm.com/
-asdf plugin add java https://github.com/halcyon/asdf-java.git
-asdf install
+nvm install 24.18.0
+nvm use 24.18.0
 ```
 
-**What happens**: Gradle Toolchains will auto-download BellSoft Liberica JDK 25 on first build if not present locally. The `mise`/`asdf` setup ensures your shell and IDE (IntelliJ) use the correct Java version.
-
-### Running
+Then configure and start the full application:
 
 ```bash
 cp .env.example .env
-# edit .env: set SPRING_PROFILE=local, shared generation collections, local state paths,
-# and the shared gateway OPENAI_BASE_URL/OPENAI_API_KEY
-make compose-up   # fresh Qdrant 1.18.3 generation-specific volume
-make dev          # bootstraps missing schemas only on loopback Qdrant
+# Set OPENAI_BASE_URL and OPENAI_API_KEY in .env.
+make compose-up
+make dev
 ```
 
-Open `http://localhost:8085/`.
+Open [http://localhost:8085](http://localhost:8085). The local commands create missing Qdrant
+schemas only for loopback connections; remote Qdrant deployments remain fail-closed.
 
-### CLI development
+For a fuller explanation of the environment variables, local collection setup, and optional
+documentation ingestion, read [Getting started](docs/getting-started.md).
 
-The CLI is its own npm package under `cli/`. Install it and run the source entrypoint from that
-directory:
+## Useful development commands
+
+```bash
+make help       # list repository-owned commands
+make build      # build the frontend and backend
+make test       # run shell contracts and JVM tests
+make lint       # run frontend and JVM static analysis
+make health     # check the running application
+```
+
+To work only on the npm package:
 
 ```bash
 cd cli
 npm install
 npm run dev -- --help
-npm run dev -- --host http://localhost:8085 ask "How do Java records work?"
+npm test
 ```
 
-See the **[CLI README](cli/README.md)** for authentication, inventory, production dogfood,
-packaged-artifact checks, and the npm release procedure. Agents can reuse the repository's
-**[JavaChat skill](skills/javachat/SKILL.md)** for source-grounded documentation questions.
+## Index documentation and repositories
 
-## Index documentation (RAG)
+Documentation ingestion is optional for ordinary application development. Run it only after the
+gateway and Qdrant preflight checks pass.
 
 ```bash
-# Run only after the generation configuration and gateway/Qdrant preflight are valid.
-make full-pipeline          # fetch all docs + ingest into Qdrant
-make process-all            # ingest only (incremental, upload to Qdrant)
+make full-pipeline
 REPO_PATH=/absolute/path/to/repository make process-github-repo
 REPO_URL=https://github.com/owner/repository make process-github-repo
 SYNC_EXISTING=1 make process-github-repo
 ```
 
-Ingestion writes dense + BM25 sparse vectors to four hybrid Qdrant collections, queried via RRF fusion.
-
-Full command reference (scrape flags, doc set filtering, HTTP API, full re-ingest):
-**[docs/pipeline-commands.md](docs/pipeline-commands.md)**
-
-GitHub source repository ingestion details:
-**[docs/github-repository-ingestion.md](docs/github-repository-ingestion.md)**
+See [Pipeline commands](docs/pipeline-commands.md) for source selection and ingestion controls, and
+[GitHub repository ingestion](docs/github-repository-ingestion.md) for repository synchronization.
 
 ## Documentation
 
-Start with `docs/README.md`.
-
-## Contributing
-
-See `CONTRIBUTING.md`.
+- [Documentation index](docs/README.md)
+- [Getting started](docs/getting-started.md)
+- [Architecture](docs/architecture.md)
+- [HTTP and streaming API](docs/api.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## License
 
-See `LICENSE.md`.
+See [LICENSE.md](LICENSE.md).

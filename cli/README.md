@@ -1,75 +1,128 @@
 # JavaChat CLI
 
-Ask JavaChat from a terminal with the same retrieval and citations as the web application.
+Ask JavaChat from any terminal and receive the same retrieved evidence and citations as the web
+application. The CLI is useful when you want a documentation answer without leaving a repository,
+editor, or remote shell.
+
+## Requirements
+
+- Node.js 24.18 or newer
+- macOS or Linux
+- A JavaChat account for interactive use, or an existing API key for automation
+
+The package has no runtime dependencies.
 
 ## Install
 
 ```bash
 npm install --global @wcallahan/javachat-cli
+javachat --version
+```
+
+Authorize the default production deployment and ask a question:
+
+```bash
 javachat auth login
+javachat auth status
 javachat ask "How do Java records work?"
 ```
 
-`javachat auth login` opens JavaChat in a browser. After sign-in and approval, the CLI stores the
-personal Clerk API key in `$XDG_CONFIG_HOME/javachat/credentials.json` (or
-`~/.config/javachat/credentials.json`) with POSIX owner-only permissions. The package supports
-macOS and Linux.
-
-Use `JAVACHAT_API_KEY` for non-interactive environments and `JAVACHAT_HOST` to target another
-JavaChat deployment.
+Answers stream to standard output. When retrieval succeeds, the answer ends with a `Sources:`
+section containing the cited documentation or source-repository URLs.
 
 ## Commands
 
-- `javachat ask "question"` — ask a question with the same retrieval and citations as the website.
-- `javachat auth login` / `javachat auth logout` — authorize or remove this machine's credential.
-- `javachat auth status` — show who the stored key belongs to.
-- `javachat list all` — list every ingested source with canonical URLs, versions or revisions,
-  and chunk counts.
-- `javachat list knowledge` — alias for `javachat list all`.
+```text
+javachat ask "question"       Ask a grounded question
+javachat auth login           Authorize this machine in a browser
+javachat auth logout          Revoke and remove the stored credential
+javachat auth status          Show the account for the selected deployment
+javachat list all             List every indexed source, URL, and version
+javachat list knowledge       Alias for list all
+```
 
-Run `javachat`, `javachat --help`, or `javachat -h` for the complete command list.
+Run `javachat`, `javachat --help`, or `javachat -h` for the complete command and option reference.
 
-## Develop locally
+### Inspect the available sources
 
-The CLI has no runtime dependencies. Node.js 24.18 or newer and npm are sufficient:
+Check the inventory before asking about an exact package or version:
 
 ```bash
-cd cli
+javachat list all
+```
+
+Each group includes its canonical documentation or GitHub URL, exact ingested versions or commit
+revisions, and indexed chunk count. `javachat list knowledge` produces the same output.
+
+### Start a fresh, verbose question
+
+```bash
+javachat --new --verbose ask \
+  "According to the Java 25 Thread API, what does Thread.ofVirtual() return?"
+```
+
+`--new` starts a new conversation. `--verbose` writes retrieval progress to standard error while
+the answer continues on standard output. Without `--new`, later questions resume the most recent
+conversation for that host.
+
+## Authentication and deployments
+
+Credentials are stored separately for each JavaChat host. Interactive login writes the personal
+credential to `$XDG_CONFIG_HOME/javachat/credentials.json`, or
+`~/.config/javachat/credentials.json` when `XDG_CONFIG_HOME` is unset. On POSIX systems, the file
+uses owner-only permissions.
+
+Browser-approved API keys expire after 30 days. On a machine with a browser available separately,
+print the approval URL instead:
+
+```bash
+javachat --no-browser auth login
+```
+
+The approving browser must run on the same machine as the CLI because the callback listener uses
+that machine's loopback interface. On a remote shell, use an existing `JAVACHAT_API_KEY` instead of
+starting browser login.
+
+Use `--host` to select another deployment:
+
+```bash
+javachat --host https://dev.javachat.ai auth login
+javachat --host https://dev.javachat.ai auth status
+javachat --host https://dev.javachat.ai list all
+```
+
+For CI or another non-interactive environment, provide an existing credential through
+`JAVACHAT_API_KEY`. `JAVACHAT_HOST` changes the default deployment.
+
+```bash
+JAVACHAT_HOST=https://javachat.ai \
+JAVACHAT_API_KEY="$EXISTING_JAVACHAT_API_KEY" \
+javachat --new ask "What does Thread.ofVirtual() return?"
+```
+
+Keep credentials out of command arguments, package scripts, logs, and committed files.
+
+## Develop the package
+
+From the repository's `cli/` directory:
+
+```bash
 npm install
 npm run dev -- --version
 npm run dev -- --help
+npm test
 ```
 
-Everything after `--` is passed to the CLI. It targets `https://javachat.ai` by default. Use
-`--host` for another deployment:
+Everything after `npm run dev --` is passed to the CLI. To test against a locally running JavaChat
+server:
 
 ```bash
-npm run dev -- --host http://localhost:8085 --help
-npm run dev -- --host https://dev.javachat.ai --help
-npm run dev -- --host https://javachat.ai --help
+npm run dev -- --host http://localhost:8085 ask "How do Java records work?"
 ```
 
-Credentials are stored separately for each host. Sign in to the host you intend to test:
+## Verify the package artifact
 
-```bash
-npm run dev -- --host https://javachat.ai auth login
-npm run dev -- --host https://javachat.ai auth status
-```
-
-For headless environments, set `JAVACHAT_API_KEY` instead of running `auth login`. Do not put API
-keys in command arguments, package scripts, or committed files.
-
-## Dogfood the CLI
-
-Exercise the inventory and a fresh, citation-backed answer against the target deployment:
-
-```bash
-npm run dev -- --host https://javachat.ai list all
-npm run dev -- --host https://javachat.ai --new --verbose ask \
-  "Compare HikariCP 7.0.5 with Spring AI 1.1.5 and name every indexed version used as evidence."
-```
-
-Then verify the package that npm would install, not only the source entrypoint:
+Test the tarball rather than relying only on the source entrypoint:
 
 ```bash
 npm test
@@ -77,27 +130,12 @@ npm run pack:check
 npm pack
 npm install --global ./wcallahan-javachat-cli-0.0.1.tgz
 javachat --version
-javachat --host https://javachat.ai auth status
-javachat --host https://javachat.ai list knowledge
+javachat auth status
+javachat list knowledge
 ```
 
-The tarball-installed `javachat` command uses the same per-host credential file as the source
-entrypoint.
+The tarball-installed command uses the same host-scoped credential file as the source entrypoint.
 
-## Publish the first npm release
+## License
 
-Package versions on npm are immutable. Confirm the prepared version and packed contents before
-publishing from `cli/`:
-
-```bash
-npm test
-npm run pack:check
-npm whoami
-npm publish --access public
-npm view @wcallahan/javachat-cli@0.0.1 version
-```
-
-Publishing a scoped public package requires control of the `wcallahan` npm scope and npm's current
-two-factor authentication or granular access requirements. If `npm whoami` is not `wcallahan`, sign
-in with `npm login` before publishing. Do not publish `0.0.1` until every source and tarball dogfood
-check above passes; any correction after publication must use a new version.
+See [LICENSE.md](LICENSE.md).
