@@ -164,10 +164,6 @@
     </Match>
     <Match>
         <Bug pattern="CRLF_INJECTION_LOGS"/>
-        <Class name="com.williamcallahan.javachat.service.ingestion.SourceCodeFileIngestionProcessor"/>
-    </Match>
-    <Match>
-        <Bug pattern="CRLF_INJECTION_LOGS"/>
         <Class name="com.williamcallahan.javachat.web.ChatController"/>
     </Match>
     <Match>

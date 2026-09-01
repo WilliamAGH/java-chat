@@ -186,14 +186,13 @@ public class ChatService {
             Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener,
             long stageDeadlineNanos) {
 
-        RetrievalService.RetrievalOutcome retrievalOutcome = retrieveTokenConstrainedOfficialDocumentation(
+        List<Document> contextDocs = retrieveTokenConstrainedOfficialDocumentation(
                 latestUserMessage, retrievalProgressListener, stageDeadlineNanos);
         logger.debug(
                 "Using GPT-5.4 retrieval context: {} documents with max {} tokens each",
-                retrievalOutcome.documents().size(),
+                contextDocs.size(),
                 ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
 
-        List<Document> contextDocs = retrievalOutcome.documents();
         String searchQualityNote = determineSearchQuality(contextDocs);
 
         // Build system prompt with search quality context
@@ -218,16 +217,16 @@ public class ChatService {
         StructuredPrompt structuredPrompt =
                 new StructuredPrompt(systemSegment, contextSegments, conversationSegments, querySegment);
 
-        return new StructuredPromptOutcome(structuredPrompt, retrievalOutcome.notices(), retrievalOutcome.documents());
+        return new StructuredPromptOutcome(structuredPrompt, contextDocs);
     }
 
     /**
      * Retrieves the official documentation context shared by constrained chat prompts and diagnostics.
      *
      * @param query learner query
-     * @return constrained official-document retrieval outcome
+     * @return constrained official documents
      */
-    public RetrievalService.RetrievalOutcome retrieveTokenConstrainedOfficialDocumentation(String query) {
+    public List<Document> retrieveTokenConstrainedOfficialDocumentation(String query) {
         return retrieveTokenConstrainedOfficialDocumentation(query, notice -> {});
     }
 
@@ -236,9 +235,9 @@ public class ChatService {
      *
      * @param query learner query
      * @param retrievalProgressListener receives live user-facing retrieval progress notices
-     * @return constrained official-document retrieval outcome
+     * @return constrained official documents
      */
-    public RetrievalService.RetrievalOutcome retrieveTokenConstrainedOfficialDocumentation(
+    public List<Document> retrieveTokenConstrainedOfficialDocumentation(
             String query, Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener) {
         return retrieveTokenConstrainedOfficialDocumentation(
                 query,
@@ -252,13 +251,13 @@ public class ChatService {
      * @param query learner query
      * @param retrievalProgressListener receives live user-facing retrieval progress notices
      * @param stageDeadlineNanos absolute {@link System#nanoTime()} response-preparation deadline
-     * @return constrained official-document retrieval outcome
+     * @return constrained official documents
      */
-    public RetrievalService.RetrievalOutcome retrieveTokenConstrainedOfficialDocumentation(
+    public List<Document> retrieveTokenConstrainedOfficialDocumentation(
             String query,
             Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener,
             long stageDeadlineNanos) {
-        return retrievalService.retrieveWithLimitOutcome(
+        return retrievalService.retrieveWithLimit(
                 query,
                 ModelConfiguration.RAG_LIMIT_CONSTRAINED,
                 ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED,
@@ -391,18 +390,13 @@ public class ChatService {
      * Captures a structured prompt with retrieval metadata for intelligent truncation.
      *
      * @param structuredPrompt the typed prompt segments
-     * @param notices retrieval notices for UI diagnostics
      * @param documents source documents for citation emission
      */
-    public record StructuredPromptOutcome(
-            StructuredPrompt structuredPrompt,
-            List<RetrievalService.RetrievalNotice> notices,
-            List<Document> documents) {
+    public record StructuredPromptOutcome(StructuredPrompt structuredPrompt, List<Document> documents) {
         public StructuredPromptOutcome {
             if (structuredPrompt == null) {
                 throw new IllegalArgumentException("Structured prompt cannot be null");
             }
-            notices = notices == null ? List.of() : List.copyOf(notices);
             documents = documents == null ? List.of() : List.copyOf(documents);
         }
 

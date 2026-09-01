@@ -63,46 +63,18 @@ public class HybridSearchService {
     }
 
     /**
-     * Captures one retrieval notice generated during non-strict hybrid fan-out.
-     *
-     * @param summary concise summary for UI status events
-     * @param details detailed retrieval context for diagnostics
-     */
-    public record HybridSearchNotice(String summary, String details) {
-        public HybridSearchNotice {
-            if (summary == null || summary.isBlank()) {
-                throw new IllegalArgumentException("summary cannot be null or blank");
-            }
-            details = details == null ? "" : details;
-        }
-    }
-
-    /**
-     * Captures hybrid search results and optional non-fatal notices.
-     *
-     * @param documents retrieved documents
-     * @param notices retrieval notices for non-strict partial failures
-     */
-    public record SearchOutcome(List<Document> documents, List<HybridSearchNotice> notices) {
-        public SearchOutcome {
-            documents = documents == null ? List.of() : List.copyOf(documents);
-            notices = notices == null ? List.of() : List.copyOf(notices);
-        }
-    }
-
-    /**
-     * Performs hybrid search across all configured collections and returns retrieval notices.
+     * Performs hybrid search across all configured collections.
      *
      * @param query search query text
      * @param topK maximum number of results to return
      * @param retrievalConstraint retrieval metadata constraint for server-side filtering
      * @param stageDeadlineNanos absolute {@link System#nanoTime()} deadline shared by every
      *     retrieval stage hop, so this search can never outlive the caller's stage budget
-     * @return search outcome containing documents and optional non-fatal notices
+     * @return ranked documents
      */
-    public SearchOutcome searchOutcome(
+    public List<Document> search(
             String query, int topK, RetrievalConstraint retrievalConstraint, long stageDeadlineNanos) {
-        return searchOutcomes(query, topK, List.of(retrievalConstraint), stageDeadlineNanos)
+        return searchByConstraint(query, topK, List.of(retrievalConstraint), stageDeadlineNanos)
                 .getFirst();
     }
 
@@ -120,15 +92,15 @@ public class HybridSearchService {
      * @param retrievalConstraints server-side metadata scopes searched with the shared encoding
      * @param stageDeadlineNanos absolute {@link System#nanoTime()} deadline shared by every
      *     retrieval stage hop
-     * @return search outcomes in the same order as the supplied scopes
+     * @return ranked document lists in the same order as the supplied scopes
      */
-    public List<SearchOutcome> searchOutcomes(
+    public List<List<Document>> searchByConstraint(
             String query, int topK, List<RetrievalConstraint> retrievalConstraints, long stageDeadlineNanos) {
         Objects.requireNonNull(query, "query");
         List<RetrievalConstraint> requiredRetrievalConstraints = requireRetrievalConstraints(retrievalConstraints);
         if (query.isBlank() || topK <= 0) {
             return requiredRetrievalConstraints.stream()
-                    .map(ignoredConstraint -> new SearchOutcome(List.of(), List.of()))
+                    .map(ignoredConstraint -> List.<Document>of())
                     .toList();
         }
 
@@ -165,7 +137,7 @@ public class HybridSearchService {
             queryDispatches.add(new CollectionQueryDispatch(
                     futuresByCollection, remainingQueryTimeout(queryDeadlineNanos), queryDeadlineNanos));
         }
-        return collectSearchOutcomes(queryDispatches, topK);
+        return collectSearchResults(queryDispatches, topK);
     }
 
     /**
@@ -181,11 +153,11 @@ public class HybridSearchService {
      * @param retrievalConstraint official documentation metadata constraint
      * @param stageDeadlineNanos absolute {@link System#nanoTime()} deadline shared by every
      *     retrieval stage hop, so citation discovery can never outlive the caller's stage budget
-     * @return citation search outcome containing documents
+     * @return citation documents
      */
-    public SearchOutcome searchDocumentationCitationsOutcome(
+    public List<Document> searchDocumentationCitations(
             String query, int topK, RetrievalConstraint retrievalConstraint, long stageDeadlineNanos) {
-        return searchDocumentationCitationsOutcomes(query, topK, List.of(retrievalConstraint), stageDeadlineNanos)
+        return searchDocumentationCitationsByConstraint(query, topK, List.of(retrievalConstraint), stageDeadlineNanos)
                 .getFirst();
     }
 
@@ -197,15 +169,15 @@ public class HybridSearchService {
      * @param retrievalConstraints official-documentation scopes searched independently
      * @param stageDeadlineNanos absolute {@link System#nanoTime()} deadline shared by every
      *     retrieval stage hop
-     * @return citation outcomes in the same order as the supplied scopes
+     * @return citation document lists in the same order as the supplied scopes
      */
-    public List<SearchOutcome> searchDocumentationCitationsOutcomes(
+    public List<List<Document>> searchDocumentationCitationsByConstraint(
             String query, int topK, List<RetrievalConstraint> retrievalConstraints, long stageDeadlineNanos) {
         Objects.requireNonNull(query, "query");
         List<RetrievalConstraint> requiredRetrievalConstraints = requireRetrievalConstraints(retrievalConstraints);
         if (query.isBlank() || topK <= 0) {
             return requiredRetrievalConstraints.stream()
-                    .map(ignoredConstraint -> new SearchOutcome(List.of(), List.of()))
+                    .map(ignoredConstraint -> List.<Document>of())
                     .toList();
         }
 
@@ -231,7 +203,7 @@ public class HybridSearchService {
                         remainingQueryTimeout(queryDeadlineNanos),
                         queryDeadlineNanos));
             }
-            return collectSearchOutcomes(queryDispatches, topK);
+            return collectSearchResults(queryDispatches, topK);
         }
 
         String sparseCitationQuery = queryEncoding.sparseCitationQuery(query);
@@ -239,7 +211,7 @@ public class HybridSearchService {
                 queryEncoding.sparseVectorEncoder().encode(sparseCitationQuery);
         if (sparseVector.indices().isEmpty()) {
             return requiredRetrievalConstraints.stream()
-                    .map(ignoredConstraint -> new SearchOutcome(List.of(), List.of()))
+                    .map(ignoredConstraint -> List.<Document>of())
                     .toList();
         }
 
@@ -272,7 +244,7 @@ public class HybridSearchService {
             queryDispatches.add(new CollectionQueryDispatch(
                     futuresByCollection, remainingQueryTimeout(queryDeadlineNanos), queryDeadlineNanos));
         }
-        return collectSearchOutcomes(queryDispatches, topK);
+        return collectSearchResults(queryDispatches, topK);
     }
 
     /**
@@ -294,10 +266,10 @@ public class HybridSearchService {
         return Duration.ofNanos(Math.max(0L, stageDeadlineNanos - System.nanoTime()));
     }
 
-    private List<SearchOutcome> collectSearchOutcomes(List<CollectionQueryDispatch> queryDispatches, int topK) {
+    private List<List<Document>> collectSearchResults(List<CollectionQueryDispatch> queryDispatches, int topK) {
         try {
             return queryDispatches.stream()
-                    .map(queryDispatch -> collectSearchOutcome(queryDispatch, topK))
+                    .map(queryDispatch -> collectSearchResult(queryDispatch, topK))
                     .toList();
         } catch (HybridSearchPartialFailureException searchFailure) {
             queryDispatches.forEach(HybridSearchService::cancelPendingQueries);
@@ -316,7 +288,7 @@ public class HybridSearchService {
                 .toList();
     }
 
-    private SearchOutcome collectSearchOutcome(CollectionQueryDispatch queryDispatch, int topK) {
+    private List<Document> collectSearchResult(CollectionQueryDispatch queryDispatch, int topK) {
         Map<String, ScoredPointMatch> scoredPointsByUuid = new LinkedHashMap<>();
         List<HybridSearchPartialFailureException.CollectionSearchFailure> collectionFailures = new ArrayList<>();
         List<Throwable> dependencyFailures = new ArrayList<>();
@@ -338,9 +310,7 @@ public class HybridSearchService {
                         scoredPointMatch.score(),
                         scoredPointMatch.collectionName()))
                 .toList();
-        List<HybridSearchNotice> retrievalNotices =
-                collectionFailures.stream().map(HybridSearchService::toNotice).toList();
-        return new SearchOutcome(rankedDocuments, retrievalNotices);
+        return rankedDocuments;
     }
 
     /**
@@ -476,13 +446,6 @@ public class HybridSearchService {
             return point.getId().getUuid();
         }
         return String.valueOf(point.getId().getNum());
-    }
-
-    private static HybridSearchNotice toNotice(
-            HybridSearchPartialFailureException.CollectionSearchFailure collectionSearchFailure) {
-        String summary = "Partial retrieval failure in collection " + collectionSearchFailure.collectionName();
-        String details = collectionSearchFailure.failureType() + ": " + collectionSearchFailure.failureDetails();
-        return new HybridSearchNotice(summary, details);
     }
 
     private static String sanitizeFailureDetails(String failureDetails) {

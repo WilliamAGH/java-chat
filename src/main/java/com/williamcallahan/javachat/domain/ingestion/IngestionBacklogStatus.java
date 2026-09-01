@@ -149,14 +149,19 @@ public record IngestionBacklogStatus(
     /**
      * Reclassifies work left in a running checkpoint after its process released ownership.
      *
-     * <p>Only terminal successes remain inspected. Failed and interrupted files return to pending
-     * so monitoring and the next run describe retryable work truthfully.</p>
+     * <p>A recorded failure restarts the full marker-backed inventory because aggregate counts
+     * cannot identify a non-prefix failed file. An interruption without a recorded failure retains
+     * the terminal-success prefix and returns only interrupted files to pending.</p>
      *
      * @return partial backlog with no files reported as actively owned
      */
     public IngestionBacklogStatus abandon() {
         if (lifecycle == Lifecycle.COMPLETE || lifecycle == Lifecycle.NOT_STARTED) {
             return this;
+        }
+        if (failedFiles > 0) {
+            return new IngestionBacklogStatus(
+                    Lifecycle.PARTIAL, eligibleFiles, 0, 0, 0, 0, eligibleFiles, 0, directory);
         }
         int terminalSuccessCount = processedFiles + skippedFiles;
         return new IngestionBacklogStatus(
@@ -172,10 +177,11 @@ public record IngestionBacklogStatus(
     }
 
     /**
-     * Reopens unfinished work while retaining terminal success counts from the prior attempt.
+     * Reopens unfinished work from the first position the durable state can identify safely.
      *
-     * <p>Failed and in-progress files return to pending so the next run retries the first unfinished
-     * position. Completed runs intentionally restart from inventory to detect changed file content.</p>
+     * <p>Failed attempts restart the full marker-backed inventory; interruption-only attempts retain
+     * their terminal-success prefix. Completed runs intentionally restart from inventory to detect
+     * changed file content.</p>
      */
     public IngestionBacklogStatus resume() {
         if (lifecycle == Lifecycle.COMPLETE || lifecycle == Lifecycle.NOT_STARTED) {

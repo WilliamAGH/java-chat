@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Logger;
 import com.williamcallahan.javachat.domain.ingestion.GitHubRepoMetadata;
 import com.williamcallahan.javachat.domain.ingestion.GitHubRepositoryIdentity;
 import com.williamcallahan.javachat.domain.ingestion.SourceFileProcessingResult;
@@ -24,7 +25,9 @@ import com.williamcallahan.javachat.service.LocalStoreService;
 import com.williamcallahan.javachat.service.ProgressTracker;
 import com.williamcallahan.javachat.service.QdrantCollectionRouter;
 import com.williamcallahan.javachat.service.QdrantPayloadFieldSchema;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.io.IOException;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -38,6 +41,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 
 /**
@@ -46,6 +50,8 @@ import org.springframework.ai.document.Document;
 class SourceCodeFileIngestionProcessorTest {
     private static final String PRIOR_COLLECTION_NAME = "prior-collection";
     private static final String TARGET_COLLECTION_NAME = "target-collection";
+    private static final Logger SOURCE_INGESTION_LOGGER =
+            (Logger) LoggerFactory.getLogger(SourceCodeFileIngestionProcessor.class);
 
     @Test
     void missingMarkerWithExistingVectorsReplacesUrlDocuments(@TempDir Path temporaryDirectory) throws IOException {
@@ -98,6 +104,52 @@ class SourceCodeFileIngestionProcessorTest {
         verify(ingestionScenario.hybridVectorService(), never())
                 .replaceUrlDocuments(eq(TARGET_COLLECTION_NAME), eq(ingestionScenario.sourceUrl()), Mockito.anyList());
         verify(ingestionScenario.hybridVectorService(), never()).countPointsForUrl(anyString(), anyString());
+    }
+
+    @Test
+    void repositoryPathLogsEscapeLineBreaksWithoutChangingIdentity(@TempDir Path temporaryDirectory)
+            throws IOException {
+        SourceIngestionScenario ingestionScenario =
+                sourceIngestionScenario(temporaryDirectory, "Main\r\nINJECTED.java");
+        Document indexedDocument = new Document("point-1", "package demo; class Main {}", new HashMap<>());
+        indexedDocument.getMetadata().put(QdrantPayloadFieldSchema.HASH_FIELD, "newhash");
+        when(ingestionScenario
+                        .chunkProcessingService()
+                        .processAndStoreChunks(
+                                anyString(),
+                                eq(ingestionScenario.sourceUrl()),
+                                eq("Main\r\nINJECTED.java"),
+                                anyString()))
+                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(
+                        List.of(indexedDocument), List.of("newhash"), 1, 0));
+
+        SourceFileProcessingResult sourceFileProcessing;
+        try (ExpectedLogEvents ingestionLogs = ExpectedLogEvents.capture(SOURCE_INGESTION_LOGGER)) {
+            sourceFileProcessing = ingestionScenario
+                    .ingestionProcessor()
+                    .process(ingestionScenario.repositoryContext(Set.of()), ingestionScenario.sourceFilePath());
+
+            assertTrue(ingestionLogs.events().stream()
+                    .map(loggingEvent -> loggingEvent.getFormattedMessage())
+                    .allMatch(
+                            formattedMessage -> !formattedMessage.contains("\r") && !formattedMessage.contains("\n")));
+            assertTrue(ingestionLogs.events().stream()
+                    .map(loggingEvent -> loggingEvent.getFormattedMessage())
+                    .anyMatch(formattedMessage -> formattedMessage.contains("Main\\r\\nINJECTED.java")));
+        }
+
+        assertTrue(sourceFileProcessing.outcome().processed());
+        assertTrue(sourceFileProcessing.fileUrl().contains("Main%0D%0AINJECTED.java"));
+        ArgumentCaptor<List<Document>> storedDocumentsCaptor = ArgumentCaptor.captor();
+        verify(ingestionScenario.hybridVectorService())
+                .upsertToCollection(eq(TARGET_COLLECTION_NAME), storedDocumentsCaptor.capture());
+        assertEquals(
+                "src/Main\r\nINJECTED.java",
+                storedDocumentsCaptor
+                        .getValue()
+                        .getFirst()
+                        .getMetadata()
+                        .get(QdrantPayloadFieldSchema.FILE_PATH_FIELD));
     }
 
     @Test
@@ -627,6 +679,11 @@ class SourceCodeFileIngestionProcessorTest {
     }
 
     private static SourceIngestionScenario sourceIngestionScenario(Path temporaryDirectory) throws IOException {
+        return sourceIngestionScenario(temporaryDirectory, "Main.java");
+    }
+
+    private static SourceIngestionScenario sourceIngestionScenario(Path temporaryDirectory, String sourceFileName)
+            throws IOException {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
@@ -645,7 +702,7 @@ class SourceCodeFileIngestionProcessorTest {
                 progressTracker,
                 ingestedFilePruneService);
         Path repositoryRoot = temporaryDirectory.resolve("repository");
-        Path sourceFilePath = repositoryRoot.resolve("src/Main.java");
+        Path sourceFilePath = repositoryRoot.resolve("src").resolve(sourceFileName);
         Files.createDirectories(Objects.requireNonNull(sourceFilePath.getParent(), "sourceFilePath parent"));
         Files.writeString(sourceFilePath, "package demo; class Main {}", StandardCharsets.UTF_8);
         GitHubRepoMetadata repositoryMetadata = new GitHubRepoMetadata(
@@ -656,7 +713,9 @@ class SourceCodeFileIngestionProcessorTest {
                 "abcdef123456",
                 "MIT",
                 "Example repository");
-        String sourceUrl = "https://github.com/openai/java-chat/blob/main/src/Main.java";
+        String encodedSourceFileName =
+                URLEncoder.encode(sourceFileName, StandardCharsets.UTF_8).replace("+", "%20");
+        String sourceUrl = "https://github.com/openai/java-chat/blob/main/src/" + encodedSourceFileName;
         when(contentHasher.sha256(sourceFilePath)).thenReturn("new-fingerprint");
         when(fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.empty());
         when(progressTracker.formatPercent()).thenReturn("100%");

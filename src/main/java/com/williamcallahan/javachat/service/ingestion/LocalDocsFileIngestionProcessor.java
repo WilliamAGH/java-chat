@@ -104,7 +104,8 @@ public class LocalDocsFileIngestionProcessor {
      *
      * @param root root ingestion directory
      * @param files ordered files to process
-     * @return ordered outcomes through the first failure
+     * @return ordered outcomes through the first failed batch; every file already stored by a
+     *     combined upsert completes its marker transition before later work stops
      */
     public List<LocalDocsFileOutcome> processBatch(Path root, List<Path> files) {
         return processBatch(root, files, DocsSourceRegistry.resolveMirroredIngestionIdentities(root, files));
@@ -590,14 +591,15 @@ public class LocalDocsFileIngestionProcessor {
             return false;
         }
 
+        boolean batchCompletionFailed = false;
         for (DocumentProcessingRequest processingRequest : preparedFiles) {
             LocalDocsFileOutcome outcome = completeDocumentsAfterStorage(processingRequest);
             outcomes.add(outcome);
             if (outcome.failure().isPresent()) {
-                return false;
+                batchCompletionFailed = true;
             }
         }
-        return true;
+        return !batchCompletionFailed;
     }
 
     private LocalDocsFileOutcome processDocuments(DocumentProcessingRequest processingRequest) {

@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.document.Document;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -198,12 +199,9 @@ public class ChatController extends BaseController {
                                             chunkCount.incrementAndGet();
                                         });
 
-                                // Surface retrieval and citation-conversion notices before response
-                                // content.
-                                Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
-                                        .map(notice -> sseSupport.statusEvent(notice.summary(), notice.details()));
-                                statusEvents = statusEvents.concatWith(sseSupport.citationPartialFailureStatusFlux(
-                                        citationOutcome.failedConversionCount()));
+                                Flux<ServerSentEvent<String>> statusEvents =
+                                        sseSupport.citationPartialFailureStatusFlux(
+                                                citationOutcome.failedConversionCount());
 
                                 // Wrap chunks in JSON to preserve whitespace
                                 Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
@@ -283,20 +281,11 @@ public class ChatController extends BaseController {
      */
     @GetMapping("/diagnostics/retrieval")
     public RetrievalDiagnosticsResponse retrievalDiagnostics(@RequestParam("q") String query) {
-        RetrievalService.RetrievalOutcome retrievalOutcome =
-                chatService.retrieveTokenConstrainedOfficialDocumentation(query);
+        List<Document> retrievalDocuments = chatService.retrieveTokenConstrainedOfficialDocumentation(query);
         // Normalize URLs the same way as citations so we never emit file:// links
-        List<Citation> citations = retrievalService
-                .toCitationsForQuery(query, retrievalOutcome.documents())
-                .citations();
-        if (retrievalOutcome.notices().isEmpty()) {
-            return RetrievalDiagnosticsResponse.success(citations);
-        }
-        String noticeDetails = retrievalOutcome.notices().stream()
-                .map(notice -> notice.summary() + ": " + notice.details())
-                .reduce((first, second) -> first + "; " + second)
-                .orElse("Retrieval warnings present");
-        return new RetrievalDiagnosticsResponse(citations, noticeDetails);
+        List<Citation> citations =
+                retrievalService.toCitationsForQuery(query, retrievalDocuments).citations();
+        return RetrievalDiagnosticsResponse.success(citations);
     }
 
     /**

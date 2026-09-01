@@ -11,7 +11,7 @@ For environment variable reference, see [configuration.md](configuration.md).
 ```
 ChatController.stream()
   -> ChatService.buildStructuredPromptWithContextOutcome()
-      -> RetrievalService.retrieveOutcome()
+      -> RetrievalService.retrieve()
           |-- 1. QueryVersionExtractor   -- version detection + query boosting
           |-- 2. HybridSearchService     -- parallel dense+sparse search with RRF fusion
           |-- 3. dedupeByHashThenUrl()   -- UUID -> SHA-256 hash -> URL dedup
@@ -24,7 +24,7 @@ ChatController.stream()
 | Stage | File | Entry point |
 |---|---|---|
 | Version extraction | `util/QueryVersionExtractor.java` | `boostQueryWithVersionContext()` |
-| Hybrid search | `service/HybridSearchService.java` | `searchOutcome()` |
+| Hybrid search | `service/HybridSearchService.java` | `search()` |
 | Deduplication | `service/RetrievalService.java` | `dedupeByHashThenUrl()` |
 | LLM reranking | `service/RerankerService.java` | `rerank()` |
 | Prompt assembly | `application/prompt/PromptTruncator.java` | `truncate()` |

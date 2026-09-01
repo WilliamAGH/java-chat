@@ -378,17 +378,72 @@ describe("streamSse payload validation", () => {
     vi.restoreAllMocks();
   });
 
-  it("dispatches canonical chunk payloads", async () => {
+  it.each(['event: text\ndata: {"text":"Hello"}\n\n', 'event: text\ndata:{"text":"Hello"}\n\n'])(
+    "dispatches canonical chunk payloads",
+    async (sseWireText) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(createSseStreamResponse(sseWireText)));
+      const onText = vi.fn();
+
+      await streamSse("/api/test/stream", {}, { onText }, "sse.test.ts");
+
+      expect(onText).toHaveBeenCalledOnce();
+      expect(onText).toHaveBeenCalledWith("Hello");
+    },
+  );
+
+  it.each(['event: text\ndata: {"text":"Hello"}', 'event: text\ndata: {"text":"Hello"}\n'])(
+    "rejects an SSE event that ends before a blank line",
+    async (sseWireText) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(createSseStreamResponse(sseWireText)));
+      const onText = vi.fn();
+      const onError = vi.fn();
+
+      await expect(
+        streamSse("/api/test/stream", {}, { onText, onError }, "sse.test.ts"),
+      ).rejects.toThrow("Received an invalid SSE event from the server");
+
+      expect(onText).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledOnce();
+      expect(onError).toHaveBeenCalledWith({
+        message: "Received an invalid SSE event from the server",
+      });
+    },
+  );
+
+  it("accepts a terminal DONE line without dispatching content", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(createSseStreamResponse("data:[DONE]")));
+    const onText = vi.fn();
+    const onError = vi.fn();
+
+    await streamSse("/api/test/stream", {}, { onText, onError }, "sse.test.ts");
+
+    expect(onText).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("preserves CRLF, multiline data, and split UTF-8 decoding", async () => {
+    const encoder = new TextEncoder();
+    const sseBytes = encoder.encode('event: text\r\ndata: {"text":\r\ndata: "héllo"}\r\n\r\n');
+    const multibyteStart = sseBytes.indexOf(0xc3);
+    const sseStreamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(sseBytes.slice(0, multibyteStart + 1));
+        controller.enqueue(sseBytes.slice(multibyteStart + 1));
+        controller.close();
+      },
+    });
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(createSseStreamResponse('event: text\ndata: {"text":"Hello"}\n\n')),
+      vi
+        .fn()
+        .mockResolvedValue(new Response(sseStreamBody, { status: SSE_STREAM_RESPONSE_STATUS })),
     );
     const onText = vi.fn();
 
     await streamSse("/api/test/stream", {}, { onText }, "sse.test.ts");
 
     expect(onText).toHaveBeenCalledOnce();
-    expect(onText).toHaveBeenCalledWith("Hello");
+    expect(onText).toHaveBeenCalledWith("héllo");
   });
 
   it("preserves a valid structured status event", async () => {

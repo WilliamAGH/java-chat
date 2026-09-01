@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.cli;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
@@ -13,6 +14,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Logger;
 import com.williamcallahan.javachat.domain.ingestion.GitHubRepoMetadata;
 import com.williamcallahan.javachat.domain.ingestion.GitHubRepositoryIdentity;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
@@ -23,6 +25,7 @@ import com.williamcallahan.javachat.service.ingestion.GitHubRepositoryIdentityRe
 import com.williamcallahan.javachat.service.ingestion.IngestedFilePruneService;
 import com.williamcallahan.javachat.service.ingestion.LocalDocsFileOutcome;
 import com.williamcallahan.javachat.service.ingestion.SourceCodeFileIngestionProcessor;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import io.qdrant.client.grpc.Common.Filter;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -31,6 +34,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 
 /** Verifies that direct GitHub CLI execution cannot cross embedding-generation boundaries. */
 class GitHubRepoProcessorIsolationTest {
@@ -39,6 +43,8 @@ class GitHubRepoProcessorIsolationTest {
     private static final String REPOSITORY_BRANCH = "main";
     private static final String REPOSITORY_COMMIT = "0123456789abcdef0123456789abcdef01234567";
     private static final int ELIGIBLE_FILE_COUNT = 50;
+    private static final Logger GITHUB_REPO_PROCESSOR_LOGGER =
+            (Logger) LoggerFactory.getLogger(GitHubRepoProcessor.class);
 
     @Test
     void acceptsSharedGenerationCollection() {
@@ -112,10 +118,14 @@ class GitHubRepoProcessorIsolationTest {
     }
 
     @Test
-    void fileFailurePreventsOrphanPruningAndMetadataRefresh(@TempDir Path repositoryRoot) throws IOException {
+    void fileFailurePreventsOrphanPruningAndMetadataRefresh(@TempDir Path temporaryDirectory) throws IOException {
+        Path repositoryRoot = temporaryDirectory.resolve("repository\r\nINJECTED");
+        Files.createDirectories(repositoryRoot);
         Path sourceFilePath = repositoryRoot.resolve("Source.java");
         Files.writeString(sourceFilePath, "class Source {}");
         ProcessorFixture processorFixture = processorFixture();
+        IngestionLocalFailure hostileFailure =
+                new IngestionLocalFailure(sourceFilePath.toString(), "chunking", "malformed source");
         when(processorFixture.hybridVectorService().scrollAllUrlsInCollection(COLLECTION_NAME))
                 .thenReturn(Set.of("https://github.com/openai/java-chat/blob/main/Deleted.java"));
         when(processorFixture
@@ -124,13 +134,22 @@ class GitHubRepoProcessorIsolationTest {
                                 any(SourceCodeFileIngestionProcessor.RepositoryIngestionContext.class),
                                 any(Path.class)))
                 .thenReturn(new SourceFileProcessingResult(
-                        LocalDocsFileOutcome.failedFile(
-                                new IngestionLocalFailure(sourceFilePath.toString(), "chunking", "malformed source")),
-                        ACTIVE_SOURCE_URL));
+                        LocalDocsFileOutcome.failedFile(hostileFailure), ACTIVE_SOURCE_URL));
 
-        assertThrows(
-                GitHubRepoProcessor.GitHubRepoProcessingException.class,
-                () -> processorFixture.processor().processRepository(repositoryMetadata(repositoryRoot)));
+        try (ExpectedLogEvents repositoryLogs = ExpectedLogEvents.capture(GITHUB_REPO_PROCESSOR_LOGGER)) {
+            assertThrows(
+                    GitHubRepoProcessor.GitHubRepoProcessingException.class,
+                    () -> processorFixture.processor().processRepository(repositoryMetadata(repositoryRoot)));
+
+            assertTrue(repositoryLogs.events().stream()
+                    .map(loggingEvent -> loggingEvent.getFormattedMessage())
+                    .allMatch(
+                            formattedMessage -> !formattedMessage.contains("\r") && !formattedMessage.contains("\n")));
+            assertTrue(repositoryLogs.events().stream()
+                    .map(loggingEvent -> loggingEvent.getFormattedMessage())
+                    .anyMatch(formattedMessage -> formattedMessage.contains("repository\\r\\nINJECTED")));
+        }
+        assertTrue(hostileFailure.filePath().contains("\r\n"));
 
         verify(processorFixture.hybridVectorService()).scrollAllUrlsInCollection(COLLECTION_NAME);
         verifyNoMoreInteractions(processorFixture.hybridVectorService());

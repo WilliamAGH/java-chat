@@ -327,10 +327,6 @@ final class InlineListParser {
 
         private static String normalizeEntryLabel(String raw) {
             String label = raw == null ? "" : raw.trim();
-            int colonIndex = label.indexOf(':');
-            if (colonIndex > 0) {
-                label = label.substring(0, colonIndex).trim();
-            }
             while (!label.isEmpty()) {
                 char last = label.charAt(label.length() - 1);
                 if (last == '.' || last == '!' || last == '?') {

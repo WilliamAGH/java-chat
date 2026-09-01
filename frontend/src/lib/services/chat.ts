@@ -32,20 +32,14 @@ export interface ChatMessage {
   errorRetryable?: boolean;
 }
 
-const INVISIBLE_CHAT_FORMAT_CHARACTERS = new Set([
-  "\u200B",
-  "\u200C",
-  "\u200D",
-  "\uFEFF",
-  "\u2060",
-]);
+const UNICODE_FORMAT_CHARACTER_PATTERN = /\p{Cf}/u;
 
 /** Reports whether streamed message text contains a user-visible character. */
 export function hasVisibleChatMessageText(messageText: string): boolean {
   for (const messageCharacter of messageText) {
     if (
       messageCharacter.trim().length > 0 &&
-      !INVISIBLE_CHAT_FORMAT_CHARACTERS.has(messageCharacter)
+      !UNICODE_FORMAT_CHARACTER_PATTERN.test(messageCharacter)
     ) {
       return true;
     }

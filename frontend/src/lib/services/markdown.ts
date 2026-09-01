@@ -9,8 +9,7 @@ interface EnrichmentPresentation {
 }
 
 const NEWLINE = "\n";
-const ZERO_WIDTH_SPACE_CODE_POINT = 0x200b;
-const WORD_JOINER_CODE_POINT = 0x2060;
+const UNICODE_FORMAT_CHARACTER_PATTERN = /\p{Cf}/u;
 
 /** Matches absolute web URLs; relative and fragment links stay in the current tab. */
 const EXTERNAL_LINK_PATTERN = /^https?:\/\//i;
@@ -477,20 +476,59 @@ function readEnrichmentOpening(src: string, index: number): EnrichmentOpening | 
 }
 
 function findEnrichmentStart(src: string): number {
-  let openingIndex = -1;
-  for (const kind of ENRICHMENT_PRESENTATIONS_BY_TOKEN.keys()) {
-    const candidateIndex = src.indexOf(`{{${kind}:`);
-    if (candidateIndex >= 0 && (openingIndex < 0 || candidateIndex < openingIndex)) {
-      openingIndex = candidateIndex;
+  const codeRegionState = new MarkdownCodeRegionState();
+  for (let cursor = 0; cursor < src.length; ) {
+    const startOfLine = cursor === 0 || src[cursor - 1] === NEWLINE;
+    if (startOfLine && !codeRegionState.isInsideInlineCode()) {
+      if (!codeRegionState.isInsideFence() && isIndentedCodeLine(src, cursor)) {
+        const lineEnd = src.indexOf(NEWLINE, cursor);
+        cursor = lineEnd < 0 ? src.length : lineEnd + 1;
+        continue;
+      }
+
+      const fenceCandidate = scanFenceAfterCommonMarkIndentation(src, cursor);
+      if (fenceCandidate) {
+        const { marker, markerIndex } = fenceCandidate;
+        if (!codeRegionState.isInsideFence()) {
+          codeRegionState.enterFence(marker, false);
+        } else if (codeRegionState.wouldCloseFence(src, markerIndex, marker)) {
+          codeRegionState.exitFence();
+        }
+        cursor = markerIndex + marker.length;
+        continue;
+      }
     }
+
+    if (!codeRegionState.isInsideFence()) {
+      const backtickRun = scanBacktickRun(src, cursor);
+      if (backtickRun) {
+        codeRegionState.processBacktickRun(src, cursor, backtickRun);
+        cursor += backtickRun.length;
+        continue;
+      }
+    }
+
+    if (
+      !codeRegionState.isInsideFence() &&
+      !codeRegionState.isInsideInlineCode() &&
+      src[cursor] === "{" &&
+      src[cursor + 1] === "{"
+    ) {
+      const opening = readEnrichmentOpening(src, cursor);
+      if (opening) {
+        let precedingIndex = cursor - 1;
+        while (precedingIndex >= 0 && " \t\r\n".includes(src[precedingIndex])) {
+          precedingIndex--;
+        }
+        return src[precedingIndex] === "}" && src[precedingIndex - 1] !== "}"
+          ? precedingIndex
+          : cursor;
+      }
+    }
+
+    cursor++;
   }
-  let precedingIndex = openingIndex - 1;
-  while (precedingIndex >= 0 && " \t\r\n".includes(src[precedingIndex])) {
-    precedingIndex--;
-  }
-  return src[precedingIndex] === "}" && src[precedingIndex - 1] !== "}"
-    ? precedingIndex
-    : openingIndex;
+  return -1;
 }
 
 /**
@@ -569,11 +607,8 @@ function findEnrichmentClose(src: string, startIndex: number, isStreaming: boole
 
 function isBlankEnrichmentText(enrichmentMarkdown: string): boolean {
   for (const character of enrichmentMarkdown) {
-    const codePoint = character.codePointAt(0);
     const isBlankCharacter =
-      character.trim().length === 0 ||
-      codePoint === ZERO_WIDTH_SPACE_CODE_POINT ||
-      codePoint === WORD_JOINER_CODE_POINT;
+      character.trim().length === 0 || UNICODE_FORMAT_CHARACTER_PATTERN.test(character);
 
     if (!isBlankCharacter) return false;
   }
@@ -589,13 +624,16 @@ function createEnrichmentExtension(
   isStreaming: boolean,
   markdownParser: Marked,
 ): TokenizerExtension & RendererExtension {
+  let fullBlockSource = "";
   return {
     name: "enrichment",
     level: "block",
-    start(src: string) {
-      return findEnrichmentStart(src);
+    start() {
+      const openingIndex = findEnrichmentStart(fullBlockSource);
+      return openingIndex > 0 ? openingIndex - 1 : -1;
     },
     tokenizer(src: string): EnrichmentToken | undefined {
+      fullBlockSource = src;
       if (src[0] === "}") {
         return { type: "enrichment", raw: "}", kind: "", content: "", resolved: false };
       }

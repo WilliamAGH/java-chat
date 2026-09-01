@@ -357,6 +357,42 @@ async function consumeSseStream(
     processEvent(sseEventType, rawSseEventText, callbacks, source);
   };
 
+  const processSseLine = (decodedSseLine: string) => {
+    const receivedLine = decodedSseLine.endsWith("\r")
+      ? decodedSseLine.slice(0, -1)
+      : decodedSseLine;
+
+    if (receivedLine.startsWith(":")) {
+      return;
+    }
+
+    if (receivedLine.startsWith("event:")) {
+      currentSseEventType = receivedLine.startsWith("event: ")
+        ? receivedLine.slice(7)
+        : receivedLine.slice(6);
+      return;
+    }
+
+    if (receivedLine.startsWith("data:")) {
+      const sseEventText = receivedLine.startsWith("data: ")
+        ? receivedLine.slice(6)
+        : receivedLine.slice(5);
+      if (sseEventText === "[DONE]") {
+        return;
+      }
+      if (hasBufferedSseEvent) {
+        sseEventBuffer += "\n";
+      }
+      sseEventBuffer += sseEventText;
+      hasBufferedSseEvent = true;
+      return;
+    }
+
+    if (receivedLine.trim() === "") {
+      flushSseEvent();
+    }
+  };
+
   try {
     while (true) {
       const { done: streamEnded, value: byteSegment } = await sseReader
@@ -375,15 +411,13 @@ async function consumeSseStream(
         if (remainingDecodedText) {
           unprocessedText += remainingDecodedText;
         }
-        // Commit any remaining buffered line before flushing event data
         if (unprocessedText.length > 0) {
-          sseEventBuffer = sseEventBuffer
-            ? `${sseEventBuffer}\n${unprocessedText}`
-            : unprocessedText;
-          hasBufferedSseEvent = true;
+          processSseLine(unprocessedText);
           unprocessedText = "";
         }
-        flushSseEvent();
+        if (hasBufferedSseEvent) {
+          throwInvalidSseEvent(callbacks);
+        }
         break;
       }
 
@@ -393,46 +427,7 @@ async function consumeSseStream(
       unprocessedText = receivedLines[receivedLines.length - 1];
 
       for (let lineIndex = 0; lineIndex < receivedLines.length - 1; lineIndex++) {
-        let receivedLine = receivedLines[lineIndex];
-        if (receivedLine.endsWith("\r")) {
-          receivedLine = receivedLine.slice(0, -1);
-        }
-
-        // Skip SSE comments (keepalive heartbeats)
-        if (receivedLine.startsWith(":")) {
-          continue;
-        }
-
-        // Track event type
-        if (receivedLine.startsWith("event:")) {
-          currentSseEventType = receivedLine.startsWith("event: ")
-            ? receivedLine.slice(7)
-            : receivedLine.slice(6);
-          continue;
-        }
-
-        // Accumulate data within current SSE event
-        if (receivedLine.startsWith("data:")) {
-          // Per SSE spec, strip optional space after "data:" prefix
-          const sseEventText = receivedLine.startsWith("data: ")
-            ? receivedLine.slice(6)
-            : receivedLine.slice(5);
-
-          // Skip [DONE] token
-          if (sseEventText === "[DONE]") {
-            continue;
-          }
-
-          // Accumulate within current SSE event
-          if (hasBufferedSseEvent) {
-            sseEventBuffer += "\n";
-          }
-          sseEventBuffer += sseEventText;
-          hasBufferedSseEvent = true;
-        } else if (receivedLine.trim() === "") {
-          // Blank line marks end of SSE event - commit accumulated data
-          flushSseEvent();
-        }
+        processSseLine(receivedLines[lineIndex]);
       }
     }
   } catch (streamError) {
