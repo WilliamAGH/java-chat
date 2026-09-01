@@ -87,7 +87,7 @@ if grep -Fq 'date -Ins' "$queued_launcher" \
     fail_queued_platform_test "queued job does not use portable UTC timestamps"
 fi
 
-grep -Fxq 'readonly QUEUED_DOCUMENTATION_SOURCES="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,scala,groovy,clojure,spring-boot,quarkus,java/java21-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle-java25-release-notes,ibm-java25-overview,jetbrains-java25-article"' "$queued_launcher" \
+grep -Fxq 'readonly QUEUED_DOCUMENTATION_SOURCES="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,kotlin-api,scala,groovy,clojure,spring-boot,quarkus,java/java21-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle-java25-release-notes,ibm-java25-overview,jetbrains-java25-article"' "$queued_launcher" \
     || fail_queued_platform_test "remaining documentation fetch inventory or order changed"
 if grep -Fq 'QUEUED_DOCUMENTATION_SETS' "$queued_launcher"; then
     fail_queued_platform_test "documentation queue duplicates the canonical ingestion registry"
