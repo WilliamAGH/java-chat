@@ -2,9 +2,10 @@
 
 [![JavaChat application](src/main/resources/static/images/java-chat-app.png)](https://javachat.ai)
 
-JavaChat answers software-development questions from retrieved documentation and source code. It
-streams each answer as it is generated and shows the sources used, so you can verify the result
-instead of accepting an uncited response.
+JavaChat answers software-development questions from retrieved documentation and source code when
+supporting sources are available. It streams each answer as it is generated and shows the sources
+used. When retrieval cannot support a claim, JavaChat labels it source-unavailable rather than
+presenting it as grounded.
 
 Use JavaChat in whichever form fits your workflow:
 

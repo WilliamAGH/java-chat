@@ -27,8 +27,9 @@ javachat auth status
 javachat ask "How do Java records work?"
 ```
 
-Answers stream to standard output. When retrieval succeeds, the answer ends with a `Sources:`
-section containing the cited documentation or source-repository URLs.
+Answers stream to standard output. When retrieval supplies supporting sources, the answer ends with
+a `Sources:` section containing the cited documentation or source-repository URLs. Claims without
+retrieved support are labeled source-unavailable rather than presented as grounded.
 
 ## Commands
 
@@ -62,8 +63,9 @@ javachat --new --verbose ask \
 ```
 
 `--new` starts a new conversation. `--verbose` writes retrieval progress to standard error while
-the answer continues on standard output. Without `--new`, later questions resume the most recent
-conversation for that host.
+the answer continues on standard output. Without `--new`, later questions made with a stored
+interactive credential resume the most recent conversation for that host. Headless requests using
+`JAVACHAT_API_KEY` always start a new session.
 
 ## Authentication and deployments
 
@@ -114,9 +116,10 @@ npm test
 ```
 
 Everything after `npm run dev --` is passed to the CLI. To test against a locally running JavaChat
-server:
+server, authenticate that host first:
 
 ```bash
+npm run dev -- --host http://localhost:8085 auth login
 npm run dev -- --host http://localhost:8085 ask "How do Java records work?"
 ```
 
