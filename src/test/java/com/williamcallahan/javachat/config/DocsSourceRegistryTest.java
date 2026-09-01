@@ -14,6 +14,8 @@ import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Verifies JVM citation and provenance source behavior.
@@ -38,10 +40,26 @@ class DocsSourceRegistryTest {
     @Test
     void resolvesEnvironmentOrDefaultWhenSystemPropertyIsAbsent() {
         String environmentBaseUrl = System.getenv(ORACLE_JAVASE_BASE_SETTING);
-        String expectedBaseUrl = environmentBaseUrl == null ? DEFAULT_TEST_BASE_URL : environmentBaseUrl;
+        String expectedBaseUrl =
+                environmentBaseUrl == null || environmentBaseUrl.isBlank() ? DEFAULT_TEST_BASE_URL : environmentBaseUrl;
 
         withoutSystemProperty(
                 ORACLE_JAVASE_BASE_SETTING,
+                () -> assertEquals(
+                        expectedBaseUrl,
+                        DocsSourceRegistry.resolveRuntimeBaseUrl(ORACLE_JAVASE_BASE_SETTING, DEFAULT_TEST_BASE_URL)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "   "})
+    void ignoresBlankSystemPropertyForRuntimeBaseUrl(String blankSystemProperty) {
+        String environmentBaseUrl = System.getenv(ORACLE_JAVASE_BASE_SETTING);
+        String expectedBaseUrl =
+                environmentBaseUrl == null || environmentBaseUrl.isBlank() ? DEFAULT_TEST_BASE_URL : environmentBaseUrl;
+
+        withSystemProperty(
+                ORACLE_JAVASE_BASE_SETTING,
+                blankSystemProperty,
                 () -> assertEquals(
                         expectedBaseUrl,
                         DocsSourceRegistry.resolveRuntimeBaseUrl(ORACLE_JAVASE_BASE_SETTING, DEFAULT_TEST_BASE_URL)));

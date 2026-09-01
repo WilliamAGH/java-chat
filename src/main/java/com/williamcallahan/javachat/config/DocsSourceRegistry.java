@@ -914,11 +914,11 @@ public final class DocsSourceRegistry {
     /** Resolves a citation base by preferring a JVM property, then process environment, then built-in default. */
     static String resolveRuntimeBaseUrl(String settingKey, String defaultBaseUrl) {
         String systemPropertyBaseUrl = System.getProperty(settingKey);
-        if (systemPropertyBaseUrl != null) {
+        if (systemPropertyBaseUrl != null && !systemPropertyBaseUrl.isBlank()) {
             return systemPropertyBaseUrl;
         }
         String environmentBaseUrl = System.getenv(settingKey);
-        return environmentBaseUrl != null ? environmentBaseUrl : defaultBaseUrl;
+        return environmentBaseUrl != null && !environmentBaseUrl.isBlank() ? environmentBaseUrl : defaultBaseUrl;
     }
 
     private static Map<String, CitationRoute> buildLocalPrefixLookup() {
