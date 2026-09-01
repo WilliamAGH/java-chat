@@ -32,7 +32,7 @@ class ChatControllerRetrievalDiagnosticsTest {
         RetrievalService retrievalService = mock(RetrievalService.class);
         Document officialPromptDocument = mock(Document.class);
         when(chatService.retrieveTokenConstrainedOfficialDocumentation(EXACT_OVERLOAD_QUERY))
-                .thenReturn(new RetrievalService.RetrievalOutcome(List.of(officialPromptDocument), List.of()));
+                .thenReturn(List.of(officialPromptDocument));
         Citation exactOverloadCitation =
                 new Citation(JAVA_21_LIST_URL, "List (Java SE 21 & JDK 21)", EXACT_OVERLOAD_ANCHOR, "Exact overload");
         when(retrievalService.toCitationsForQuery(EXACT_OVERLOAD_QUERY, List.of(officialPromptDocument)))

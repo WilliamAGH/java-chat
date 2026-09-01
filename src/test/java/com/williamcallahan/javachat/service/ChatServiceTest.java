@@ -49,8 +49,8 @@ class ChatServiceTest {
         assertEquals(List.of(expectedCitation), citations);
         verify(retrievalService, never()).retrieve(anyString());
         verify(retrievalService, never()).retrieve(anyString(), any(RetrievalConstraint.class));
-        verify(retrievalService, never()).retrieveOutcome(anyString());
-        verify(retrievalService, never()).retrieveOutcome(anyString(), any(RetrievalConstraint.class));
+        verify(retrievalService, never()).retrieve(anyString());
+        verify(retrievalService, never()).retrieve(anyString(), any(RetrievalConstraint.class));
     }
 
     @Test
@@ -77,14 +77,14 @@ class ChatServiceTest {
         SystemPromptConfig systemPromptConfig = mock(SystemPromptConfig.class);
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         when(systemPromptConfig.getCoreSystemPrompt()).thenReturn("You are a Java tutor.");
-        when(retrievalService.retrieveWithLimitOutcome(
+        when(retrievalService.retrieveWithLimit(
                         eq(VERSIONED_CONTEXT_QUERY),
                         eq(ModelConfiguration.RAG_LIMIT_CONSTRAINED),
                         eq(ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED),
                         any(RetrievalConstraint.class),
                         any(),
                         anyLong()))
-                .thenReturn(new RetrievalService.RetrievalOutcome(List.of(), List.of()));
+                .thenReturn(List.of());
         ChatService chatService =
                 new ChatService(streamingService, retrievalService, systemPromptConfig, new AppProperties());
 
@@ -92,7 +92,7 @@ class ChatServiceTest {
 
         ArgumentCaptor<RetrievalConstraint> constraintCaptor = ArgumentCaptor.forClass(RetrievalConstraint.class);
         verify(retrievalService)
-                .retrieveWithLimitOutcome(
+                .retrieveWithLimit(
                         eq(VERSIONED_CONTEXT_QUERY),
                         eq(ModelConfiguration.RAG_LIMIT_CONSTRAINED),
                         eq(ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED),
@@ -118,14 +118,14 @@ class ChatServiceTest {
                         "https://docs.spring.io/spring-framework/reference/data-access.html")
                 .metadata(QdrantPayloadFieldSchema.SOURCE_NAME_FIELD, "Spring Framework Reference")
                 .build();
-        when(retrievalService.retrieveWithLimitOutcome(
+        when(retrievalService.retrieveWithLimit(
                         eq("Spring 7.0.7 transaction behavior"),
                         eq(ModelConfiguration.RAG_LIMIT_CONSTRAINED),
                         eq(ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED),
                         any(RetrievalConstraint.class),
                         any(),
                         anyLong()))
-                .thenReturn(new RetrievalService.RetrievalOutcome(List.of(springReference), List.of()));
+                .thenReturn(List.of(springReference));
         ChatService chatService = new ChatService(
                 mock(OpenAIStreamingService.class), retrievalService, systemPromptConfig, new AppProperties());
 
@@ -152,14 +152,14 @@ class ChatServiceTest {
                 .metadata(QdrantPayloadFieldSchema.DOC_SET_FIELD, "hikaricp/7.0.2/api")
                 .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "7.0.2")
                 .build();
-        when(retrievalService.retrieveWithLimitOutcome(
+        when(retrievalService.retrieveWithLimit(
                         eq("HikariCP 7.0.5 connection timeout"),
                         eq(ModelConfiguration.RAG_LIMIT_CONSTRAINED),
                         eq(ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED),
                         any(RetrievalConstraint.class),
                         any(),
                         anyLong()))
-                .thenReturn(new RetrievalService.RetrievalOutcome(List.of(hikaricpDocumentation), List.of()));
+                .thenReturn(List.of(hikaricpDocumentation));
         ChatService chatService = new ChatService(
                 mock(OpenAIStreamingService.class), retrievalService, systemPromptConfig, new AppProperties());
 
