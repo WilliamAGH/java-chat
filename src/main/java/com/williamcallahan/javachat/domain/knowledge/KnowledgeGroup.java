@@ -35,6 +35,16 @@ public record KnowledgeGroup(
         }
     }
 
+    @Override
+    public List<String> canonicalUrls() {
+        return List.copyOf(canonicalUrls);
+    }
+
+    @Override
+    public List<String> ingestedVersions() {
+        return List.copyOf(ingestedVersions);
+    }
+
     private static List<String> copyText(List<String> text, String fieldName) {
         Objects.requireNonNull(text, fieldName);
         return text.stream()
