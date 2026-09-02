@@ -192,11 +192,13 @@ public class ChatController extends BaseController {
 
                                 // Stream with structure-aware truncation - preserves semantic
                                 // boundaries
-                                Flux<String> dataStream =
-                                        sseSupport.prepareDataStream(streamingResult.textChunks(), chunk -> {
-                                            fullResponse.append(chunk);
-                                            chunkCount.incrementAndGet();
-                                        });
+                                Flux<String> answerChunks = sseSupport.appendSourceAvailabilityNote(
+                                        streamingResult.textChunks(),
+                                        !streamingResult.contextDocumentIds().isEmpty());
+                                Flux<String> dataStream = sseSupport.prepareDataStream(answerChunks, chunk -> {
+                                    fullResponse.append(chunk);
+                                    chunkCount.incrementAndGet();
+                                });
 
                                 // Surface retrieval and citation-conversion notices before response
                                 // content.

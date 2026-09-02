@@ -81,10 +81,9 @@ class SystemPromptConfigTest {
                 () -> assertTrue(corePrompt.contains("Never substitute another dependency or related project")),
                 () -> assertTrue(corePrompt.contains("missing evidence changes provenance, not answer availability")),
                 () -> assertTrue(corePrompt.contains("Never refuse an in-scope question")),
-                () -> assertTrue(corePrompt.contains(
-                        "Matching source documents for <requested source or version> were not available to JavaChat")),
                 () -> assertTrue(
                         corePrompt.contains("answer the question as well as possible using general knowledge")),
+                () -> assertTrue(corePrompt.contains("Do not write a source-availability label")),
                 () -> assertTrue(corePrompt.contains("Never imply that the Sources list verifies")),
                 () -> assertFalse(corePrompt.contains("Source unavailable:")));
     }

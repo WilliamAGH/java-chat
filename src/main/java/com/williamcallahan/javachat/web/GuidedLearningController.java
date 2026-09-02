@@ -351,8 +351,11 @@ public class GuidedLearningController extends BaseController {
                                 ServerSentEvent<String> providerEvent =
                                         sseSupport.providerEvent(streamingResult.providerDisplayName());
 
-                                Flux<String> dataStream = sseSupport.prepareDataStream(
-                                        streamingResult.textChunks(), fullResponse::append);
+                                Flux<String> answerChunks = sseSupport.appendSourceAvailabilityNote(
+                                        streamingResult.textChunks(),
+                                        !streamingResult.contextDocumentIds().isEmpty());
+                                Flux<String> dataStream =
+                                        sseSupport.prepareDataStream(answerChunks, fullResponse::append);
 
                                 Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
                                 Flux<ServerSentEvent<String>> citationEvent =
