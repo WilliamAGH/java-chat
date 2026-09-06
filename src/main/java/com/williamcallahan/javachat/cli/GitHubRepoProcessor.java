@@ -190,7 +190,7 @@ public class GitHubRepoProcessor {
                 activeFileUrls.add(fileProcessingOutcome.fileUrl());
                 switch (fileProcessingOutcome.outcome()) {
                     case LocalDocsFileOutcome.Processed _ -> processedCount++;
-                    case LocalDocsFileOutcome.Skipped _ -> skippedCount++;
+                    case LocalDocsFileOutcome.Skipped _, LocalDocsFileOutcome.Excluded _ -> skippedCount++;
                     case LocalDocsFileOutcome.Failed failed -> {
                         failedCount++;
                         failed.failure()

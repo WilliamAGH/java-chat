@@ -945,6 +945,7 @@ class LocalDocsFileIngestionProcessorTest {
 
         assertFalse(firstOutcome.processed());
         assertTrue(firstOutcome.failure().isEmpty());
+        assertTrue(firstOutcome instanceof LocalDocsFileOutcome.Excluded);
         verify(ingestionFixture.hybridVectorService)
                 .deleteByUrl(any(QdrantCollectionKind.class), eq(expectedClassUseUrl));
         verify(ingestionFixture.ingestedFilePruneService)
@@ -971,6 +972,7 @@ class LocalDocsFileIngestionProcessorTest {
 
         assertFalse(repeatedOutcome.processed());
         assertTrue(repeatedOutcome.failure().isEmpty());
+        assertTrue(repeatedOutcome instanceof LocalDocsFileOutcome.Excluded);
         verify(ingestionFixture.ingestedFilePruneService, times(1))
                 .pruneObsoleteLocalStateAfterReplacement(expectedClassUseUrl, staleIngestionRecord, List.of());
         verify(ingestionFixture.fileIngestionMarkerStore, times(1)).markFileIngested(eq(expectedClassUseUrl), any());
@@ -1003,6 +1005,7 @@ class LocalDocsFileIngestionProcessorTest {
 
         assertFalse(outcome.processed());
         assertTrue(outcome.failure().isEmpty());
+        assertTrue(outcome instanceof LocalDocsFileOutcome.Excluded);
         ArgumentCaptor<FileIngestionRecord> markerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
         verify(ingestionFixture.fileIngestionMarkerStore).markFileIngested(eq(expectedUrl), markerCaptor.capture());
         assertTrue(markerCaptor.getValue().chunkHashes().isEmpty());
@@ -1055,6 +1058,7 @@ class LocalDocsFileIngestionProcessorTest {
         assertEquals(2, outcomes.size());
         assertFalse(outcomes.getFirst().processed());
         assertTrue(outcomes.getFirst().failure().isEmpty());
+        assertTrue(outcomes.getFirst() instanceof LocalDocsFileOutcome.Excluded);
         assertTrue(outcomes.getLast().processed());
         assertTrue(outcomes.getLast().failure().isEmpty());
         ArgumentCaptor<FileIngestionRecord> markerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
