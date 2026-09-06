@@ -92,9 +92,9 @@ class PromptTruncatorTest {
         assertEquals(0, result.contextDocumentCount());
         assertEquals(1, result.conversationTurnCount());
         // Verify it's the most recent turn
-        String rendered = result.render();
-        assertTrue(rendered.contains("recent"));
-        assertFalse(rendered.contains("old1"));
+        List<ConversationTurnSegment> retainedHistory = result.prompt().conversationHistory();
+        assertEquals(1, retainedHistory.size());
+        assertEquals("recent", retainedHistory.getFirst().messageText());
     }
 
     @Test
@@ -219,16 +219,9 @@ class PromptTruncatorTest {
         assertTrue(truncationOutcome.wasTruncated());
         assertEquals(0, truncationOutcome.contextDocumentCount());
         assertEquals(0, truncationOutcome.conversationTurnCount());
-
-        // The legacy rendering stays complete while the Responses API input is separated.
-        String rendered = truncationOutcome.render();
         assertEquals(
                 "Critical system instructions",
                 truncationOutcome.prompt().system().content());
-        assertTrue(rendered.contains("Critical system instructions"));
-        assertTrue(rendered.contains("Important question"));
-        assertFalse(truncationOutcome.renderInput().contains("Critical system instructions"));
-        assertTrue(truncationOutcome.renderInput().contains("Important question"));
     }
 
     @Test
@@ -260,22 +253,6 @@ class PromptTruncatorTest {
     }
 
     @Test
-    void prependsTruncationNotice() {
-        StructuredPrompt prompt = new StructuredPrompt(
-                new SystemSegment("System", 100),
-                List.of(
-                        new ContextDocumentSegment(1, "document-1", "url1", "doc1", 500),
-                        new ContextDocumentSegment(2, "document-2", "url2", "doc2", 500)),
-                List.of(),
-                new CurrentQuerySegment("query", 50));
-
-        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 400);
-
-        assertTrue(result.wasTruncated());
-        assertTrue(result.render().startsWith("[Context truncated due to model input limit]"));
-    }
-
-    @Test
     void reindexesContextDocumentsAfterTruncation() {
         // Documents ordered by relevance (most relevant first, as from reranker)
         StructuredPrompt prompt = new StructuredPrompt(
@@ -292,15 +269,13 @@ class PromptTruncatorTest {
 
         assertTrue(result.wasTruncated());
         assertEquals(2, result.contextDocumentCount());
-
-        String rendered = result.render();
         // Should have [CTX 1] and [CTX 2], not [CTX 3]
-        assertTrue(rendered.contains("[CTX 1]"));
-        assertTrue(rendered.contains("[CTX 2]"));
-        assertFalse(rendered.contains("[CTX 3]"));
+        List<ContextDocumentSegment> retainedDocuments = result.prompt().contextDocuments();
+        assertEquals(1, retainedDocuments.get(0).index());
+        assertEquals(2, retainedDocuments.get(1).index());
         // Should contain content from original docs 1 and 2 (most relevant)
-        assertTrue(rendered.contains("url1") && rendered.contains("url2"));
-        assertFalse(rendered.contains("url3"));
+        assertEquals("url1", retainedDocuments.get(0).sourceUrl());
+        assertEquals("url2", retainedDocuments.get(1).sourceUrl());
     }
 
     @Test
@@ -334,29 +309,6 @@ class PromptTruncatorTest {
         assertFalse(result.wasTruncated());
         assertEquals(0, result.contextDocumentCount());
         assertEquals(0, result.conversationTurnCount());
-
-        String rendered = result.render();
         assertEquals("System", result.prompt().system().content());
-        assertTrue(rendered.contains("System"));
-        assertTrue(rendered.contains("query"));
-        assertEquals("query", result.renderInput());
-    }
-
-    @Test
-    void preservesAssistantPrefixInRenderedOutput() {
-        StructuredPrompt prompt = new StructuredPrompt(
-                new SystemSegment("System", 50),
-                List.of(),
-                List.of(
-                        new ConversationTurnSegment("user", "question", 20),
-                        new ConversationTurnSegment("assistant", "answer", 20)),
-                new CurrentQuerySegment("follow-up", 20));
-
-        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 500);
-
-        assertFalse(result.wasTruncated());
-        String rendered = result.render();
-        assertTrue(rendered.contains("Assistant: answer"));
-        assertFalse(rendered.contains("User:")); // User messages have no prefix
     }
 }
