@@ -155,20 +155,6 @@ public class SystemPromptConfig {
     }
 
     /**
-     * Get prompt for code review/analysis mode
-     */
-    public String getCodeReviewPrompt() {
-        return """
-            Analyze the provided code with focus on:
-            - Best practices and idioms
-            - Potential bugs or issues
-            - Performance considerations
-            - Suggestions for improvement
-            Assume the default Java environment. Use the learning markers to highlight key insights.
-            """;
-    }
-
-    /**
      * Combine base prompt with context-specific additions
      */
     public String buildFullPrompt(String basePrompt, String... additions) {
