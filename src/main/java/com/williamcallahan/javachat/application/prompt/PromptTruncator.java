@@ -31,8 +31,6 @@ public class PromptTruncator {
 
     private static final Logger log = LoggerFactory.getLogger(PromptTruncator.class);
 
-    private static final String TRUNCATION_NOTICE = "[Context truncated due to model input limit]\n\n";
-
     /**
      * Truncates a structured prompt to fit within the specified token limit.
      *
@@ -221,34 +219,6 @@ public class PromptTruncator {
      * @param wasTruncated true if any segments were removed
      */
     public record TruncatedPrompt(StructuredPrompt prompt, boolean wasTruncated) {
-        /**
-         * Renders the complete prompt, prepending the truncation notice when needed.
-         *
-         * @return final complete prompt string
-         */
-        public String render() {
-            return prependTruncationNotice(prompt.render());
-        }
-
-        /**
-         * Renders non-system request input, prepending the truncation notice when needed.
-         *
-         * <p>The system segment remains available through {@link #prompt()} so the request
-         * boundary can submit it as system-level instructions.</p>
-         *
-         * @return final non-system input string ready for LLM submission
-         */
-        public String renderInput() {
-            return prependTruncationNotice(prompt.renderInput());
-        }
-
-        private String prependTruncationNotice(String renderedPrompt) {
-            if (!wasTruncated) {
-                return renderedPrompt;
-            }
-            return TRUNCATION_NOTICE + renderedPrompt;
-        }
-
         /**
          * Returns the number of context documents in the truncated prompt.
          *
