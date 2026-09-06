@@ -451,6 +451,67 @@ test("releases an unterminated enrichment marker instead of swallowing it", asyn
   assert.match(cliExecution.standardOutput, /never closed/);
 });
 
+test("keeps a trailing content brace inside an enrichment marker body", async (testContext) => {
+  const apiServer = createServer((request, response) => {
+    if (request.url === "/api/me") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"userId":"user_cli"}');
+      return;
+    }
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end(
+      'event: text\ndata: {"text":"{{example:an empty object literal is {}}}"}\n\n',
+    );
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const address = apiServer.address();
+
+  const cliExecution = await runCli(
+    ["--host", `http://127.0.0.1:${address.port}`, "ask", "What is an empty object?"],
+    { JAVACHAT_API_KEY: TEST_API_KEY },
+  );
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.match(cliExecution.standardOutput, /Example: an empty object literal is \{\}\n/);
+  assert.doesNotMatch(cliExecution.standardOutput, /literal is \{\n\}/);
+});
+
+test("keeps a brace run's content brace when the marker spans stream chunks", async (testContext) => {
+  const apiServer = createServer((request, response) => {
+    if (request.url === "/api/me") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"userId":"user_cli"}');
+      return;
+    }
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end(
+      'event: text\ndata: {"text":"Intro. {{example:try (var scope"}\n\n' +
+        'event: text\ndata: {"text":" = open()) { doWork(); }}}"}\n\n' +
+        'event: text\ndata: {"text":" Outro."}\n\n',
+    );
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const address = apiServer.address();
+
+  const cliExecution = await runCli(
+    ["--host", `http://127.0.0.1:${address.port}`, "ask", "What is try-with-resources?"],
+    { JAVACHAT_API_KEY: TEST_API_KEY },
+  );
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.match(cliExecution.standardOutput, /Intro\./);
+  assert.match(cliExecution.standardOutput, /Outro\./);
+  assert.match(
+    cliExecution.standardOutput,
+    /Example: try \(var scope = open\(\)\) \{ doWork\(\); \}\n/,
+  );
+  assert.doesNotMatch(cliExecution.standardOutput, /doWork\(\);\n\}/);
+});
+
 test("rejects a successful non-SSE response", async (testContext) => {
   const apiServer = createServer((request, response) => {
     if (request.url === "/api/me") {
