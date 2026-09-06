@@ -123,12 +123,16 @@ public class SourceCodeFileIngestionProcessor {
 
         Optional<LocalDocsFileOutcome> validationFailure = validateFileAttributes(sourceFilePath);
         if (validationFailure.isPresent()) {
+            if (validationFailure.get() instanceof LocalDocsFileOutcome.Skipped) {
+                pruneSkipIfPreviouslyIngested(repositoryContext, canonicalCollectionName, fileUrl, sourceFilePath);
+            }
             return new SourceFileProcessingResult(validationFailure.get(), fileUrl);
         }
 
         ValidatedFileContext fileContext = buildFileContext(sourceFilePath, repositoryRoot, repositoryMetadata);
         Optional<ReadableFileContent> readableContent = readAndFingerprintFile(sourceFilePath, fileContext);
         if (readableContent.isEmpty()) {
+            pruneSkipIfPreviouslyIngested(repositoryContext, canonicalCollectionName, fileUrl, sourceFilePath);
             return new SourceFileProcessingResult(LocalDocsFileOutcome.skippedFile(), fileUrl);
         }
         ReadableFileContent fileContent = readableContent.get();
@@ -251,6 +255,35 @@ public class SourceCodeFileIngestionProcessor {
         } catch (IOException fingerprintException) {
             throw new IllegalStateException(
                     "Failed computing file fingerprint after successful read: " + sourceFilePath, fingerprintException);
+        }
+    }
+
+    /**
+     * Best-effort prune of stale prior state when a previously-ingested file is now skipped.
+     *
+     * <p>A skip (e.g. oversized, binary, or blank) returns without reindexing. When the file was
+     * previously ingested, its prior Qdrant chunks and local marker are left behind and would
+     * otherwise be shielded from orphan purging because the skip still reports the URL as active.
+     * This strict prune removes the stale vectors and marker so search cannot surface chunks that
+     * contradict the file's current on-disk bytes. A prune failure is logged and swallowed so the
+     * skip remains a {@link LocalDocsFileOutcome.Skipped} outcome rather than escalating to failed
+     * run health over best-effort cleanup.</p>
+     */
+    private void pruneSkipIfPreviouslyIngested(
+            RepositoryIngestionContext repositoryContext,
+            String canonicalCollectionName,
+            String fileUrl,
+            Path sourceFilePath) {
+        if (!repositoryContext.storedFileUrls().contains(fileUrl)) {
+            return;
+        }
+        try {
+            ingestedFilePruneService.pruneCollectionFileStrict(canonicalCollectionName, fileUrl, null);
+        } catch (IOException pruneException) {
+            log.warn(
+                    "Skip-time prune of formerly-ingested file failed (stale vectors may persist): {}",
+                    renderPathForLog(sourceFilePath.toString()),
+                    pruneException);
         }
     }
 
