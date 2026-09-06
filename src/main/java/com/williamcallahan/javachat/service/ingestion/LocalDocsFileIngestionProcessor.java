@@ -297,7 +297,10 @@ public class LocalDocsFileIngestionProcessor {
                 GuardDecision guardDecision = contentGuard.evaluate(new GuardInput(bodyText, parsedDocument));
                 if (!guardDecision.acceptable()) {
                     String rejectionReason = guardDecision.rejectionReason();
-                    return deferred(() -> quarantineRejectedFile(file, rejectionReason));
+                    final boolean replacementRequired = requiresFullReindex;
+                    final MarkerContext rejectedMarkerContext = markerContext;
+                    return deferred(
+                            () -> quarantineRejectedFile(rejectedMarkerContext, replacementRequired, rejectionReason));
                 }
             }
         }
@@ -731,22 +734,55 @@ public class LocalDocsFileIngestionProcessor {
         return navigationFrameset || interactiveApiReferenceShell;
     }
 
-    private LocalDocsFileOutcome quarantineRejectedFile(Path file, String rejectionReason) {
+    private LocalDocsFileOutcome quarantineRejectedFile(
+            MarkerContext markerContext, boolean requiresFullReindex, String rejectionReason) {
+        Path file = markerContext.file();
+        String contentGuardPhase;
+        String contentGuardDetails;
         try {
             var quarantineService = fileContentServices.quarantine();
             IngestionQuarantineService.QuarantineResult quarantineCopy = quarantineService.quarantine(file);
             INDEXING_LOG.warn("[INDEXING] Content guard rejected file and copied it to quarantine");
-            return LocalDocsFileOutcome.failedFile(new IngestionLocalFailure(
-                    file.toString(),
-                    "content-guard",
-                    "quarantine copy " + quarantineCopy.quarantined() + ": " + rejectionReason));
+            contentGuardPhase = "content-guard";
+            contentGuardDetails = "quarantine copy " + quarantineCopy.quarantined() + ": " + rejectionReason;
         } catch (IOException quarantineException) {
             log.warn(
                     "Failed to quarantine invalid content (exception type: {})",
                     quarantineException.getClass().getSimpleName());
-            return LocalDocsFileOutcome.failedFile(
-                    failureFactory.failure(file, "quarantine-write", quarantineException));
+            contentGuardPhase = "quarantine-write";
+            contentGuardDetails = failureFactory
+                    .failure(file, "quarantine-write", quarantineException)
+                    .details();
         }
+        if (requiresFullReindex) {
+            try {
+                storage.hybridVector().deleteByUrl(markerContext.collectionKind(), markerContext.url());
+                ingestedFilePruneService.pruneObsoleteLocalStateAfterReplacement(
+                        markerContext.url(),
+                        markerContext.priorIngestionRecord().orElse(null),
+                        List.of());
+            } catch (IOException pruneException) {
+                return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "prune-local", pruneException));
+            } catch (RuntimeException pruneException) {
+                return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "prune-runtime", pruneException));
+            }
+            try {
+                markFileIngested(
+                        markerContext.url(),
+                        new FileIngestionRecord(
+                                markerContext.fileSizeBytes(),
+                                markerContext.lastModifiedMillis(),
+                                markerContext.ingestionFingerprint(),
+                                LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
+                                markerContext.collectionName(),
+                                List.of()));
+            } catch (RuntimeException markerTransitionException) {
+                return LocalDocsFileOutcome.failedFile(
+                        failureFactory.failure(file, "marker-transition", markerTransitionException));
+            }
+        }
+        return LocalDocsFileOutcome.failedFile(
+                new IngestionLocalFailure(file.toString(), contentGuardPhase, contentGuardDetails));
     }
 
     private LocalDocsFileOutcome markPreviouslyIngestedFile(
