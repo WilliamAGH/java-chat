@@ -196,6 +196,12 @@ public class ClerkApiKeyVerifier implements ApiKeyLifecycle {
         if (verification.revoked() || verification.expired()) {
             return Optional.empty();
         }
+        if (verification.id() == null
+                || verification.id().isBlank()
+                || verification.subject() == null
+                || verification.subject().isBlank()) {
+            throw new ApiKeyOperationUnavailableException("Clerk returned an incomplete API key identity");
+        }
         VerifiedApiKey verifiedApiKey = new VerifiedApiKey(verification.id(), verification.subject());
         return Optional.of(verifiedApiKey);
     }
