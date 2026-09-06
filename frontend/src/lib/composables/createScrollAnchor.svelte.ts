@@ -274,6 +274,16 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let performedScroll = false;
     let previousScrollHeight = -1;
+    // Sticky across passes: tracks whether *any* pass will actually move the
+    // container. A `scrollTo` whose target clamps to the current position is a
+    // no-op and fires no `scroll`/`scrollend` event, so nothing routes into
+    // `onUserScroll`'s near-bottom branch to clear `programmaticScrollActive` —
+    // the flag would stay stuck and later gate off the no-intent scroll-away
+    // branch (e.g. keyboard Tab focus into an off-screen link). Only keep the
+    // flag raised when this pass will really move; once any pass moves, leave
+    // the flag raised so the smooth scroll's in-flight events stay shielded
+    // (the near-bottom branch clears it once they settle).
+    let movedDuringScroll = false;
     for (let pass = 0; pass <= MAX_FINAL_REVEAL_RECONCILIATION_PASSES; pass++) {
       await tick();
       if (
@@ -289,11 +299,17 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
       }
       previousScrollHeight = currentScrollHeight;
       performedScroll = true;
+      if (scrollContainer.scrollTop + scrollContainer.clientHeight < currentScrollHeight) {
+        movedDuringScroll = true;
+      }
       programmaticScrollActive = true;
       scrollContainer.scrollTo({
         top: currentScrollHeight,
         behavior: prefersReducedMotion ? "auto" : "smooth",
       });
+    }
+    if (!movedDuringScroll) {
+      programmaticScrollActive = false;
     }
     return performedScroll;
   }

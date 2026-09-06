@@ -587,4 +587,81 @@ describe("createScrollAnchor final content", () => {
     expect(scrollAnchor.showIndicator).toBe(true);
     scrollAnchor.cleanup();
   });
+
+  it("respects a no-intent scroll-away following a no-op send scroll", async () => {
+    vi.useFakeTimers();
+    const scrollContainer = document.createElement("div");
+    setScrollGeometry(scrollContainer, 0, 500, 500);
+    const scrollToSpy = vi.spyOn(scrollContainer, "scrollTo");
+    const scrollAnchor = createScrollAnchor({ indicatorDelayMs: 150 });
+    scrollAnchor.attach(scrollContainer);
+
+    await scrollAnchor.scrollOnce();
+    scrollToSpy.mockClear();
+
+    setScrollGeometry(scrollContainer, 200, 1_000, 500);
+    scrollAnchor.onUserScroll();
+
+    await scrollAnchor.revealFinalContentIfFollowing();
+    vi.advanceTimersByTime(150);
+
+    expect(scrollToSpy).not.toHaveBeenCalled();
+    expect(scrollAnchor.unseenCount).toBe(1);
+    expect(scrollAnchor.showIndicator).toBe(true);
+    scrollAnchor.cleanup();
+  });
+
+  describe("movedDuringScroll accumulator (multi-pass)", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+
+    it("pass-0 no-op then pass-1 real move keeps the flag raised (shields in-flight scroll)", async () => {
+      vi.useFakeTimers();
+      const el = document.createElement("div");
+      let calls = 0;
+      Object.defineProperties(el, {
+        scrollTop: { configurable: true, value: 0 },
+        clientHeight: { configurable: true, value: 500 },
+        scrollHeight: { configurable: true, get: () => (calls++ === 0 ? 500 : 1000) },
+      });
+      const spy = vi.spyOn(el, "scrollTo");
+      const a = createScrollAnchor({ indicatorDelayMs: 150 });
+      a.attach(el);
+      await a.scrollOnce();
+      spy.mockClear();
+      Object.defineProperty(el, "scrollTop", { configurable: true, value: 200 });
+      a.onUserScroll();
+      await a.revealFinalContentIfFollowing();
+      vi.advanceTimersByTime(150);
+      expect(spy).toHaveBeenCalled();
+      a.cleanup();
+    });
+
+    it("every-pass no-op clears the flag so a later no-intent scroll disengages follow", async () => {
+      vi.useFakeTimers();
+      const el = document.createElement("div");
+      Object.defineProperties(el, {
+        scrollTop: { configurable: true, value: 0 },
+        scrollHeight: { configurable: true, value: 500 },
+        clientHeight: { configurable: true, value: 500 },
+      });
+      const spy = vi.spyOn(el, "scrollTo");
+      const a = createScrollAnchor({ indicatorDelayMs: 150 });
+      a.attach(el);
+      await a.scrollOnce();
+      spy.mockClear();
+      Object.defineProperties(el, {
+        scrollTop: { configurable: true, value: 200 },
+        scrollHeight: { configurable: true, value: 1000 },
+      });
+      a.onUserScroll();
+      await a.revealFinalContentIfFollowing();
+      vi.advanceTimersByTime(150);
+      expect(spy).not.toHaveBeenCalled();
+      expect(a.unseenCount).toBe(1);
+      a.cleanup();
+    });
+  });
 });
