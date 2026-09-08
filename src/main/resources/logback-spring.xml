@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
+    <!-- Redacts Clerk API-key identifiers from rendered throwables so transport
+         failure stack traces remain diagnosable without leaking the ak_ id that
+         Spring interpolates into the revoke request URI. -->
+    <conversionRule conversionWord="redactedEx"
+        converterClass="com.williamcallahan.javachat.support.logging.RedactingThrowableProxyConverter"/>
+
     <!-- Plain console output keeps container log levels machine-detectable. -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg %kvp%n</pattern>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg %kvp%n%redactedEx</pattern>
         </encoder>
     </appender>
 
