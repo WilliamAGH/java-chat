@@ -2,7 +2,6 @@ package com.williamcallahan.javachat.service;
 
 import com.openai.core.http.Headers;
 import java.util.Objects;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 /**
  * Resolves strict rate-limit decisions from provider headers.
@@ -62,31 +61,6 @@ final class RateLimitDecisionResolver {
             return RateLimitDecision.fromRetryAfterSeconds(headerParser.parseRetryAfterSeconds(headers));
         } catch (IllegalArgumentException parseError) {
             throw new RateLimitDecisionException("Gateway Retry-After header is invalid", parseError);
-        }
-    }
-
-    /**
-     * Resolves a decision from Spring WebClient response headers.
-     *
-     * @throws RateLimitDecisionException when headers are missing or invalid
-     */
-    RateLimitDecision resolveFromWebClientException(WebClientResponseException webClientError) {
-        Objects.requireNonNull(webClientError, "webClientError");
-
-        try {
-            String retryAfterHeader = webClientError.getHeaders().getFirst(RETRY_AFTER_HEADER);
-            long retryAfterSeconds = headerParser.parseRetryAfterHeader(retryAfterHeader);
-            if (retryAfterHeader != null && !retryAfterHeader.isBlank()) {
-                return RateLimitDecision.fromRetryAfterSeconds(retryAfterSeconds);
-            }
-
-            return headerParser
-                    .parseResetHeader(webClientError.getHeaders().getFirst(RESET_HEADER))
-                    .map(RateLimitDecision::fromResetTime)
-                    .orElseThrow(() -> new RateLimitDecisionException(
-                            "WebClient rate-limit headers did not include Retry-After or X-RateLimit-Reset"));
-        } catch (IllegalArgumentException parseError) {
-            throw new RateLimitDecisionException("WebClient rate-limit headers are invalid", parseError);
         }
     }
 
