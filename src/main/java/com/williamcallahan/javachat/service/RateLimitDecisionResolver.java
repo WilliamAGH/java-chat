@@ -11,7 +11,6 @@ import java.util.Objects;
  */
 final class RateLimitDecisionResolver {
     private static final String RETRY_AFTER_HEADER = "Retry-After";
-    private static final String RESET_HEADER = "X-RateLimit-Reset";
 
     private final RateLimitHeaderParser headerParser;
 
