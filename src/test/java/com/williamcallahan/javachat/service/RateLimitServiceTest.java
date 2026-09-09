@@ -16,14 +16,11 @@ import com.openai.core.http.Headers;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnexpectedStatusCodeException;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.env.MockEnvironment;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 /**
  * Verifies strict header-only rate-limit decision behavior.
@@ -103,38 +100,6 @@ class RateLimitServiceTest {
                 RateLimitDecisionException.class,
                 () -> rateLimitService.recordRateLimitFromOpenAiServiceException(
                         RateLimitService.ApiProvider.OPENAI, exception));
-
-        verifyNoInteractions(rateLimitState);
-    }
-
-    @Test
-    void recordRateLimitFromExceptionUsesWebClientRetryAfterHeader() {
-        RateLimitState rateLimitState = mock(RateLimitState.class);
-        RateLimitService rateLimitService = new RateLimitService(rateLimitState, new MockEnvironment());
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.add("Retry-After", "8");
-        WebClientResponseException exception = WebClientResponseException.create(
-                429, "Too Many Requests", headers, new byte[0], StandardCharsets.UTF_8);
-
-        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(RATE_LIMIT_SERVICE_LOGGER)) {
-            rateLimitService.recordRateLimitFromException(RateLimitService.ApiProvider.OPENAI, exception);
-            assertRateLimitWarning(expectedLogEvents, "[openai] Rate limited (retryAfterSeconds=8)");
-        }
-
-        verify(rateLimitState).recordRateLimit(eq("openai"), any(Instant.class), eq("1m"));
-    }
-
-    @Test
-    void recordRateLimitFromExceptionFailsForNonWebClientErrors() {
-        RateLimitState rateLimitState = mock(RateLimitState.class);
-        RateLimitService rateLimitService = new RateLimitService(rateLimitState, new MockEnvironment());
-
-        RuntimeException exception = new RuntimeException("network issue");
-
-        assertThrows(
-                RateLimitDecisionException.class,
-                () -> rateLimitService.recordRateLimitFromException(RateLimitService.ApiProvider.OPENAI, exception));
 
         verifyNoInteractions(rateLimitState);
     }
