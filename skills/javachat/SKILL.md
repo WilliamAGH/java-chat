@@ -1,6 +1,6 @@
 ---
 name: javachat
-description: "Answer software and platform documentation questions with the JavaChat CLI and retrieved citations. Use for Java, Kotlin, Docker, Docker Swarm, Dokploy, Clerk, Spring, indexed GitHub repositories, or any question that should be checked against JavaChat's current knowledge inventory."
+description: "Use the JavaChat CLI to answer software and platform documentation questions with retrieved citations. Use it when an answer depends on a package version, indexed repository, command syntax, or deployment behavior."
 ---
 
 # JavaChat documentation
