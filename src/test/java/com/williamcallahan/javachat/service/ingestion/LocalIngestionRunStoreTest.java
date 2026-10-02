@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.williamcallahan.javachat.application.ingestion.IngestionAlreadyRunningException;
 import com.williamcallahan.javachat.domain.ingestion.IngestionBacklogStatus;
 import com.williamcallahan.javachat.service.LocalStoreService;
@@ -11,7 +12,11 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -30,7 +35,7 @@ class LocalIngestionRunStoreTest {
         Path documentationDirectory = temporaryDirectory.resolve("docs").toAbsolutePath();
         IngestionBacklogStatus partialBacklog = IngestionBacklogStatus.running(documentationDirectory.toString(), 4)
                 .startBatch(3)
-                .completeBatch(1, 1, 1)
+                .completeBatch(1, 1, 0, 1)
                 .finish();
 
         runStore.write(documentationDirectory, partialBacklog, INVENTORY_FINGERPRINT);
@@ -53,7 +58,7 @@ class LocalIngestionRunStoreTest {
         Path documentationDirectory = temporaryDirectory.resolve("docs").toAbsolutePath();
         IngestionBacklogStatus partialBacklog = IngestionBacklogStatus.running(documentationDirectory.toString(), 2)
                 .startBatch(1)
-                .completeBatch(1, 0, 0)
+                .completeBatch(1, 0, 0, 0)
                 .finish();
 
         runStore.write(documentationDirectory, partialBacklog, INVENTORY_FINGERPRINT);
@@ -133,7 +138,7 @@ class LocalIngestionRunStoreTest {
                 IngestionBacklogStatus.running("docs", 3).startBatch(3);
         runStore.write(documentationDirectory, runningBacklog, INVENTORY_FINGERPRINT);
         IngestionBacklogStatus completedBacklog =
-                runningBacklog.completeBatch(2, 1, 0).finish();
+                runningBacklog.completeBatch(2, 1, 0, 0).finish();
         ownerCompletion.set(() -> {
             try {
                 runStore.write(documentationDirectory, completedBacklog, INVENTORY_FINGERPRINT);
@@ -171,6 +176,49 @@ class LocalIngestionRunStoreTest {
                     runStore.read(underscoredDirectory, INVENTORY_FINGERPRINT).stream()
                             .count());
         }
+    }
+
+    @Test
+    void readsCheckpointWrittenBeforeExcludedFilesFieldWasIntroduced(@TempDir Path temporaryDirectory)
+            throws IOException {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        LocalIngestionRunStore runStore = runStore(temporaryDirectory, meterRegistry);
+        Path documentationDirectory = temporaryDirectory.resolve("docs").toAbsolutePath();
+        IngestionBacklogStatus partialBacklog = IngestionBacklogStatus.running(documentationDirectory.toString(), 2)
+                .startBatch(2)
+                .completeBatch(0, 1, 0, 0)
+                .finish();
+        runStore.write(documentationDirectory, partialBacklog, INVENTORY_FINGERPRINT);
+
+        Path progressFile = soleProgressFile(temporaryDirectory);
+        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectNode checkpointNode = (ObjectNode) objectMapper.readTree(progressFile.toFile());
+        ObjectNode backlogNode = (ObjectNode) checkpointNode.get("backlog");
+        backlogNode.remove("excludedFiles");
+        objectMapper.writeValue(progressFile.toFile(), checkpointNode);
+
+        IngestionBacklogStatus readBacklog =
+                runStore.read(documentationDirectory, INVENTORY_FINGERPRINT).orElseThrow();
+
+        assertEquals(IngestionBacklogStatus.Lifecycle.PARTIAL, readBacklog.lifecycle());
+        assertEquals(1, readBacklog.inspectedFiles());
+        assertEquals(0, readBacklog.processedFiles());
+        assertEquals(1, readBacklog.skippedFiles());
+        assertEquals(0, readBacklog.excludedFiles());
+        assertEquals(0, readBacklog.failedFiles());
+        assertEquals(1, readBacklog.pendingFiles());
+    }
+
+    private static Path soleProgressFile(Path temporaryDirectory) throws IOException {
+        Path indexDirectory = temporaryDirectory.resolve("qwen3-embedding-4b-2560/local/index");
+        List<Path> progressFiles = new ArrayList<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(indexDirectory, "local-ingestion-*.json")) {
+            stream.forEach(progressFiles::add);
+        }
+        if (progressFiles.size() != 1) {
+            throw new IllegalStateException("Expected exactly one progress file, found " + progressFiles.size());
+        }
+        return progressFiles.getFirst();
     }
 
     private static LocalIngestionRunStore runStore(Path temporaryDirectory, SimpleMeterRegistry meterRegistry) {

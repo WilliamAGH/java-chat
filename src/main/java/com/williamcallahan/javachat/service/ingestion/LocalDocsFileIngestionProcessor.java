@@ -435,7 +435,7 @@ public class LocalDocsFileIngestionProcessor {
                             expectedPointUuids(expectedChunkHashes));
             if (hasExactPointIds && expectedChunkHashes.isEmpty()) {
                 INDEXING_LOG.debug("[INDEXING] Skipping unchanged excluded Java API page");
-                return ReindexDecision.terminal(LocalDocsFileOutcome.skippedFile());
+                return ReindexDecision.terminal(LocalDocsFileOutcome.excludedFile());
             }
             if (hasExactPointIds) {
                 INDEXING_LOG.debug("[INDEXING] Skipping unchanged file (already ingested)");
@@ -721,7 +721,7 @@ public class LocalDocsFileIngestionProcessor {
                     failureFactory.failure(markerContext.file(), "marker-transition", markerTransitionException));
         }
         INDEXING_LOG.info("[INDEXING] Excluded documentation page from indexing");
-        return LocalDocsFileOutcome.skippedFile();
+        return LocalDocsFileOutcome.excludedFile();
     }
 
     private static boolean isNavigationOnlyDocument(org.jsoup.nodes.Document parsedDocument) {
