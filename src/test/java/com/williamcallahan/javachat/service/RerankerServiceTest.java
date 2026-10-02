@@ -139,12 +139,37 @@ class RerankerServiceTest {
                 .thenReturn(Mono.just("{\"order\":[]}"));
 
         RerankerService rerankerService = createRerankerService(streamingService);
-        List<Document> sourceDocuments = List.of(new Document("first"), new Document("second"));
+        List<Document> sourceDocuments = List.of(new Document("irrelevant"));
 
         List<Document> selectedDocuments = rerankerService.rerank(
                 "query", sourceDocuments, 5, stageDeadlineNanos(REMAINING_STAGE_BUDGET_TEST_TIMEOUT));
 
         assertTrue(selectedDocuments.isEmpty());
+    }
+
+    @Test
+    void rerankRetainsOneRelevantDocument() {
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        when(streamingService.completeJsonObject(
+                        anyString(),
+                        eq(TEST_RERANKER_TEMPERATURE),
+                        eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
+                        eq(TEST_RERANKER_TIMEOUT)))
+                .thenReturn(Mono.just("{\"order\":[0]}"));
+
+        RerankerService rerankerService = createRerankerService(streamingService);
+        List<Document> sourceDocuments = List.of(new Document("relevant"));
+
+        List<Document> selectedDocuments = rerankerService.rerank(
+                "query", sourceDocuments, 5, stageDeadlineNanos(REMAINING_STAGE_BUDGET_TEST_TIMEOUT));
+
+        assertEquals(sourceDocuments, selectedDocuments);
+        verify(streamingService)
+                .completeJsonObject(
+                        anyString(),
+                        eq(TEST_RERANKER_TEMPERATURE),
+                        eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
+                        eq(TEST_RERANKER_TIMEOUT));
     }
 
     @Test

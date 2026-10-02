@@ -6,7 +6,17 @@ set -euo pipefail
 
 TEST_SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_WORK_DIRECTORY="$(mktemp -d)"
-trap 'rm -rf -- "$TEST_WORK_DIRECTORY"' EXIT
+staging_process_id=""
+
+cleanup_local_staging_contract_test() {
+    if [ -n "$staging_process_id" ]; then
+        kill "$staging_process_id" 2>/dev/null || true
+        wait "$staging_process_id" 2>/dev/null || true
+    fi
+    rm -rf -- "$TEST_WORK_DIRECTORY"
+}
+
+trap cleanup_local_staging_contract_test EXIT
 
 fail_local_staging_contract_test() {
     printf 'FAIL: %s\n' "$1" >&2
@@ -79,4 +89,90 @@ if [ "$writer_lease_line" -le "$repository_validation_line" ]; then
     fail_local_staging_contract_test "launcher contends on the writer lease before repository validation"
 fi
 
+fake_project_root="$TEST_WORK_DIRECTORY/project"
+fake_script_directory="$fake_project_root/scripts"
+fake_binary_directory="$TEST_WORK_DIRECTORY/bin"
+staging_trace="$TEST_WORK_DIRECTORY/staging.trace"
+documentation_started_marker="$TEST_WORK_DIRECTORY/documentation.started"
+documentation_release_marker="$TEST_WORK_DIRECTORY/documentation.release"
+staging_output="$TEST_WORK_DIRECTORY/staging.output"
+mkdir -p "$fake_script_directory/lib" "$fake_binary_directory" "$fake_project_root/data/repos/github/test"
+cp "$launcher_path" "$fake_script_directory/run_local_embedding_staging.sh"
+
+for repository_index in {1..23}; do
+    mkdir -p "$fake_project_root/data/repos/github/test/repository-$repository_index/.git"
+done
+
+printf '%s\n' \
+    '#!/bin/bash' \
+    'exit 0' \
+    > "$fake_binary_directory/git"
+printf '%s\n' \
+    '#!/bin/bash' \
+    'set -euo pipefail' \
+    'printf "DOCUMENTATION_STAGED\\n" >> "$STAGING_TRACE"' \
+    'touch "$DOCUMENTATION_STARTED_MARKER"' \
+    'while [ ! -f "$DOCUMENTATION_RELEASE_MARKER" ]; do sleep 0.05; done' \
+    > "$fake_script_directory/process_all_to_qdrant.sh"
+printf '%s\n' \
+    '#!/bin/bash' \
+    'set -euo pipefail' \
+    'SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' \
+    'source "$SCRIPT_DIRECTORY/lib/common_qdrant.sh"' \
+    'record_staged_library' \
+    'printf "REPOSITORY_STAGED\\n" >> "$STAGING_TRACE"' \
+    > "$fake_script_directory/process_github_repo.sh"
+printf '%s\n' \
+    'acquire_qdrant_writer_lease() { :; }' \
+    'record_staged_library() { printf "LIBRARY_STAGED\\n" >> "$STAGING_TRACE"; }' \
+    > "$fake_script_directory/lib/common_qdrant.sh"
+chmod +x \
+    "$fake_binary_directory/git" \
+    "$fake_script_directory/run_local_embedding_staging.sh" \
+    "$fake_script_directory/process_all_to_qdrant.sh" \
+    "$fake_script_directory/process_github_repo.sh"
+
+PATH="$fake_binary_directory:$PATH" \
+STAGING_TRACE="$staging_trace" \
+DOCUMENTATION_STARTED_MARKER="$documentation_started_marker" \
+DOCUMENTATION_RELEASE_MARKER="$documentation_release_marker" \
+    "$fake_script_directory/run_local_embedding_staging.sh" > "$staging_output" 2>&1 &
+staging_process_id=$!
+
+for ((wait_attempt = 0; wait_attempt < 200; wait_attempt++)); do
+    [ -f "$documentation_started_marker" ] && break
+    sleep 0.05
+done
+if [ ! -f "$documentation_started_marker" ]; then
+    fail_local_staging_contract_test "staged documentation child did not start"
+fi
+
+printf '#!/bin/bash\nexit 99\n' > "$fake_script_directory/run_local_embedding_staging.sh"
+printf '#!/bin/bash\nexit 99\n' > "$fake_script_directory/process_all_to_qdrant.sh"
+printf '#!/bin/bash\nexit 99\n' > "$fake_script_directory/process_github_repo.sh"
+printf 'return 99\n' > "$fake_script_directory/lib/common_qdrant.sh"
+touch "$documentation_release_marker"
+
+if ! wait "$staging_process_id"; then
+    staging_process_id=""
+    fail_local_staging_contract_test "staged launcher failed after live scripts changed"
+fi
+staging_process_id=""
+
+repository_staged_count="$(grep -c '^REPOSITORY_STAGED$' "$staging_trace" || true)"
+library_staged_count="$(grep -c '^LIBRARY_STAGED$' "$staging_trace" || true)"
+if [ "$repository_staged_count" -ne 23 ] || [ "$library_staged_count" -ne 23 ]; then
+    fail_local_staging_contract_test "staged launcher did not use all snapshotted repository children and libraries"
+fi
+if ! grep -q '^LOCAL_STAGING_COMPLETE ' "$staging_output"; then
+    fail_local_staging_contract_test "staged launcher did not reach its completion boundary"
+fi
+shopt -s nullglob
+staging_residue=("$fake_project_root"/.local-embedding-staging-run.*)
+shopt -u nullglob
+if [ "${#staging_residue[@]}" -ne 0 ]; then
+    fail_local_staging_contract_test "staged launcher left a script snapshot behind"
+fi
+
 printf 'PASS: durable staging forces local Qdrant and masks cloud credentials across .env loading.\n'
+printf 'PASS: durable staging executes one immutable script snapshot across live in-place edits.\n'

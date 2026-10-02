@@ -9,11 +9,12 @@
  */
 
 import { createServer } from "node:http";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID, randomBytes } from "node:crypto";
+import { existsSync, realpathSync } from "node:fs";
 import { hostname, homedir, platform } from "node:os";
 import { mkdir, readFile, writeFile, chmod, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { stdout, stderr, argv, exit, env } from "node:process";
 import { stripVTControlCharacters } from "node:util";
 import packageMetadata from "../package.json" with { type: "json" };
@@ -24,6 +25,7 @@ const CREDENTIALS_DIRECTORY_MODE = 0o700;
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 const CITATION_DISPLAY_LIMIT = 5;
 const CLIENT_LABEL_MAX_LENGTH = 64;
+const CLI_PACKAGE = packageMetadata.name;
 
 // The assistant is instructed to emit enrichment markers (SystemPromptConfig's
 // MARKER_USAGE_PROMPT); the web client renders each as a titled callout. Titles
@@ -254,7 +256,9 @@ async function commandLogin(host, options) {
   }
   const storedHosts = await readCredentials();
   if (storedHosts[host]?.apiKey) {
-    stderr.write(`Already signed in to ${host}. Run "javachat logout" before replacing the key.\n`);
+    stderr.write(
+      `Already signed in to ${host}. Run "javachat auth logout" before replacing the key.\n`,
+    );
     return 0;
   }
   const apiKey = await authorizeThroughBrowser(host, !options.noBrowser);
@@ -271,7 +275,7 @@ async function commandLogin(host, options) {
 async function commandLogout(host) {
   if (env.JAVACHAT_API_KEY?.trim()) {
     stderr.write(
-      `Authentication for ${host} comes from JAVACHAT_API_KEY. Unset it, then run "javachat logout" again to remove any stored fallback credential.\n`,
+      `Authentication for ${host} comes from JAVACHAT_API_KEY. Unset it, then run "javachat auth logout" again to remove any stored fallback credential.\n`,
     );
     return 0;
   }
@@ -320,14 +324,107 @@ async function fetchIdentity(host, apiKey) {
   return identity.userId;
 }
 
-async function commandWhoami(host) {
+async function commandStatus(host) {
   const apiKey = await storedKeyFor(host);
   if (!apiKey) {
-    stderr.write(`Not signed in to ${host}. Run "javachat login".\n`);
+    stderr.write(`Not signed in to ${host}. Run "javachat auth login".\n`);
     return 1;
   }
   stdout.write(`${await fetchIdentity(host, apiKey)} at ${host}\n`);
   return 0;
+}
+
+/** Updates the npm installation that owns the invoked javachat command. */
+async function commandUpdate() {
+  const installTarget = await resolveNpmInstallTarget();
+  stderr.write(`Updating ${CLI_PACKAGE} with npm...\n`);
+  const updateResult = spawnSync("npm", installTarget.npmArguments, {
+    cwd: installTarget.workingDirectory,
+    stdio: "inherit",
+  });
+  if (updateResult.error) throw new Error(`Could not start npm: ${updateResult.error.message}`);
+  if (updateResult.signal) {
+    throw new Error(`npm install stopped after receiving ${updateResult.signal}.`);
+  }
+  const updateExitCode = updateResult.status ?? 1;
+  if (updateExitCode === 0) stdout.write("JavaChat CLI update complete.\n");
+  return updateExitCode;
+}
+
+/** Resolves a project-local or global npm install without guessing from the package scope. */
+async function resolveNpmInstallTarget() {
+  const invokedEntrypoint = argv[1] ? resolve(argv[1]) : "";
+  if (basename(invokedEntrypoint) !== "javachat") {
+    throw new Error(
+      '"javachat update" must run through an npm-installed javachat command, not the source entrypoint.',
+    );
+  }
+
+  let packageRoot;
+  try {
+    packageRoot = dirname(dirname(realpathSync(invokedEntrypoint)));
+  } catch (entrypointFailure) {
+    throw new Error(`Could not resolve the installed javachat command: ${entrypointFailure.message}`);
+  }
+  if (existsSync(join(packageRoot, "package-lock.json")) && existsSync(join(packageRoot, "test"))) {
+    throw new Error(
+      '"javachat update" does not replace the repository checkout. Use npm install in cli/ for local development.',
+    );
+  }
+
+  const invokedDirectory = dirname(invokedEntrypoint);
+  if (basename(invokedDirectory) === ".bin" && basename(dirname(invokedDirectory)) === "node_modules") {
+    const projectRoot = dirname(dirname(invokedDirectory));
+    if (projectRoot.split(sep).includes("_npx")) {
+      throw new Error('"javachat update" cannot update an ephemeral npx installation.');
+    }
+    const projectManifest = await readProjectManifest(projectRoot);
+    const declaresJavaChat = [
+      projectManifest.dependencies,
+      projectManifest.devDependencies,
+      projectManifest.optionalDependencies,
+    ].some((dependencyGroup) => Object.hasOwn(dependencyGroup ?? {}, CLI_PACKAGE));
+    if (!declaresJavaChat) {
+      throw new Error(
+        `The project at ${projectRoot} does not declare ${CLI_PACKAGE}; npm will not be allowed to modify it.`,
+      );
+    }
+    return {
+      npmArguments: ["install", `${CLI_PACKAGE}@latest`],
+      workingDirectory: projectRoot,
+    };
+  }
+
+  const prefixResult = spawnSync("npm", ["prefix", "--global"], { encoding: "utf8" });
+  if (prefixResult.error) {
+    throw new Error(`Could not ask npm for its global prefix: ${prefixResult.error.message}`);
+  }
+  const globalPrefixOutput = prefixResult.stdout?.trim();
+  if (prefixResult.status !== 0 || !globalPrefixOutput) {
+    throw new Error("npm could not identify its global installation prefix.");
+  }
+  const globalPrefix = resolve(globalPrefixOutput);
+  if (resolve(invokedDirectory) !== join(globalPrefix, "bin")) {
+    throw new Error(
+      '"javachat update" could not identify this command as a project-local or global npm installation.',
+    );
+  }
+  return {
+    npmArguments: ["install", "--global", `${CLI_PACKAGE}@latest`],
+    workingDirectory: globalPrefix,
+  };
+}
+
+async function readProjectManifest(projectRoot) {
+  try {
+    const projectManifest = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"));
+    if (!projectManifest || typeof projectManifest !== "object" || Array.isArray(projectManifest)) {
+      throw new Error("package.json must contain an object");
+    }
+    return projectManifest;
+  } catch (manifestFailure) {
+    throw new Error(`Could not read ${join(projectRoot, "package.json")}: ${manifestFailure.message}`);
+  }
 }
 
 /**
@@ -337,10 +434,10 @@ async function commandWhoami(host) {
  * collections, repository URLs for GitHub collections); the terminal's job is
  * only to validate and print that inventory.
  */
-async function commandKnowledge(host) {
+async function commandList(host) {
   const apiKey = await storedKeyFor(host);
   if (!apiKey) {
-    stderr.write(`Not signed in to ${host}. Run "javachat login".\n`);
+    stderr.write(`Not signed in to ${host}. Run "javachat auth login".\n`);
     return 1;
   }
   const groupsResponse = await fetch(new URL("/api/knowledge/groups", host), {
@@ -370,6 +467,12 @@ async function commandKnowledge(host) {
     const chunkNoun = knowledgeGroup.chunks === 1 ? "chunk" : "chunks";
     stdout.write(
       `  ${stripVTControlCharacters(knowledgeGroup.name)} (${knowledgeGroup.chunks} ${chunkNoun})\n`,
+    );
+    for (const canonicalUrl of knowledgeGroup.canonicalUrls) {
+      stdout.write(`    URL: ${stripVTControlCharacters(canonicalUrl)}\n`);
+    }
+    stdout.write(
+      `    Versions/revisions: ${knowledgeGroup.ingestedVersions.length > 0 ? knowledgeGroup.ingestedVersions.map(stripVTControlCharacters).join(", ") : "unversioned"}\n`,
     );
   }
   const collectionCount = new Set(knowledgeGroups.map((knowledgeGroup) => knowledgeGroup.collection))
@@ -404,16 +507,34 @@ function parseKnowledgeInventory(rawKnowledgeInventory, host) {
       !rawKnowledgeGroup.kind ||
       typeof rawKnowledgeGroup.name !== "string" ||
       !rawKnowledgeGroup.name ||
+      !Array.isArray(rawKnowledgeGroup.canonicalUrls) ||
+      rawKnowledgeGroup.canonicalUrls.length === 0 ||
+      !Array.isArray(rawKnowledgeGroup.ingestedVersions) ||
+      rawKnowledgeGroup.ingestedVersions.some(
+        (ingestedVersion) => typeof ingestedVersion !== "string" || !ingestedVersion,
+      ) ||
       typeof rawKnowledgeGroup.chunks !== "number" ||
       !Number.isSafeInteger(rawKnowledgeGroup.chunks) ||
       rawKnowledgeGroup.chunks < 0
     ) {
       throw new Error(`JavaChat returned a malformed knowledge group from ${host}.`);
     }
+    const canonicalUrls = rawKnowledgeGroup.canonicalUrls.map((canonicalUrl) => {
+      if (typeof canonicalUrl !== "string" || !canonicalUrl) {
+        throw new Error(`JavaChat returned a malformed knowledge group from ${host}.`);
+      }
+      const parsedUrl = URL.parse(canonicalUrl, host);
+      if (!parsedUrl || (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:")) {
+        throw new Error(`JavaChat returned a malformed knowledge group from ${host}.`);
+      }
+      return parsedUrl.href;
+    });
     return {
       collection: rawKnowledgeGroup.collection,
       kind: rawKnowledgeGroup.kind,
       name: rawKnowledgeGroup.name,
+      canonicalUrls,
+      ingestedVersions: rawKnowledgeGroup.ingestedVersions,
       chunks: rawKnowledgeGroup.chunks,
     };
   });
@@ -499,7 +620,7 @@ async function commandAsk(host, question, options) {
   const allHosts = environmentApiKey ? {} : await readCredentials();
   const apiKey = environmentApiKey || allHosts[host]?.apiKey;
   if (!apiKey) {
-    throw new Error(`Not signed in to ${host}. Run "javachat login" first.`);
+    throw new Error(`Not signed in to ${host}. Run "javachat auth login" first.`);
   }
   const storedSessionId = allHosts[host]?.sessionId;
   const sessionId =
@@ -618,17 +739,20 @@ function decodeFrame(frame) {
 const USAGE = `javachat — ask Java Chat from your terminal
 
 Usage
-  javachat "How do Java records work?"     Ask a question
-  javachat login                           Authorize this machine in your browser
-  javachat logout                          Remove the local credential
-  javachat whoami                          Show who the stored key belongs to
-  javachat knowledge                       List the document groups ingested in the knowledge base
+  javachat ask "How do records work?"       Ask a question
+  javachat auth login                       Authorize this machine in your browser
+  javachat auth logout                      Remove the local credential
+  javachat auth status                      Show who the stored key belongs to
+  javachat update                           Update this npm installation
+  javachat list all                        List every ingested source, URL, and version
+  javachat list knowledge                  Alias for list all
 
 Options
   --host <url>    Target a different deployment (default ${DEFAULT_HOST})
   --new           Start a fresh conversation instead of continuing the last one
   --verbose       Show retrieval progress on stderr
   --no-browser    Print the approval URL instead of opening a browser
+  --help, -h      Show this complete command reference
   --version       Show the installed CLI version
   --              Treat everything after it as question text (for questions starting with -)
 
@@ -637,11 +761,10 @@ Environment
   JAVACHAT_HOST      Default host when --host is absent
 `;
 
-const SUBCOMMANDS = new Map([
+const AUTH_COMMANDS = new Map([
   ["login", commandLogin],
   ["logout", commandLogout],
-  ["whoami", commandWhoami],
-  ["knowledge", commandKnowledge],
+  ["status", commandStatus],
 ]);
 
 function parseArguments(rawArguments) {
@@ -653,6 +776,7 @@ function parseArguments(rawArguments) {
     version: false,
   };
   let host = env.JAVACHAT_HOST?.trim() || DEFAULT_HOST;
+  let hostOptionProvided = false;
   const positional = [];
   for (let index = 0; index < rawArguments.length; index += 1) {
     const argument = rawArguments[index];
@@ -666,6 +790,7 @@ function parseArguments(rawArguments) {
         throw new Error("--host requires a value, e.g. javachat --host https://javachat.ai");
       }
       host = hostValue;
+      hostOptionProvided = true;
       index += 1;
     } else if (argument === "--verbose" || argument === "-v") options.verbose = true;
     else if (argument === "--new") options.newSession = true;
@@ -676,21 +801,19 @@ function parseArguments(rawArguments) {
       throw new Error(`Unknown option: ${argument}. Run "javachat --help" for usage.`);
     } else {
       positional.push(argument);
-      const questionStarted =
-        (!SUBCOMMANDS.has(positional[0]) && positional[0] !== "ask" && positional[0] !== "help") ||
-        (positional[0] === "ask" && positional.length > 1);
+      const questionStarted = positional[0] === "ask" && positional.length > 1;
       if (questionStarted) {
         positional.push(...rawArguments.slice(index + 1));
         break;
       }
     }
   }
-  return { host, options, positional };
+  return { host, hostOptionProvided, options, positional };
 }
 
 async function main() {
   const rawArguments = argv.slice(2);
-  const { host, options, positional } = parseArguments(rawArguments);
+  const { host, hostOptionProvided, options, positional } = parseArguments(rawArguments);
   const [first, ...rest] = positional;
 
   if (options.version) {
@@ -699,22 +822,51 @@ async function main() {
     return 0;
   }
 
-  const normalizedHost = normalizeHost(host);
   if (options.help || first === "help" || !first) {
+    if (hostOptionProvided) normalizeHost(host);
     stdout.write(USAGE);
-    return options.help || first ? 0 : 1;
+    return 0;
   }
-  const subcommand = SUBCOMMANDS.get(first);
-  if (subcommand) {
-    if (rest.length > 0) {
-      throw new Error(`javachat ${first} takes no arguments.`);
+  if (first === "update") {
+    if (rest.length > 0) throw new Error("javachat update takes no arguments.");
+    return await commandUpdate();
+  }
+  const normalizedHost = normalizeHost(host);
+  if (first === "auth") {
+    const [authCommandName, ...authArguments] = rest;
+    if (!authCommandName) {
+      throw new Error("javachat auth requires a command: login, logout, or status.");
     }
-    return await subcommand(normalizedHost, options);
+    const authCommand = AUTH_COMMANDS.get(authCommandName);
+    if (!authCommand) {
+      throw new Error(
+        `Unknown auth command: ${authCommandName}. Run "javachat --help" for usage.`,
+      );
+    }
+    if (authArguments.length > 0) {
+      throw new Error(`javachat auth ${authCommandName} takes no arguments.`);
+    }
+    return await authCommand(normalizedHost, options);
   }
-
-  const question = (first === "ask" ? rest : positional).join(" ").trim();
+  if (first === "list") {
+    const [listTarget, ...listArguments] = rest;
+    if (!listTarget) {
+      throw new Error("javachat list requires a target: all or knowledge.");
+    }
+    if (listTarget !== "all" && listTarget !== "knowledge") {
+      throw new Error(`Unknown list target: ${listTarget}. Run "javachat --help" for usage.`);
+    }
+    if (listArguments.length > 0) {
+      throw new Error(`javachat list ${listTarget} takes no arguments.`);
+    }
+    return await commandList(normalizedHost);
+  }
+  if (first !== "ask") {
+    throw new Error(`Unknown command: ${first}. Run "javachat --help" for usage.`);
+  }
+  const question = rest.join(" ").trim();
   if (!question) {
-    stderr.write('Nothing to ask. Try: javachat "How do Java records work?"\n');
+    stderr.write('Nothing to ask. Try: javachat ask "How do Java records work?"\n');
     return 1;
   }
   return await commandAsk(normalizedHost, question, options);

@@ -68,7 +68,7 @@ class OpenAIStreamingServiceTest {
     private static final String OPENAI_BASE_URL = "https://api.llm-gateway.iocloudhost.net/v1";
     private static final long CONFIGURED_PROVIDER_BACKOFF_SECONDS = 600L;
     private static final int TEST_COMPLETION_OUTPUT_TOKEN_BUDGET = 768;
-    private static final String INVISIBLE_PROVIDER_DELTA = " \t\u200B";
+    private static final String INVISIBLE_PROVIDER_DELTA = " \t\u061C\u202E\u2066\uDB40\uDC01";
     private static final Duration INVISIBLE_PROVIDER_DELTA_INTERVAL = Duration.ofSeconds(3);
     private static final Duration VISIBLE_OUTPUT_DEADLINE_REMAINDER = Duration.ofSeconds(2);
     private static final Duration MID_RESPONSE_VISIBLE_OUTPUT_PAUSE = Duration.ofSeconds(21);
@@ -168,7 +168,7 @@ class OpenAIStreamingServiceTest {
 
     @Test
     void providerStreamWithoutVisibleTextIsTerminal() {
-        for (String invisibleText : List.of("", " \t\n\u200B\uFEFF\u2060")) {
+        for (String invisibleText : List.of("", INVISIBLE_PROVIDER_DELTA)) {
             RateLimitService rateLimitService = mock(RateLimitService.class);
             StreamResponse<ResponseStreamEvent> providerStream = mock();
             ResponseStreamEvent invisibleTextEvent = mock(ResponseStreamEvent.class);

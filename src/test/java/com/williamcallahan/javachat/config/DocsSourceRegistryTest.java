@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,6 +15,8 @@ import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Verifies JVM citation and provenance source behavior.
@@ -38,10 +41,26 @@ class DocsSourceRegistryTest {
     @Test
     void resolvesEnvironmentOrDefaultWhenSystemPropertyIsAbsent() {
         String environmentBaseUrl = System.getenv(ORACLE_JAVASE_BASE_SETTING);
-        String expectedBaseUrl = environmentBaseUrl == null ? DEFAULT_TEST_BASE_URL : environmentBaseUrl;
+        String expectedBaseUrl =
+                environmentBaseUrl == null || environmentBaseUrl.isBlank() ? DEFAULT_TEST_BASE_URL : environmentBaseUrl;
 
         withoutSystemProperty(
                 ORACLE_JAVASE_BASE_SETTING,
+                () -> assertEquals(
+                        expectedBaseUrl,
+                        DocsSourceRegistry.resolveRuntimeBaseUrl(ORACLE_JAVASE_BASE_SETTING, DEFAULT_TEST_BASE_URL)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "   "})
+    void ignoresBlankSystemPropertyForRuntimeBaseUrl(String blankSystemProperty) {
+        String environmentBaseUrl = System.getenv(ORACLE_JAVASE_BASE_SETTING);
+        String expectedBaseUrl =
+                environmentBaseUrl == null || environmentBaseUrl.isBlank() ? DEFAULT_TEST_BASE_URL : environmentBaseUrl;
+
+        withSystemProperty(
+                ORACLE_JAVASE_BASE_SETTING,
+                blankSystemProperty,
                 () -> assertEquals(
                         expectedBaseUrl,
                         DocsSourceRegistry.resolveRuntimeBaseUrl(ORACLE_JAVASE_BASE_SETTING, DEFAULT_TEST_BASE_URL)));
@@ -86,6 +105,7 @@ class DocsSourceRegistryTest {
 
         assertEquals("hikaricp", evidence.sourceFamily());
         assertEquals("7.0.5", evidence.requestedVersion());
+        assertFalse(evidence.isExactVersion("7.0.2"));
         assertEquals(
                 List.of("7.0.2", "7.1.0"),
                 evidence.sources().stream().map(DocumentationSource::docVersion).toList());
@@ -95,6 +115,15 @@ class DocsSourceRegistryTest {
                         .orElseThrow()
                         .sources()
                         .stream()
+                        .map(DocumentationSource::docVersion)
+                        .toList());
+        DocsSourceRegistry.VersionedDocumentationEvidence shorthandEvidence =
+                DocsSourceRegistry.versionedDocumentationEvidence("HikariCP 7.1 connection pooling")
+                        .orElseThrow();
+        assertTrue(shorthandEvidence.isExactVersion("7.1.0"));
+        assertEquals(
+                List.of("7.1.0"),
+                shorthandEvidence.sources().stream()
                         .map(DocumentationSource::docVersion)
                         .toList());
         assertEquals(
@@ -196,6 +225,41 @@ class DocsSourceRegistryTest {
     }
 
     @Test
+    void resolvesExactKotlinLanguageAndAdjacentApiLineEvidence() {
+        List<DocsSourceRegistry.VersionedDocumentationEvidence> kotlinEvidence =
+                DocsSourceRegistry.versionedDocumentationEvidenceAll("Kotlin 2.4.10 Nothing");
+
+        assertEquals(
+                List.of("kotlin@2.4.10@exact", "kotlin-api@2.4@adjacent"),
+                kotlinEvidence.stream()
+                        .flatMap(evidence -> evidence.sources().stream()
+                                .map(source -> source.docSet() + "@" + source.docVersion() + "@"
+                                        + (evidence.isExactVersion(source.docVersion()) ? "exact" : "adjacent")))
+                        .toList());
+    }
+
+    @Test
+    void registersKotlinNothingApiWithTruthfulProvenance() {
+        DocumentationSource kotlinApiSource = DocsSourceRegistry.documentationSources().stream()
+                .filter(source -> "kotlin-api".equals(source.docSet()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(
+                "https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-nothing/", kotlinApiSource.citationBaseUrl());
+        assertEquals("kotlin-api", kotlinApiSource.relativeMirrorPath());
+        assertEquals("2.4", kotlinApiSource.docVersion());
+        assertEquals("official", kotlinApiSource.sourceKind());
+        assertEquals("api-docs", kotlinApiSource.docType());
+        String kotlinLanguageMirror = DocsSourceRegistry.documentationSources().stream()
+                .filter(source -> "kotlin".equals(source.docSet()))
+                .map(DocumentationSource::relativeMirrorPath)
+                .findFirst()
+                .orElseThrow();
+        assertFalse(kotlinApiSource.relativeMirrorPath().startsWith(kotlinLanguageMirror + "/"));
+    }
+
+    @Test
     void returnsImmutableDocumentationSourceSnapshot() {
         List<DocumentationSource> documentationSources = DocsSourceRegistry.documentationSources();
 
@@ -282,6 +346,14 @@ class DocsSourceRegistryTest {
     }
 
     @Test
+    void resolvesCanonicalRootsByStoredDocumentSetRatherThanMirrorPath() {
+        assertEquals(
+                List.of("https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/"),
+                DocsSourceRegistry.citationBasesForDocSet("groovy"));
+        assertEquals(List.of(), DocsSourceRegistry.citationBasesForDocSet("groovy/5.0.7"));
+    }
+
+    @Test
     void assignsDistinctStorageUrlsToJavaPagesThatShareOneCanonicalSourceFile(@TempDir Path temporaryDirectory) {
         Path mirrorRoot = temporaryDirectory.resolve("jackson/2.22.2/api");
         Path outerTypePage = mirrorRoot.resolve("com/fasterxml/jackson/databind/ObjectMapper.html");
@@ -361,6 +433,18 @@ class DocsSourceRegistryTest {
 
     @Test
     void preservesCanonicalUrlsForSingleDocumentMirrors() {
+        assertEquals(
+                "https://www.npmjs.com/package/@wcallahan/javachat-cli",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/javachat-cli/index.html"));
+        assertEquals(
+                "https://www.mintlify.com/llms.txt",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/mintlify/index.html"));
+        assertEquals(
+                "https://buildwithfern.com/llms.txt",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/fern/index.html"));
+        assertEquals(
+                "https://temporal.io/llms.txt",
+                DocsSourceRegistry.normalizeDocUrl("file:///data/docs/temporal/index.html"));
         assertEquals(
                 "https://porkbun.com/api/json/v3/documentation",
                 DocsSourceRegistry.normalizeDocUrl("file:///data/docs/porkbun/index.html"));

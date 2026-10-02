@@ -70,6 +70,50 @@ class SseSupportTest {
     }
 
     @Test
+    void sourceAvailabilityNoteDependsOnRetainedProviderContext() {
+        SseSupport sseSupport = createSseSupport();
+        Flux<String> answerChunks = Flux.just("The answer.");
+
+        StepVerifier.create(sseSupport.appendSourceAvailabilityNote(answerChunks, false))
+                .expectNext("The answer.", SseSupport.GENERAL_KNOWLEDGE_SOURCE_NOTE)
+                .verifyComplete();
+        StepVerifier.create(sseSupport.appendSourceAvailabilityNote(answerChunks, true))
+                .expectNext("The answer.")
+                .verifyComplete();
+        StepVerifier.create(sseSupport.appendSourceAvailabilityNote(
+                        Flux.just(
+                                "Answer.\n\nNote: Matching source documents were not available to JavaChat for ",
+                                "this question, so this answer uses the model's general knowledge."),
+                        false))
+                .expectNext(
+                        "Answer.\n\nNote: Matching source documents were not available to JavaChat for ",
+                        "this question, so this answer uses the model's general knowledge.")
+                .verifyComplete();
+        StepVerifier.create(sseSupport.appendSourceAvailabilityNote(
+                        Flux.just(
+                                "Answer.\n\nNote: Matching source documents for Rust 1.99 were not available ",
+                                "to JavaChat, so this answer uses the model's general knowledge."),
+                        false))
+                .expectNext(
+                        "Answer.\n\nNote: Matching source documents for Rust 1.99 were not available ",
+                        "to JavaChat, so this answer uses the model's general knowledge.")
+                .verifyComplete();
+        StepVerifier.create(sseSupport.appendSourceAvailabilityNote(
+                        Flux.just("Source unav", "ailable: Rust 1.99\n\nAnswer."), false))
+                .expectNext("Source unav", "ailable: Rust 1.99\n\nAnswer.")
+                .verifyComplete();
+        StepVerifier.create(sseSupport.appendSourceAvailabilityNote(
+                        Flux.just("The UI may say `Note: Matching source documents were not available to JavaChat`."),
+                        false))
+                .expectNext(
+                        "The UI may say `Note: Matching source documents were not available to JavaChat`.",
+                        SseSupport.GENERAL_KNOWLEDGE_SOURCE_NOTE)
+                .verifyComplete();
+        StepVerifier.create(sseSupport.appendSourceAvailabilityNote(Flux.empty(), false))
+                .verifyComplete();
+    }
+
+    @Test
     void prepareDataStreamTerminatesWithOverflowInsteadOfDroppingCoalescedChunks() {
         SseSupport sseSupport = createSseSupport();
         int coalescedChunkCount = (STREAM_BACKPRESSURE_BUFFER_CAPACITY * BACKPRESSURE_OVERFLOW_BUFFER_MULTIPLIER) + 1;

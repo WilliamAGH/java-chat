@@ -194,8 +194,10 @@ public class GitHubRepoProcessor {
                     case LocalDocsFileOutcome.Failed failed -> {
                         failedCount++;
                         failed.failure()
-                                .ifPresent(failure ->
-                                        LOGGER.warn("File failed (phase={}): {}", failure.phase(), failure.filePath()));
+                                .ifPresent(failure -> LOGGER.warn(
+                                        "File failed (phase={}): {}",
+                                        failure.phase(),
+                                        renderPathForLog(failure.filePath())));
                     }
                 }
             }
@@ -340,7 +342,7 @@ public class GitHubRepoProcessor {
         LOGGER.info("GitHub Repository Ingestion");
         LOGGER.info(LOG_BANNER_LINE);
         LOGGER.info("Repository: {}", repoMetadata.repoName());
-        LOGGER.info("Path: {}", repoRoot);
+        LOGGER.info("Path: {}", renderPathForLog(repoRoot.toString()));
         LOGGER.info("Collection: {}", repoMetadata.collectionName());
         if (!repoMetadata.repoUrl().isBlank()) {
             LOGGER.info("URL: {}", repoMetadata.repoUrl());
@@ -356,6 +358,10 @@ public class GitHubRepoProcessor {
                             .substring(0, Math.min(12, repoMetadata.commitHash().length())));
         }
         LOGGER.info("");
+    }
+
+    private static String renderPathForLog(String sourcePath) {
+        return sourcePath.replace("\r", "\\r").replace("\n", "\\n");
     }
 
     private void logSummary(IngestionTotals totals, String collectionName) {

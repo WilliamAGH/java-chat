@@ -127,8 +127,42 @@ class InlineListParserTest {
         assertNotNull(conversion);
         assertEquals("ol", conversion.primaryListElement().tagName());
         assertEquals(2, conversion.primaryListElement().children().size());
-        // Nested lists are extracted as additional elements
-        assertNotNull(conversion.additionalListElements());
+        assertEquals("Parent", conversion.primaryListElement().child(0).text());
+        assertEquals("Another", conversion.primaryListElement().child(1).text());
+        assertEquals(1, conversion.additionalListElements().size());
+        assertEquals(
+                "Child one",
+                conversion.additionalListElements().getFirst().child(0).text());
+        assertEquals(
+                "Child two",
+                conversion.additionalListElements().getFirst().child(1).text());
+    }
+
+    @Test
+    void tryConvert_preservesNonListColonText() {
+        List<String> colonLabels = List.of(
+                "Monday: 9:00 AM",
+                "Ratio: 3:1",
+                "URL: https://example.test/reference",
+                "Definition: immutable state",
+                "Explanation: records carry data");
+
+        for (String colonLabel : colonLabels) {
+            InlineListParser.Conversion conversion = InlineListParser.tryConvert("1. " + colonLabel + " 2. Follow-up");
+
+            assertNotNull(conversion, colonLabel);
+            assertEquals(colonLabel, conversion.primaryListElement().child(0).text(), colonLabel);
+        }
+    }
+
+    @Test
+    void tryConvert_bulletsPreserveNonListColonText() {
+        InlineListParser.Conversion conversion = InlineListParser.tryConvert("- Monday: 9:00 AM - Tuesday: 2:30 PM");
+
+        assertNotNull(conversion);
+        assertEquals("Monday: 9:00 AM", conversion.primaryListElement().child(0).text());
+        assertEquals(
+                "Tuesday: 2:30 PM", conversion.primaryListElement().child(1).text());
     }
 
     @Test

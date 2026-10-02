@@ -4,6 +4,8 @@ import com.williamcallahan.javachat.adapters.in.web.security.ClerkApiKeyAuthenti
 import com.williamcallahan.javachat.application.auth.ApiKeyLifecycle;
 import com.williamcallahan.javachat.application.auth.ApiKeyOperationUnavailableException;
 import com.williamcallahan.javachat.domain.errors.ApiErrorResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +29,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api")
 @PreAuthorize("isAuthenticated()")
 public final class AuthenticatedUserController {
+    private static final Logger log = LoggerFactory.getLogger(AuthenticatedUserController.class);
+    private static final String API_KEY_REVOCATION_UNAVAILABLE_LOG_MESSAGE = "Clerk API key revocation was unavailable";
 
     private final ApiKeyLifecycle apiKeyLifecycle;
 
@@ -66,6 +70,7 @@ public final class AuthenticatedUserController {
         try {
             apiKeyLifecycle.revoke(clerkApiKey.getCredentials());
         } catch (ApiKeyOperationUnavailableException unavailableClerk) {
+            log.error(API_KEY_REVOCATION_UNAVAILABLE_LOG_MESSAGE, unavailableClerk);
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .body(ApiErrorResponse.error("API key revocation is temporarily unavailable. Please retry."));
         }

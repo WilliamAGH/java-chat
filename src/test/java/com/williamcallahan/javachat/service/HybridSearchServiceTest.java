@@ -55,6 +55,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.document.Document;
 
 /**
  * Verifies hybrid and sparse citation retrieval behavior at the direct Qdrant request boundary.
@@ -127,7 +128,7 @@ class HybridSearchServiceTest {
         RetrievalConstraint retrievalConstraint =
                 RetrievalConstraint.forDocVersions(List.of(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
 
-        hybridSearchService.searchOutcome(HYBRID_QUERY, 5, retrievalConstraint, stageDeadlineNanos());
+        hybridSearchService.search(HYBRID_QUERY, 5, retrievalConstraint, stageDeadlineNanos());
 
         assertEquals(4, capturedQueries.size());
         assertTrue(capturedQueryTimeouts.stream()
@@ -165,7 +166,7 @@ class HybridSearchServiceTest {
                 .when(qdrantClient)
                 .queryAsync(notNull(), notNull());
 
-        buildSearchService().searchOutcome(EXACT_JAVA_API_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos());
+        buildSearchService().search(EXACT_JAVA_API_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos());
 
         assertEquals(4, capturedQueries.size());
         for (QueryPoints capturedQuery : capturedQueries) {
@@ -194,9 +195,8 @@ class HybridSearchServiceTest {
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
 
-        List<HybridSearchService.SearchOutcome> versionOutcomes = buildSearchServiceWithGitHubDiscovery(
-                        gitHubCollectionDiscovery)
-                .searchOutcomes(
+        List<List<Document>> versionOutcomes = buildSearchServiceWithGitHubDiscovery(gitHubCollectionDiscovery)
+                .searchByConstraint(
                         HYBRID_QUERY,
                         5,
                         List.of(
@@ -205,8 +205,8 @@ class HybridSearchServiceTest {
                         stageDeadlineNanos());
 
         assertEquals(2, versionOutcomes.size());
-        assertEquals(1, versionOutcomes.get(0).documents().size());
-        assertEquals(1, versionOutcomes.get(1).documents().size());
+        assertEquals(1, versionOutcomes.get(0).size());
+        assertEquals(1, versionOutcomes.get(1).size());
         assertEquals(4, capturedQueries.size());
         assertTrue(capturedQueries.subList(0, 2).stream()
                 .allMatch(queryRequest -> queryRequest.getLimit() == 5
@@ -249,12 +249,11 @@ class HybridSearchServiceTest {
         HybridSearchService hybridSearchService = buildSearchService();
 
         try (ExecutorService searchExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
-            CompletableFuture<HybridSearchService.SearchOutcome> firstSearch = CompletableFuture.supplyAsync(
-                    () -> hybridSearchService.searchOutcome(
-                            HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()),
+            CompletableFuture<List<Document>> firstSearch = CompletableFuture.supplyAsync(
+                    () -> hybridSearchService.search(HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()),
                     searchExecutor);
-            CompletableFuture<HybridSearchService.SearchOutcome> secondSearch = CompletableFuture.supplyAsync(
-                    () -> hybridSearchService.searchOutcome(
+            CompletableFuture<List<Document>> secondSearch = CompletableFuture.supplyAsync(
+                    () -> hybridSearchService.search(
                             SECOND_HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()),
                     searchExecutor);
             try {
@@ -264,9 +263,8 @@ class HybridSearchServiceTest {
 
                 heldQueryFutures.forEach(heldQueryFuture -> heldQueryFuture.set(List.of(scoredPoint())));
 
-                assertEquals(1, firstSearch.get(1, TimeUnit.SECONDS).documents().size());
-                assertEquals(
-                        1, secondSearch.get(1, TimeUnit.SECONDS).documents().size());
+                assertEquals(1, firstSearch.get(1, TimeUnit.SECONDS).size());
+                assertEquals(1, secondSearch.get(1, TimeUnit.SECONDS).size());
             } finally {
                 heldQueryFutures.forEach(heldQueryFuture -> heldQueryFuture.set(List.of(scoredPoint())));
             }
@@ -294,10 +292,10 @@ class HybridSearchServiceTest {
                 .queryAsync(notNull(), notNull());
 
         long nearlyExhaustedStageDeadlineNanos = System.nanoTime() + NEARLY_EXHAUSTED_STAGE_BUDGET.toNanos();
-        HybridSearchService.SearchOutcome nearlyExhaustedStageOutcome = buildSearchService()
-                .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none(), nearlyExhaustedStageDeadlineNanos);
+        List<Document> nearlyExhaustedStageOutcome = buildSearchService()
+                .search(HYBRID_QUERY, 5, RetrievalConstraint.none(), nearlyExhaustedStageDeadlineNanos);
 
-        assertEquals(1, nearlyExhaustedStageOutcome.documents().size());
+        assertEquals(1, nearlyExhaustedStageOutcome.size());
         assertEquals(1, capturedEmbeddingBudgets.size());
         Duration capturedEmbeddingBudget = capturedEmbeddingBudgets.getFirst();
         assertFalse(capturedEmbeddingBudget.isNegative());
@@ -324,7 +322,7 @@ class HybridSearchServiceTest {
         HybridSearchPartialFailureException timedOutSearchFailure;
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(HYBRID_SEARCH_LOGGER)) {
             timedOutSearchFailure = assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
-                    .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none(), nearlyExhaustedStageDeadlineNanos));
+                    .search(HYBRID_QUERY, 5, RetrievalConstraint.none(), nearlyExhaustedStageDeadlineNanos));
 
             assertEquals(
                     appProperties.getQdrant().getCollections().all().size(),
@@ -362,9 +360,8 @@ class HybridSearchServiceTest {
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
 
-        HybridSearchService.SearchOutcome citationSearchOutcome =
-                hybridSearchService.searchDocumentationCitationsOutcome(
-                        CITATION_QUERY, 3, officialDocumentationConstraint, stageDeadlineNanos());
+        List<Document> citationSearchOutcome = hybridSearchService.searchDocumentationCitations(
+                CITATION_QUERY, 3, officialDocumentationConstraint, stageDeadlineNanos());
 
         assertEquals(2, capturedQueries.size());
         assertEquals(2, capturedQueryTimeouts.size());
@@ -396,10 +393,10 @@ class HybridSearchServiceTest {
             assertTrue(officialFilter.contains(QdrantPayloadFieldSchema.DOC_SET_FIELD));
             assertTrue(officialFilter.contains(REPRESENTED_JAVA_API_SOURCE.relativeMirrorPath()));
         }
-        assertEquals(1, citationSearchOutcome.documents().size());
+        assertEquals(1, citationSearchOutcome.size());
         assertEquals(
                 appProperties.getQdrant().getCollections().getDocs(),
-                citationSearchOutcome.documents().getFirst().getMetadata().get("collection"));
+                citationSearchOutcome.getFirst().getMetadata().get("collection"));
         verifyNoInteractions(embeddingClient);
         verify(gitHubCollectionDiscovery, never()).getDiscoveredCollections();
         verify(qdrantClient, never()).queryAsync(any(QueryPoints.class));
@@ -420,12 +417,11 @@ class HybridSearchServiceTest {
                 .scrollAsync(notNull(), notNull());
 
         HybridSearchService hybridSearchService = buildSearchService();
-        HybridSearchService.SearchOutcome exactCitationOutcome =
-                hybridSearchService.searchDocumentationCitationsOutcome(
-                        VERSIONED_SELECTOR_CITATION_QUERY,
-                        3,
-                        RetrievalConstraint.forDocVersions(List.of(REPRESENTED_JAVA_API_SOURCE.javaRelease())),
-                        stageDeadlineNanos());
+        List<Document> exactCitationOutcome = hybridSearchService.searchDocumentationCitations(
+                VERSIONED_SELECTOR_CITATION_QUERY,
+                3,
+                RetrievalConstraint.forDocVersions(List.of(REPRESENTED_JAVA_API_SOURCE.javaRelease())),
+                stageDeadlineNanos());
 
         assertEquals(1, capturedScrolls.size());
         assertEquals(1, capturedScrollTimeouts.size());
@@ -442,10 +438,10 @@ class HybridSearchServiceTest {
         assertTrue(versionFilter.contains("List.html"));
         assertTrue(versionFilter.contains(QdrantPayloadFieldSchema.ANCHOR_FIELD));
         assertTrue(versionFilter.contains("of(E,E)"));
-        assertEquals(1, exactCitationOutcome.documents().size());
+        assertEquals(1, exactCitationOutcome.size());
         assertEquals(
                 appProperties.getQdrant().getCollections().getDocs(),
-                exactCitationOutcome.documents().getFirst().getMetadata().get("collection"));
+                exactCitationOutcome.getFirst().getMetadata().get("collection"));
         verifyNoInteractions(sparseEncoder);
         verifyNoInteractions(embeddingClient);
         verify(qdrantClient, never()).queryAsync(notNull(), notNull());
@@ -464,12 +460,11 @@ class HybridSearchServiceTest {
                 .when(qdrantClient)
                 .queryAsync(notNull(), notNull());
 
-        HybridSearchService.SearchOutcome citationOutcome = buildSearchService()
-                .searchDocumentationCitationsOutcome(
-                        thirdPartyQuery, 3, RetrievalConstraint.none(), stageDeadlineNanos());
+        List<Document> citationOutcome = buildSearchService()
+                .searchDocumentationCitations(thirdPartyQuery, 3, RetrievalConstraint.none(), stageDeadlineNanos());
 
         assertEquals(2, capturedQueries.size());
-        assertEquals(1, citationOutcome.documents().size());
+        assertEquals(1, citationOutcome.size());
         verify(sparseEncoder).encode(thirdPartyQuery + " SpringApplication run");
         verify(qdrantClient, never()).scrollAsync(notNull(), notNull());
         verifyNoInteractions(embeddingClient);
@@ -487,8 +482,8 @@ class HybridSearchServiceTest {
                 .when(qdrantClient)
                 .queryAsync(notNull(), notNull());
 
-        HybridSearchService.SearchOutcome citationOutcome = buildSearchService()
-                .searchDocumentationCitationsOutcome(
+        List<Document> citationOutcome = buildSearchService()
+                .searchDocumentationCitations(
                         RUNTIME_VALUE_JAVA_API_QUERY, 3, RetrievalConstraint.none(), stageDeadlineNanos());
 
         assertEquals(2, capturedQueries.size());
@@ -500,7 +495,7 @@ class HybridSearchServiceTest {
                 .contains(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD)));
         assertTrue(capturedQueries.stream()
                 .allMatch(queryRequest -> queryRequest.getFilter().toString().contains("List.html")));
-        assertEquals(1, citationOutcome.documents().size());
+        assertEquals(1, citationOutcome.size());
         verify(sparseEncoder).encode("List of");
         verify(qdrantClient, never()).scrollAsync(notNull(), notNull());
         verifyNoInteractions(embeddingClient);
@@ -520,14 +515,13 @@ class HybridSearchServiceTest {
                 .when(qdrantClient)
                 .queryAsync(notNull(), notNull());
 
-        HybridSearchService.SearchOutcome citationOutcome = buildSearchService()
-                .searchDocumentationCitationsOutcome(
-                        styledExampleQuery, 3, RetrievalConstraint.none(), stageDeadlineNanos());
+        List<Document> citationOutcome = buildSearchService()
+                .searchDocumentationCitations(styledExampleQuery, 3, RetrievalConstraint.none(), stageDeadlineNanos());
 
         assertEquals(2, capturedQueries.size());
         assertTrue(capturedQueries.stream()
                 .allMatch(queryRequest -> queryRequest.getFilter().toString().contains("String.html")));
-        assertEquals(1, citationOutcome.documents().size());
+        assertEquals(1, citationOutcome.size());
         verify(sparseEncoder).encode("String formatted");
         verify(qdrantClient, never()).scrollAsync(notNull(), notNull());
         verifyNoInteractions(embeddingClient);
@@ -542,7 +536,7 @@ class HybridSearchServiceTest {
         HybridSearchPartialFailureException citationSearchFailure;
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(HYBRID_SEARCH_LOGGER)) {
             citationSearchFailure = assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
-                    .searchDocumentationCitationsOutcome(
+                    .searchDocumentationCitations(
                             EXACT_JAVA_API_QUERY, 3, RetrievalConstraint.none(), stageDeadlineNanos()));
 
             assertEquals(1, expectedLogEvents.events().size());
@@ -563,7 +557,7 @@ class HybridSearchServiceTest {
         when(qdrantClient.scrollAsync(notNull(), notNull())).thenReturn(stalledScrollFuture);
 
         assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
-                .searchDocumentationCitationsOutcome(
+                .searchDocumentationCitations(
                         EXACT_JAVA_API_QUERY, 3, RetrievalConstraint.none(), stageDeadlineNanos()));
 
         assertTrue(stalledScrollFuture.isCancelled());
@@ -584,7 +578,7 @@ class HybridSearchServiceTest {
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(HYBRID_SEARCH_LOGGER)) {
             citationSearchFailure = assertThrows(
                     HybridSearchPartialFailureException.class,
-                    () -> hybridSearchService.searchDocumentationCitationsOutcome(
+                    () -> hybridSearchService.searchDocumentationCitations(
                             CITATION_QUERY, 3, officialDocumentationConstraint, stageDeadlineNanos()));
 
             assertEquals(2, expectedLogEvents.events().size());
@@ -626,7 +620,7 @@ class HybridSearchServiceTest {
                     SHARED_DEADLINE_ASSERTION_LIMIT,
                     () -> assertThrows(
                             HybridSearchPartialFailureException.class,
-                            () -> hybridSearchService.searchOutcome(
+                            () -> hybridSearchService.search(
                                     HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos())));
 
             assertEquals(4, expectedLogEvents.events().size());
@@ -659,7 +653,7 @@ class HybridSearchServiceTest {
 
         HybridSearchPartialFailureException searchFailure =
                 assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
-                        .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()));
+                        .search(HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()));
 
         assertEquals(1, dispatchedQueryCount.get());
         assertFalse(searchFailure.collectionFailures().isEmpty());
@@ -690,11 +684,11 @@ class HybridSearchServiceTest {
         AtomicBoolean interruptStatusPreserved = new AtomicBoolean();
 
         try (ExecutorService searchExecutor = Executors.newSingleThreadExecutor()) {
-            CompletableFuture<HybridSearchService.SearchOutcome> interruptedSearch = CompletableFuture.supplyAsync(
+            CompletableFuture<List<Document>> interruptedSearch = CompletableFuture.supplyAsync(
                     () -> {
                         searchThread.set(Thread.currentThread());
                         try {
-                            return hybridSearchService.searchOutcome(
+                            return hybridSearchService.search(
                                     HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos());
                         } finally {
                             interruptStatusPreserved.set(Thread.currentThread().isInterrupted());
@@ -726,23 +720,7 @@ class HybridSearchServiceTest {
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(HYBRID_SEARCH_LOGGER)) {
             assertThrows(
                     HybridSearchPartialFailureException.class,
-                    () -> hybridSearchService.searchOutcome(
-                            "collections health", 5, retrievalConstraint, stageDeadlineNanos()));
-            assertCollectionFailureWarning(expectedLogEvents);
-        }
-    }
-
-    @Test
-    void collectionFailureIsAlwaysTerminal() {
-        stubPartialFailureQueryResponses("collections health");
-
-        HybridSearchService hybridSearchService = buildSearchService();
-        RetrievalConstraint retrievalConstraint = RetrievalConstraint.none();
-
-        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(HYBRID_SEARCH_LOGGER)) {
-            assertThrows(
-                    HybridSearchPartialFailureException.class,
-                    () -> hybridSearchService.searchOutcome(
+                    () -> hybridSearchService.search(
                             "collections health", 5, retrievalConstraint, stageDeadlineNanos()));
             assertCollectionFailureWarning(expectedLogEvents);
         }
@@ -764,7 +742,7 @@ class HybridSearchServiceTest {
 
         HybridSearchPartialFailureException searchFailure =
                 assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
-                        .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()));
+                        .search(HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()));
 
         assertTrue(searchFailure.isRetryable());
         assertSame(unavailableFailure, searchFailure.getCause());
@@ -789,7 +767,7 @@ class HybridSearchServiceTest {
 
         HybridSearchPartialFailureException searchFailure =
                 assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
-                        .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()));
+                        .search(HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()));
 
         assertFalse(searchFailure.isRetryable());
         assertSame(permissionDeniedFailure, searchFailure.getCause());
@@ -814,7 +792,7 @@ class HybridSearchServiceTest {
 
         HybridSearchPartialFailureException searchFailure =
                 assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
-                        .searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()));
+                        .search(HYBRID_QUERY, 5, RetrievalConstraint.none(), stageDeadlineNanos()));
 
         TimeoutException timeoutFailure = assertInstanceOf(TimeoutException.class, searchFailure.getCause());
         assertSame(deadlineExceededFailure, timeoutFailure.getCause());

@@ -419,6 +419,21 @@ class MarkdownServiceTest {
     }
 
     @Test
+    @DisplayName("Ordered and bullet list labels preserve times after colons")
+    void testInlineListLabelsPreserveTimesAfterColons() {
+        String orderedMarkdown = "Schedule: 1. Monday: 9:00 AM 2. Tuesday: 2:30 PM";
+        String bulletMarkdown = "Schedule: - Monday: 9:00 AM - Tuesday: 2:30 PM";
+
+        String orderedHtml = markdownService.processStructured(orderedMarkdown).html();
+        String bulletHtml = markdownService.processStructured(bulletMarkdown).html();
+
+        assertTrue(orderedHtml.contains("<li>Monday: 9:00 AM</li>"));
+        assertTrue(orderedHtml.contains("<li>Tuesday: 2:30 PM</li>"));
+        assertTrue(bulletHtml.contains("<li>Monday: 9:00 AM</li>"));
+        assertTrue(bulletHtml.contains("<li>Tuesday: 2:30 PM</li>"));
+    }
+
+    @Test
     @DisplayName("Enrichment closing marker preserves trailing content brace")
     void testEnrichmentClosingMarkerPreservesTrailingBrace() {
         String markdown = "{{example:try (var scope = open()) { doWork(); }}}";

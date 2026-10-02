@@ -171,9 +171,11 @@ class LocalDocsDirectoryIngestionServiceTest {
                         org.mockito.ArgumentMatchers.anyList(),
                         org.mockito.ArgumentMatchers.anyMap()))
                 .thenReturn(
-                        List.of(LocalDocsFileOutcome.failedFile(
-                                new com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure(
-                                        firstDocumentationFile.toString(), "html-read", "malformed input"))),
+                        List.of(
+                                LocalDocsFileOutcome.failedFile(
+                                        new com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure(
+                                                firstDocumentationFile.toString(), "html-read", "malformed input")),
+                                LocalDocsFileOutcome.processedFile()),
                         List.of(LocalDocsFileOutcome.processedFile()));
         LocalDocsDirectoryIngestionService directoryIngestionService = new LocalDocsDirectoryIngestionService(
                 fileProcessor, ingestionRunStore, configuredDocumentationRoot.toString());

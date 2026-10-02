@@ -10,7 +10,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
 readonly ACTIVE_STAGING_SERVICE="java-chat-local-embedding-staging.service"
 readonly QUEUE_POLL_INTERVAL_SECONDS=60
 readonly STAGING_INVOCATION_RECEIPT="$HOME/.local/state/java-chat/local-embedding-staging.invocation"
-readonly QUEUED_DOCUMENTATION_SOURCES="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,scala,groovy,clojure,spring-boot,quarkus,java/java21-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle-java25-release-notes,ibm-java25-overview,jetbrains-java25-article"
+readonly QUEUED_DOCUMENTATION_SOURCES="porkbun,porkbun-mcp,cloudflare,dev-java,kotlin,kotlin-api,scala,groovy,clojure,spring-boot,quarkus,java/java21-complete,java/java25-complete,spring-ai-reference,spring-ai-api-stable,spring-framework-reference,spring-framework-api,oracle-java25-release-notes,ibm-java25-overview,jetbrains-java25-article"
 readonly FINAL_JAVA_DOCUMENTATION_SOURCE="java/java26-complete"
 readonly QUEUED_STAGING_ATTEMPT_RECEIPT="$HOME/.local/state/java-chat/queued-platform-documentation-staging.attempted"
 

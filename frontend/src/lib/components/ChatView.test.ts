@@ -298,7 +298,7 @@ describe("ChatView streaming stability", () => {
 
   it("treats invisible streamed characters as an empty failed response", async () => {
     streamChatMock.mockImplementation(async (_sessionId, _message, onChunk) => {
-      onChunk(" \t\n\u200B\uFEFF\u2060");
+      onChunk(" \t\n\u061C\u202E\u2066\u{E0001}");
       throw new Error(TERMINAL_STREAM_FAILURE_MESSAGE);
     });
 
@@ -312,7 +312,7 @@ describe("ChatView streaming stability", () => {
 
   it("keeps the connecting indicator active for an unresolved invisible chunk", async () => {
     streamChatMock.mockImplementation(async (_sessionId, _message, onChunk) => {
-      onChunk("\u200B\uFEFF\u2060");
+      onChunk("\u061C\u202E\u2066\u{E0001}");
       return new Promise<void>(() => {});
     });
 

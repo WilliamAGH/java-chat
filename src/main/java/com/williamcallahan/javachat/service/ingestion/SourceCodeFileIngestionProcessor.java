@@ -152,13 +152,13 @@ public class SourceCodeFileIngestionProcessor {
         boolean hasExactPointCoverage = unchangedByFingerprint
                 && hasExactStoredPointCoverage(previousFileRecord, canonicalCollectionName, fileContext);
         if (hasExactPointCoverage) {
-            log.debug("Skipping unchanged file (already ingested): {}", fileContext.relativePath());
+            log.debug("Skipping unchanged file (already ingested): {}", renderPathForLog(fileContext.relativePath()));
             return new SourceFileProcessingResult(LocalDocsFileOutcome.skippedFile(), fileUrl);
         }
         if (unchangedByFingerprint) {
             log.info(
                     "File marker exists but stored point identities differ; forcing reindex: {}",
-                    fileContext.relativePath());
+                    renderPathForLog(fileContext.relativePath()));
         }
 
         boolean requiresFullReindex =
@@ -187,7 +187,10 @@ public class SourceCodeFileIngestionProcessor {
             long fileSizeBytes = Files.size(sourceFilePath);
             if (fileSizeBytes > MAX_FILE_SIZE_BYTES) {
                 log.debug(
-                        "Skipping oversized file ({}B > {}B): {}", fileSizeBytes, MAX_FILE_SIZE_BYTES, sourceFilePath);
+                        "Skipping oversized file ({}B > {}B): {}",
+                        fileSizeBytes,
+                        MAX_FILE_SIZE_BYTES,
+                        renderPathForLog(sourceFilePath.toString()));
                 return Optional.of(LocalDocsFileOutcome.skippedFile());
             }
         } catch (IOException fileAttributeException) {
@@ -230,7 +233,7 @@ public class SourceCodeFileIngestionProcessor {
         try {
             rawFileText = Files.readString(sourceFilePath, StandardCharsets.UTF_8);
         } catch (MalformedInputException malformedInputException) {
-            log.debug("Skipping binary file (UTF-8 decode failed): {}", fileContext.relativePath());
+            log.debug("Skipping binary file (UTF-8 decode failed): {}", renderPathForLog(fileContext.relativePath()));
             return Optional.empty();
         } catch (IOException readException) {
             throw new IllegalStateException("Failed reading file after validation: " + sourceFilePath, readException);
@@ -238,7 +241,7 @@ public class SourceCodeFileIngestionProcessor {
 
         String fileText = sanitizeControlCharacters(rawFileText, fileContext.relativePath());
         if (fileText.isBlank()) {
-            log.debug("Skipping empty file: {}", fileContext.relativePath());
+            log.debug("Skipping empty file: {}", renderPathForLog(fileContext.relativePath()));
             return Optional.empty();
         }
 
@@ -266,7 +269,7 @@ public class SourceCodeFileIngestionProcessor {
             log.debug(
                     "Removed {} unsupported control character(s) before embedding: {}",
                     removedControlCharacterCount,
-                    relativePath);
+                    renderPathForLog(relativePath));
         }
         return sanitizedTextBuilder.toString();
     }
@@ -366,7 +369,7 @@ public class SourceCodeFileIngestionProcessor {
             String ingestionFingerprint,
             String collectionName) {
         if (chunkingOutcome.skippedAllChunks()) {
-            log.debug("All chunks already ingested: {}", fileContext.relativePath());
+            log.debug("All chunks already ingested: {}", renderPathForLog(fileContext.relativePath()));
             markFileIngested(fileContext, ingestionFingerprint, collectionName, chunkingOutcome.allChunkHashes());
             return LocalDocsFileOutcome.skippedFile();
         }
@@ -384,9 +387,13 @@ public class SourceCodeFileIngestionProcessor {
                 "Processed {}/{} chunks for {} in {}ms ({})",
                 indexedDocumentCount,
                 totalChunkCount,
-                relativePath,
+                renderPathForLog(relativePath),
                 totalDuration,
                 progressTracker.formatPercent());
+    }
+
+    private static String renderPathForLog(String sourcePath) {
+        return sourcePath.replace("\r", "\\r").replace("\n", "\\n");
     }
 
     private static String buildFileUrl(GitHubRepoMetadata repositoryMetadata, String relativePath) {

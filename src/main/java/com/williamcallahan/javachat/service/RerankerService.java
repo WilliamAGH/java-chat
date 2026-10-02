@@ -123,7 +123,7 @@ public class RerankerService {
      */
     public List<Document> rerank(String query, List<Document> documents, int returnK, long stageDeadlineNanos) {
         requireRemainingStageBudget(stageDeadlineNanos);
-        if (documents.size() <= 1) {
+        if (documents.isEmpty()) {
             return documents;
         }
 

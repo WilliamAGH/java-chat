@@ -245,20 +245,15 @@ class RetrievalServiceCitationTest {
     }
 
     @Test
-    void retainsDistinctPdfPageAnchors() {
+    void retainsDistinctPdfPageAnchorsCreatedByDocumentFactory() {
         String pdfCitationUrl = "https://example.test/books/Reference.pdf";
+        DocumentFactory documentFactory = new DocumentFactory(new ContentHasher());
         RetrievalService.CitationOutcome citationOutcome = citationService()
                 .toCitations(List.of(
-                        Document.builder()
-                                .id("first-pdf-page-chunk")
-                                .text("First PDF page")
-                                .metadata(QdrantPayloadFieldSchema.URL_FIELD, pdfCitationUrl + "#page=1")
-                                .build(),
-                        Document.builder()
-                                .id("second-pdf-page-chunk")
-                                .text("Second PDF page")
-                                .metadata(QdrantPayloadFieldSchema.URL_FIELD, pdfCitationUrl + "#page=2")
-                                .build()));
+                        documentFactory.createDocumentWithPages(
+                                "First PDF page", pdfCitationUrl, "Reference", 0, "", "first-pdf-page-hash", 1, 1),
+                        documentFactory.createDocumentWithPages(
+                                "Second PDF page", pdfCitationUrl, "Reference", 1, "", "second-pdf-page-hash", 2, 2)));
 
         assertEquals(
                 List.of(pdfCitationUrl, pdfCitationUrl),

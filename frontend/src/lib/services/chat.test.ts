@@ -125,10 +125,12 @@ describe("streamChat", () => {
 
 describe("hasVisibleChatMessageText", () => {
   it("rejects whitespace and invisible format characters", () => {
-    expect(hasVisibleChatMessageText(" \t\n\u200B\u200C\u200D\uFEFF\u2060")).toBe(false);
+    expect(
+      hasVisibleChatMessageText(" \t\n\u200B\u200C\u200D\uFEFF\u2060\u061C\u202E\u2066\u{E0001}"),
+    ).toBe(false);
   });
 
   it("accepts a visible code point among invisible characters", () => {
-    expect(hasVisibleChatMessageText("\u200BJava 24\u2060")).toBe(true);
+    expect(hasVisibleChatMessageText("\u202EJava 24\u2066\u{E0001}")).toBe(true);
   });
 });

@@ -27,7 +27,7 @@ public final class DocsSourceRegistry {
     private static final String OFFICIAL_DOCUMENTATION_SOURCE_KIND = "official";
     private static final String LOCAL_DOCS_ROOT = "/data/docs/";
     private static final String LOCAL_DOCS_BOOKS = LOCAL_DOCS_ROOT + "books/";
-    private static final String PUBLIC_PDFS_BASE = "/pdfs/";
+    public static final String PUBLIC_PDFS_BASE = "/pdfs/";
     private static final String PDF_EXTENSION = ".pdf";
     private static final String HTML_EXTENSION = ".html";
     private static final String HTM_EXTENSION = ".htm";
@@ -158,6 +158,15 @@ public final class DocsSourceRegistry {
                     OFFICIAL_DOCUMENTATION_SOURCE_KIND,
                     "language-reference",
                     "2.4.10"),
+            new DocumentationSource(
+                    "https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-nothing/",
+                    "kotlin-api",
+                    "Kotlin 2.4 Nothing API",
+                    "kotlin-api",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "api-docs",
+                    "2.4",
+                    DocumentationCitationPathStyle.SINGLE_DOCUMENT),
             new DocumentationSource(
                     "https://docs.scala-lang.org/scala3/reference/",
                     "scala",
@@ -299,6 +308,42 @@ public final class DocsSourceRegistry {
                     "platform-reference",
                     "current",
                     DocumentationCitationPathStyle.EXTENSIONLESS_HTML),
+            new DocumentationSource(
+                    "https://www.npmjs.com/package/@wcallahan/javachat-cli",
+                    "javachat-cli",
+                    "JavaChat CLI 0.0.1 Package Documentation",
+                    "javachat-cli",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "tool-reference",
+                    "0.0.1-8b26605fce31",
+                    DocumentationCitationPathStyle.SINGLE_DOCUMENT),
+            new DocumentationSource(
+                    "https://www.mintlify.com/llms.txt",
+                    "mintlify",
+                    "Mintlify Documentation Index",
+                    "mintlify",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.SINGLE_DOCUMENT),
+            new DocumentationSource(
+                    "https://buildwithfern.com/llms.txt",
+                    "fern",
+                    "Fern Documentation Index",
+                    "fern",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.SINGLE_DOCUMENT),
+            new DocumentationSource(
+                    "https://temporal.io/llms.txt",
+                    "temporal",
+                    "Temporal Documentation Index",
+                    "temporal",
+                    OFFICIAL_DOCUMENTATION_SOURCE_KIND,
+                    "platform-reference",
+                    "current",
+                    DocumentationCitationPathStyle.SINGLE_DOCUMENT),
             new DocumentationSource(
                     "https://clerk.com/docs/llms-full.txt",
                     "clerk",
@@ -581,6 +626,11 @@ public final class DocsSourceRegistry {
             Objects.requireNonNull(requestedVersion, "requestedVersion");
             sources = List.copyOf(sources);
         }
+
+        /** Returns whether one evidence version is numerically exact for the request. */
+        public boolean isExactVersion(String evidenceVersion) {
+            return compareNumericVersions(evidenceVersion, requestedVersion) == 0;
+        }
     }
 
     /** Resolves a named versioned dependency in a query to exact or adjacent same-family sources. */
@@ -626,41 +676,64 @@ public final class DocsSourceRegistry {
                                 .find()) {
                     continue;
                 }
-                List<DocumentationSource> exactSources = familySources.getValue().stream()
-                        .filter(source -> source.docVersion().equals(requestedVersion)
-                                || source.docVersion().startsWith(requestedVersion + "-"))
-                        .toList();
-                if (!exactSources.isEmpty()) {
-                    resolvedEvidence.add(
-                            new VersionedDocumentationEvidence(familySources.getKey(), requestedVersion, exactSources));
-                    continue;
-                }
-                List<DocumentationSource> adjacentFamilySources = familySources.getValue().stream()
+                List<DocumentationSource> adjacencyEligibleSources = familySources.getValue().stream()
                         .filter(source ->
                                 !"release-notes".equals(source.docType()) && !"article".equals(source.docType()))
                         .toList();
-                if (adjacentFamilySources.isEmpty()) {
+                List<DocumentationSource> exactSources = familySources.getValue().stream()
+                        .filter(source -> compareNumericVersions(source.docVersion(), requestedVersion) == 0)
+                        .toList();
+                if (!exactSources.isEmpty()) {
+                    List<String> exactDocumentTypes = exactSources.stream()
+                            .map(DocumentationSource::docType)
+                            .distinct()
+                            .toList();
+                    List<DocumentationSource> supplementalSources = adjacencyEligibleSources.stream()
+                            .filter(source -> !exactDocumentTypes.contains(source.docType()))
+                            .collect(java.util.stream.Collectors.groupingBy(
+                                    DocumentationSource::docType,
+                                    LinkedHashMap::new,
+                                    java.util.stream.Collectors.toList()))
+                            .values()
+                            .stream()
+                            .map(sources -> adjacentDocumentationSources(sources, requestedVersion))
+                            .flatMap(List::stream)
+                            .toList();
+                    List<DocumentationSource> evidenceSources = Stream.concat(
+                                    exactSources.stream(), supplementalSources.stream())
+                            .toList();
+                    resolvedEvidence.add(new VersionedDocumentationEvidence(
+                            familySources.getKey(), requestedVersion, evidenceSources));
                     continue;
                 }
-                Optional<String> lowerVersion = adjacentFamilySources.stream()
-                        .map(DocumentationSource::docVersion)
-                        .filter(version -> compareNumericVersions(version, requestedVersion) < 0)
-                        .max(DocsSourceRegistry::compareNumericVersions);
-                Optional<String> higherVersion = adjacentFamilySources.stream()
-                        .map(DocumentationSource::docVersion)
-                        .filter(version -> compareNumericVersions(version, requestedVersion) > 0)
-                        .min(DocsSourceRegistry::compareNumericVersions);
-                List<String> evidenceVersions = Stream.concat(lowerVersion.stream(), higherVersion.stream())
-                        .toList();
-                List<DocumentationSource> evidenceSources = evidenceVersions.stream()
-                        .flatMap(evidenceVersion -> adjacentFamilySources.stream()
-                                .filter(source -> evidenceVersion.equals(source.docVersion())))
-                        .toList();
-                resolvedEvidence.add(
-                        new VersionedDocumentationEvidence(familySources.getKey(), requestedVersion, evidenceSources));
+                if (adjacencyEligibleSources.isEmpty()) {
+                    continue;
+                }
+                List<DocumentationSource> evidenceSources =
+                        adjacentDocumentationSources(adjacencyEligibleSources, requestedVersion);
+                if (!evidenceSources.isEmpty()) {
+                    resolvedEvidence.add(new VersionedDocumentationEvidence(
+                            familySources.getKey(), requestedVersion, evidenceSources));
+                }
             }
         }
         return List.copyOf(resolvedEvidence);
+    }
+
+    private static List<DocumentationSource> adjacentDocumentationSources(
+            List<DocumentationSource> familySources, String requestedVersion) {
+        Optional<String> lowerVersion = familySources.stream()
+                .map(DocumentationSource::docVersion)
+                .filter(version -> compareNumericVersions(version, requestedVersion) < 0)
+                .max(DocsSourceRegistry::compareNumericVersions);
+        Optional<String> higherVersion = familySources.stream()
+                .map(DocumentationSource::docVersion)
+                .filter(version -> compareNumericVersions(version, requestedVersion) > 0)
+                .min(DocsSourceRegistry::compareNumericVersions);
+        return Stream.concat(lowerVersion.stream(), higherVersion.stream())
+                .flatMap(evidenceVersion ->
+                        familySources.stream().filter(source -> evidenceVersion.equals(source.docVersion())))
+                .toList();
     }
 
     /** Returns a stable source-family identity from a versioned or unversioned documentation set. */
@@ -804,6 +877,22 @@ public final class DocsSourceRegistry {
         return DOCUMENTATION_SOURCES;
     }
 
+    /** Returns every canonical documentation root registered for an exact ingested document set. */
+    public static List<String> citationBasesForDocSet(String docSet) {
+        if (docSet == null || docSet.isBlank()) {
+            return List.of();
+        }
+        return Stream.concat(
+                        DOCUMENTATION_SOURCES.stream()
+                                .filter(source -> source.docSet().equals(docSet))
+                                .map(DocumentationSource::citationBaseUrl),
+                        JAVA_API_DOCUMENTATION_SOURCES.stream()
+                                .filter(source -> source.relativeMirrorPath().equals(docSet))
+                                .map(JavaApiDocumentationSource::remoteBaseUrl))
+                .distinct()
+                .toList();
+    }
+
     /** Returns retrieval identities used by official-document filters. */
     public static List<String> officialDocumentationSourceIdentities() {
         return List.copyOf(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
@@ -862,11 +951,11 @@ public final class DocsSourceRegistry {
     /** Resolves a citation base by preferring a JVM property, then process environment, then built-in default. */
     static String resolveRuntimeBaseUrl(String settingKey, String defaultBaseUrl) {
         String systemPropertyBaseUrl = System.getProperty(settingKey);
-        if (systemPropertyBaseUrl != null) {
+        if (systemPropertyBaseUrl != null && !systemPropertyBaseUrl.isBlank()) {
             return systemPropertyBaseUrl;
         }
         String environmentBaseUrl = System.getenv(settingKey);
-        return environmentBaseUrl != null ? environmentBaseUrl : defaultBaseUrl;
+        return environmentBaseUrl != null && !environmentBaseUrl.isBlank() ? environmentBaseUrl : defaultBaseUrl;
     }
 
     private static Map<String, CitationRoute> buildLocalPrefixLookup() {

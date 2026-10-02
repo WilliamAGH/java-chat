@@ -9,13 +9,6 @@ package com.williamcallahan.javachat.domain.text;
  * Unicode space separators.</p>
  */
 public final class UnicodeVisibleContent {
-
-    private static final int ZERO_WIDTH_SPACE = 0x200B;
-    private static final int ZERO_WIDTH_NON_JOINER = 0x200C;
-    private static final int ZERO_WIDTH_JOINER = 0x200D;
-    private static final int ZERO_WIDTH_NO_BREAK_SPACE = 0xFEFF;
-    private static final int WORD_JOINER = 0x2060;
-
     private UnicodeVisibleContent() {}
 
     /**
@@ -31,10 +24,6 @@ public final class UnicodeVisibleContent {
     private static boolean isVisible(int codePoint) {
         return !Character.isWhitespace(codePoint)
                 && !Character.isSpaceChar(codePoint)
-                && codePoint != ZERO_WIDTH_SPACE
-                && codePoint != ZERO_WIDTH_NON_JOINER
-                && codePoint != ZERO_WIDTH_JOINER
-                && codePoint != ZERO_WIDTH_NO_BREAK_SPACE
-                && codePoint != WORD_JOINER;
+                && Character.getType(codePoint) != Character.FORMAT;
     }
 }

@@ -16,6 +16,7 @@ import java.util.IdentityHashMap;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
@@ -38,6 +39,13 @@ import reactor.core.publisher.Mono;
 @Component
 public class SseSupport {
     private static final Logger log = LoggerFactory.getLogger(SseSupport.class);
+    private static final String SOURCE_AVAILABILITY_NOTE =
+            "Note: Matching source documents were not available to JavaChat for this question, so this answer uses the model's general knowledge.";
+    private static final String PREVIOUS_SOURCE_AVAILABILITY_SUFFIX =
+            "were not available to JavaChat, so this answer uses the model's general knowledge.";
+    private static final String LEGACY_SOURCE_AVAILABILITY_START = "Source unavailable:";
+    private static final String LEGACY_SOURCE_AVAILABILITY_PARAGRAPH = "\n\n" + LEGACY_SOURCE_AVAILABILITY_START;
+    static final String GENERAL_KNOWLEDGE_SOURCE_NOTE = "\n\n" + SOURCE_AVAILABILITY_NOTE;
 
     private static final String RESPONSE_PREPARATION_MESSAGE = "Preparing your response";
     private static final String RESPONSE_PREPARATION_DETAILS = "Finding relevant Java documentation.";
@@ -136,6 +144,53 @@ public class SseSupport {
                         this::recordCoalescedChunkOverflow,
                         BufferOverflowStrategy.ERROR)
                 .doOnNext(chunk -> chunkConsumer.accept(chunk));
+    }
+
+    /**
+     * Appends the shared source-availability note when the provider retained no source documents.
+     *
+     * @param answerChunks model answer chunks
+     * @param sourceDocumentsAvailable whether provider context retained at least one source document
+     * @return answer chunks with the deterministic general-knowledge note when needed
+     */
+    Flux<String> appendSourceAvailabilityNote(Flux<String> answerChunks, boolean sourceDocumentsAvailable) {
+        Objects.requireNonNull(answerChunks, "answerChunks");
+        if (sourceDocumentsAvailable) {
+            return answerChunks;
+        }
+        return Flux.defer(() -> {
+            AtomicBoolean sourceAvailabilityStated = new AtomicBoolean();
+            StringBuilder sourceLabelTail = new StringBuilder();
+            StringBuilder answerStart = new StringBuilder();
+            int sourceLabelTailLength = Math.max(
+                            Math.max(SOURCE_AVAILABILITY_NOTE.length(), PREVIOUS_SOURCE_AVAILABILITY_SUFFIX.length()),
+                            LEGACY_SOURCE_AVAILABILITY_PARAGRAPH.length())
+                    - 1;
+            return answerChunks
+                    .doOnNext(chunk -> {
+                        if (chunk.isEmpty()) {
+                            return;
+                        }
+                        if (!sourceAvailabilityStated.get()) {
+                            if (answerStart.length() < LEGACY_SOURCE_AVAILABILITY_START.length()) {
+                                int remainingStartLength =
+                                        LEGACY_SOURCE_AVAILABILITY_START.length() - answerStart.length();
+                                answerStart.append(chunk, 0, Math.min(chunk.length(), remainingStartLength));
+                            }
+                            sourceLabelTail.append(chunk);
+                            sourceAvailabilityStated.set(answerStart.toString().equals(LEGACY_SOURCE_AVAILABILITY_START)
+                                    || sourceLabelTail.indexOf(SOURCE_AVAILABILITY_NOTE) >= 0
+                                    || sourceLabelTail.indexOf(PREVIOUS_SOURCE_AVAILABILITY_SUFFIX) >= 0
+                                    || sourceLabelTail.indexOf(LEGACY_SOURCE_AVAILABILITY_PARAGRAPH) >= 0);
+                            if (sourceLabelTail.length() > sourceLabelTailLength) {
+                                sourceLabelTail.delete(0, sourceLabelTail.length() - sourceLabelTailLength);
+                            }
+                        }
+                    })
+                    .concatWith(Flux.defer(() -> !sourceLabelTail.isEmpty() && !sourceAvailabilityStated.get()
+                            ? Flux.just(GENERAL_KNOWLEDGE_SOURCE_NOTE)
+                            : Flux.empty()));
+        });
     }
 
     /**

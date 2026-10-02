@@ -13,7 +13,7 @@ const LONG_SOURCE_REQUEST = Array.from(
 
 const ANSWER_TEXT =
   "The retained Java and Spring records support this `transaction` summary.\n\n" +
-  "Source unavailable: jOOQ 3.20 official documentation. The jOOQ note below is general knowledge and is not verified by the Sources panel.";
+  "Note: Matching source documents for jOOQ 3.20 were not available to JavaChat, so this answer uses the model's general knowledge.";
 
 const CITATIONS = [
   {
@@ -59,9 +59,7 @@ for (const theme of ["dark", "light"] as const) {
 
     await openAnswerScreen(page, theme);
 
-    await expect(
-      page.getByText("Source unavailable: jOOQ 3.20 official documentation."),
-    ).toBeVisible();
+    await expect(page.getByText(/Matching source documents for jOOQ 3\.20/)).toBeVisible();
     await page.getByRole("button", { name: "2 sources" }).click();
     await expect(page.getByRole("link", { name: /CompletableFuture/ })).toHaveAttribute(
       "href",

@@ -85,7 +85,8 @@ describe("parseMarkdown", () => {
       "\ufeff",
       "\u200b",
       "\u2060",
-      " \t\u00a0\u2003\u200b\u2060\u3000\n",
+      "\u061c\u202e\u2066\u{e0001}",
+      " \t\u00a0\u2003\u200b\u2060\u3000\u{e0001}\n",
     ];
 
     for (const isStreaming of [false, true]) {
@@ -95,6 +96,30 @@ describe("parseMarkdown", () => {
         expect(renderedHtml).not.toContain("inline-enrichment");
         expect(renderedHtml).not.toContain("Helpful Hints");
       }
+    }
+  });
+
+  it("keeps enrichment markers inside inline code literal", () => {
+    const inlineCodeCases = ["`{{hint:test}}`", "``{{hint: test}}``"];
+
+    for (const isStreaming of [false, true]) {
+      for (const inlineCode of inlineCodeCases) {
+        const renderedHtml = parseMarkdown(`${inlineCode} then {{warning:outside}}`, isStreaming);
+
+        expect(renderedHtml).toContain("<code>{{hint:");
+        expect(renderedHtml).toContain("</code>");
+        expect(renderedHtml.match(/data-enrichment-type=/g)).toHaveLength(1);
+        expect(renderedHtml).toContain('data-enrichment-type="warning"');
+      }
+    }
+  });
+
+  it("renders a real enrichment after an unmatched backtick", () => {
+    for (const isStreaming of [false, true]) {
+      const renderedHtml = parseMarkdown("`unfinished text {{hint:outside}}", isStreaming);
+
+      expect(renderedHtml).toContain('data-enrichment-type="hint"');
+      expect(renderedHtml).toContain("outside");
     }
   });
 

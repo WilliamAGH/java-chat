@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 class IngestionBacklogStatusTest {
 
     @Test
-    void resumeReturnsFailedAndInterruptedFilesToPending() {
+    void resumeRestartsTheMarkerBackedInventoryAfterFailure() {
         IngestionBacklogStatus partialBacklog = IngestionBacklogStatus.running("java-21", 4)
                 .startBatch(3)
                 .completeBatch(1, 1, 1)
@@ -18,11 +18,11 @@ class IngestionBacklogStatusTest {
 
         assertEquals(IngestionBacklogStatus.Lifecycle.RUNNING, resumedBacklog.lifecycle());
         assertEquals(4, resumedBacklog.eligibleFiles());
-        assertEquals(2, resumedBacklog.inspectedFiles());
-        assertEquals(1, resumedBacklog.processedFiles());
-        assertEquals(1, resumedBacklog.skippedFiles());
+        assertEquals(0, resumedBacklog.inspectedFiles());
+        assertEquals(0, resumedBacklog.processedFiles());
+        assertEquals(0, resumedBacklog.skippedFiles());
         assertEquals(0, resumedBacklog.failedFiles());
-        assertEquals(2, resumedBacklog.pendingFiles());
+        assertEquals(4, resumedBacklog.pendingFiles());
         assertEquals(0, resumedBacklog.inProgressFiles());
     }
 }

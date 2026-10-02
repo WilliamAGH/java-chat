@@ -17,6 +17,8 @@ import com.williamcallahan.javachat.application.auth.ApiKeyOperationUnavailableE
 import com.williamcallahan.javachat.application.auth.VerifiedApiKey;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -235,6 +237,30 @@ class ClerkApiKeyVerifierTest {
 
         assertTrue(verifier.isAvailable());
         assertTrue(verifier.isAvailable(), "the authoritative readiness result must not probe twice");
+        clerkServer.verify();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true,false", "false,true"})
+    void acceptsCompleteRevokedOrExpiredAvailabilityResponse(boolean revoked, boolean expired) {
+        RestClient.Builder restClientBuilder = RestClient.builder();
+        MockRestServiceServer clerkServer =
+                MockRestServiceServer.bindTo(restClientBuilder).build();
+        ClerkApiKeyVerifier verifier = new ClerkApiKeyVerifier(restClientBuilder.build(), CLERK_SECRET_KEY);
+        clerkServer
+                .expect(once(), requestTo(CLERK_VERIFY_ENDPOINT))
+                .andRespond(withSuccess(
+                        ("{%n"
+                                        + "  \"id\": \"ak_0123456789abcdef0123456789abcdef\",%n"
+                                        + "  \"subject\": \"user_0123456789abcdefghijklmnopq\",%n"
+                                        + "  \"revoked\": %s,%n"
+                                        + "  \"expired\": %s%n"
+                                        + "}%n")
+                                .formatted(revoked, expired),
+                        MediaType.APPLICATION_JSON));
+
+        assertTrue(verifier.isAvailable());
+        assertTrue(verifier.isAvailable(), "the complete lifecycle response must not trigger another probe");
         clerkServer.verify();
     }
 

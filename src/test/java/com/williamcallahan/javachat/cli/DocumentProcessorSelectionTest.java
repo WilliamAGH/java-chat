@@ -31,6 +31,7 @@ class DocumentProcessorSelectionTest {
     private static final String DOCSET_SPRING_FRAMEWORK_API_PATH = "spring-framework-api";
     private static final String DOCSET_SPRING_FRAMEWORK_QUICK_PATH = "spring-framework";
     private static final String DOCSET_GROOVY_MIRROR_PATH = "groovy/5.0.7";
+    private static final String DOCSET_KOTLIN_API_MIRROR_PATH = "kotlin-api";
 
     private final DocumentProcessor documentProcessor =
             new DocumentProcessor(mock(LocalDocumentationIngestionUseCase.class), mock(ProgressTracker.class));
@@ -117,6 +118,15 @@ class DocumentProcessorSelectionTest {
 
         assertEquals(DOCSET_GROOVY_MIRROR_PATH, groovyDocumentationSet.relativePath());
         assertEquals("groovy", groovyDocumentationSet.indexedDocSet());
+    }
+
+    @Test
+    void selectsKotlinApiMirrorWithItsDedicatedIndexedDocSet() {
+        DocumentationSet kotlinApiDocumentationSet =
+                selectDocumentationSets(DOCSET_KOTLIN_API_MIRROR_PATH, false).getFirst();
+
+        assertEquals(DOCSET_KOTLIN_API_MIRROR_PATH, kotlinApiDocumentationSet.relativePath());
+        assertEquals("kotlin-api", kotlinApiDocumentationSet.indexedDocSet());
     }
 
     @Test

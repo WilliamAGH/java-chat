@@ -65,9 +65,10 @@ class ChatStreamRequestTest {
 
     @Test
     void retainsValidLatestQuery() {
-        ChatStreamRequest request = new ChatStreamRequest(SESSION_ID, USER_QUERY);
+        String queryWithFormatCharacters = "\u202E" + USER_QUERY + "\u2066";
+        ChatStreamRequest request = new ChatStreamRequest(SESSION_ID, queryWithFormatCharacters);
 
-        assertEquals(USER_QUERY, request.latest());
+        assertEquals(queryWithFormatCharacters, request.latest());
     }
 
     @ParameterizedTest(name = "{0} cannot be a latest query")
@@ -108,6 +109,7 @@ class ChatStreamRequestTest {
                 "{\"sessionId\":\"request-session\",\"latest\":null}",
                 "{\"sessionId\":\"request-session\",\"latest\":\"\"}",
                 "{\"sessionId\":\"request-session\",\"latest\":\"\u2003\"}",
+                "{\"sessionId\":\"request-session\",\"latest\":\"\u202E\u2066\"}",
                 "{\"sessionId\":\"request-session\",\"message\":\"legacy query\"}");
     }
 
@@ -120,6 +122,10 @@ class ChatStreamRequestTest {
                 Arguments.of("U+200B ZERO WIDTH SPACE", "\u200B"),
                 Arguments.of("U+200C ZERO WIDTH NON-JOINER", "\u200C"),
                 Arguments.of("U+200D ZERO WIDTH JOINER", "\u200D"),
-                Arguments.of("U+2060 WORD JOINER", "\u2060"));
+                Arguments.of("U+2060 WORD JOINER", "\u2060"),
+                Arguments.of("U+061C ARABIC LETTER MARK", "\u061C"),
+                Arguments.of("U+202E RIGHT-TO-LEFT OVERRIDE", "\u202E"),
+                Arguments.of("U+2066 LEFT-TO-RIGHT ISOLATE", "\u2066"),
+                Arguments.of("U+E0001 LANGUAGE TAG", "\uDB40\uDC01"));
     }
 }

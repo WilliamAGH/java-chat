@@ -100,6 +100,29 @@ describe("numeric list fence nesting", () => {
     }
   });
 
+  it("accepts CommonMark closing indentation after a column-zero opening fence", () => {
+    for (const fenceMarker of ["```", "~~~"]) {
+      for (const closingOffset of [1, 2, 3, 4]) {
+        const closingIndentation = " ".repeat(3 + closingOffset);
+        const markdown = [
+          "1. Template example",
+          `${fenceMarker}text`,
+          "template body",
+          `${closingIndentation}${fenceMarker}`,
+        ].join("\n");
+
+        for (const isStreaming of [false, true]) {
+          const renderedContainer = renderMarkdown(markdown, isStreaming);
+          const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
+
+          expect(nestedCodeBlocks).toHaveLength(1);
+          expect(nestedCodeBlocks[0].textContent).toContain("template body");
+          expect(nestedCodeBlocks[0].textContent?.includes(fenceMarker)).toBe(closingOffset === 4);
+        }
+      }
+    }
+  });
+
   it("repairs fences in consecutive list items and after headings", () => {
     const consecutiveItems = [
       "1. First",

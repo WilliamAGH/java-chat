@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import static io.qdrant.client.ConditionFactory.matchKeyword;
 import static io.qdrant.client.PointIdFactory.id;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -292,6 +293,25 @@ class HybridVectorServiceTest {
                         new PayloadValueCount("jetbrains/idea/2025/09", 3L),
                         new PayloadValueCount("oracle/javase/25/api", 9L)),
                 payloadValueCounts);
+    }
+
+    @Test
+    void facetPayloadValuesAppliesAnExactPayloadFilter() {
+        ArgumentCaptor<FacetCounts> facetRequest = ArgumentCaptor.forClass(FacetCounts.class);
+        when(qdrantClient.facetAsync(facetRequest.capture()))
+                .thenReturn(Futures.immediateFuture(List.of(facetHit("2.4.10", 9L))));
+
+        List<PayloadValueCount> versions = hybridVectorService.facetPayloadValues(
+                COLLECTION_NAME,
+                QdrantPayloadFieldSchema.DOC_VERSION_FIELD,
+                QdrantPayloadFieldSchema.DOC_SET_FIELD,
+                "kotlin");
+
+        assertEquals(List.of(new PayloadValueCount("2.4.10", 9L)), versions);
+        assertTrue(facetRequest.getValue().hasFilter());
+        assertEquals(
+                matchKeyword(QdrantPayloadFieldSchema.DOC_SET_FIELD, "kotlin"),
+                facetRequest.getValue().getFilter().getMust(0));
     }
 
     @Test

@@ -125,8 +125,8 @@ class ChatPreparationSseIntegrationTest {
             }
         });
         when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any(), anyLong()))
-                .thenReturn(new ChatService.StructuredPromptOutcome(
-                        StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
+                .thenReturn(
+                        new ChatService.StructuredPromptOutcome(StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         when(chatService.citationOutcomeForRetainedContext(
                         eq(USER_QUERY), any(ChatService.StructuredPromptOutcome.class), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));

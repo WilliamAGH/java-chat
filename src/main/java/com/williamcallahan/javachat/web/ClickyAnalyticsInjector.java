@@ -46,7 +46,7 @@ public class ClickyAnalyticsInjector {
      * @param document the Jsoup document whose {@code <head>} will be modified in place
      */
     public void applyTo(Document document) {
-        removeLegacyInitializers(document);
+        removeInlineInitializers(document);
         Element existingClickyLoader = document.head().selectFirst("script[src=\"" + CLICKY_SCRIPT_URL + "\"]");
 
         if (!clickyEnabled) {
@@ -68,7 +68,7 @@ public class ClickyAnalyticsInjector {
                 .attr("src", CLICKY_SCRIPT_URL);
     }
 
-    private void removeLegacyInitializers(Document document) {
+    private void removeInlineInitializers(Document document) {
         document.head().select("script").forEach(scriptTag -> {
             if (scriptTag.html().contains("clicky_site_ids")) {
                 scriptTag.remove();

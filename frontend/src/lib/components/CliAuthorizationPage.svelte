@@ -54,7 +54,7 @@
     {#if !authorizationQueryValidation.success}
       <p role="alert">
         This authorization request is invalid. Return to your terminal and run
-        <code>javachat login</code> again.
+        <code>javachat auth login</code> again.
       </p>
     {:else if clerkAuthentication.phase === 'disabled' || clerkAuthentication.phase === 'failed'}
       <p role="alert">

@@ -248,6 +248,26 @@ public class HybridVectorService {
      *     distinct-value count exceeds {@value #FACET_VALUE_LIMIT}
      */
     public List<PayloadValueCount> facetPayloadValues(String collectionName, String payloadField) {
+        return facetPayloadValues(collectionName, payloadField, FacetCounts.newBuilder());
+    }
+
+    /** Counts distinct values within points matching one exact keyword payload value. */
+    public List<PayloadValueCount> facetPayloadValues(
+            String collectionName, String payloadField, String filterField, String filterValue) {
+        Objects.requireNonNull(filterField, "filterField");
+        Objects.requireNonNull(filterValue, "filterValue");
+        if (filterField.isBlank() || filterValue.isBlank()) {
+            throw new IllegalArgumentException("facet filter field and value must not be blank");
+        }
+        return facetPayloadValues(
+                collectionName,
+                payloadField,
+                FacetCounts.newBuilder()
+                        .setFilter(Filter.newBuilder().addMust(matchKeyword(filterField, filterValue))));
+    }
+
+    private List<PayloadValueCount> facetPayloadValues(
+            String collectionName, String payloadField, FacetCounts.Builder facetRequest) {
         Objects.requireNonNull(collectionName, NULL_MESSAGE_COLLECTION_NAME);
         Objects.requireNonNull(payloadField, "payloadField");
         if (collectionName.isBlank()) {
@@ -259,7 +279,7 @@ public class HybridVectorService {
 
         List<FacetHit> facetHits = RetrySupport.executeWithRetry(
                 () -> QdrantFutureAwaiter.awaitFuture(
-                        qdrantClient.facetAsync(FacetCounts.newBuilder()
+                        qdrantClient.facetAsync(facetRequest
                                 .setCollectionName(collectionName)
                                 .setKey(payloadField)
                                 .setExact(true)

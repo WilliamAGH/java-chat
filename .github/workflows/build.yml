@@ -15,6 +15,10 @@ on:
 permissions:
   contents: read
 
+env:
+  IMAGE_REGISTRY: registry.haiku.host
+  IMAGE_REPOSITORY: registry.haiku.host/java-chat/java-chat
+
 jobs:
   writer-lease-portability:
     runs-on: macos-15
@@ -309,3 +313,127 @@ jobs:
             --project-name java-chat-ci \
             --file infra/docker-compose-qdrant.yml \
             down --volumes
+
+  # One multi-platform image per environment: each platform builds natively,
+  # pushes by digest, and the manifest job joins the digests under one index.
+  image:
+    if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'main')
+    needs:
+      - docker-smoke
+    environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to the image registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.IMAGE_REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push platform image by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            SOURCE_COMMIT=${{ github.sha }}
+            VITE_CLERK_PUBLISHABLE_KEY=${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
+          outputs: type=image,name=${{ env.IMAGE_REPOSITORY }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ github.ref_name }}-${{ matrix.runner }}
+          cache-to: type=gha,mode=max,scope=${{ github.ref_name }}-${{ matrix.runner }}
+
+      - name: Record platform digest
+        env:
+          PLATFORM_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/digests"
+          touch "${RUNNER_TEMP}/digests/${PLATFORM_DIGEST#sha256:}"
+
+      - name: Upload platform digest
+        uses: actions/upload-artifact@v6
+        with:
+          name: image-digest-${{ matrix.runner }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    needs:
+      - image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+      url: ${{ github.ref_name == 'main' && 'https://javachat.ai' || 'https://dev.javachat.ai' }}
+    concurrency:
+      group: dokploy-${{ github.ref_name }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Download platform digests
+        uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: image-digest-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to the image registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.IMAGE_REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Publish multi-platform image index
+        id: index
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_REPOSITORY }}:${{ github.ref_name }}-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          platform_images=()
+          for platform_digest in *; do
+            platform_images+=("${IMAGE_REPOSITORY}@sha256:${platform_digest}")
+          done
+          docker buildx imagetools create --tag "$IMAGE_TAG" "${platform_images[@]}"
+          docker buildx imagetools inspect "$IMAGE_TAG"
+          index_digest="$(docker buildx imagetools inspect "$IMAGE_TAG" --format '{{json .Manifest}}' | jq --exit-status --raw-output .digest)"
+          printf 'reference=%s@%s\n' "$IMAGE_REPOSITORY" "$index_digest" >>"$GITHUB_OUTPUT"
+
+      - name: Deploy image digest to Dokploy
+        env:
+          DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          DOKPLOY_APPLICATION_ID: ${{ vars.DOKPLOY_APPLICATION_ID }}
+          DOKPLOY_REGISTRY_ID: ${{ vars.DOKPLOY_REGISTRY_ID }}
+          IMAGE_REFERENCE: ${{ steps.index.outputs.reference }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          PUBLIC_URL: ${{ github.ref_name == 'main' && 'https://javachat.ai' || 'https://dev.javachat.ai' }}
+        run: scripts/deploy_dokploy_image.sh

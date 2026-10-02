@@ -216,22 +216,22 @@ public class DocumentProcessor {
             return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0);
         }
 
-        final long fileCount = countEligibleFiles(docsPath);
-        if (fileCount <= 0) {
-            if (LOGGER.isDebugEnabled()) {
-                LOGGER.debug(LOG_SKIP_NO_ELIGIBLE);
-            }
-            return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0);
-        }
-
-        if (LOGGER.isInfoEnabled()) {
-            LOGGER.info(LOG_SECTION_LINE);
-            LOGGER.info(LOG_PROCESSING_SET);
-            LOGGER.info(LOG_FILES_TO_PROCESS, fileCount);
-        }
-
-        final long startMillis = System.currentTimeMillis();
         try {
+            final long fileCount = countEligibleFiles(docsPath);
+            if (fileCount <= 0) {
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debug(LOG_SKIP_NO_ELIGIBLE);
+                }
+                return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0);
+            }
+
+            if (LOGGER.isInfoEnabled()) {
+                LOGGER.info(LOG_SECTION_LINE);
+                LOGGER.info(LOG_PROCESSING_SET);
+                LOGGER.info(LOG_FILES_TO_PROCESS, fileCount);
+            }
+
+            final long startMillis = System.currentTimeMillis();
             final IngestionLocalOutcome outcome =
                     ingestionService.ingestLocalDirectory(docsPath.toString(), CLI_FILE_LIMIT);
             final int processed = outcome.backlog().processedFiles();
@@ -265,7 +265,7 @@ public class DocumentProcessor {
             LOGGER.info(LOG_DOCSET_POSTCONDITION, safeDocumentationSet);
             return new ProcessingOutcome.Success(processed, duplicates);
 
-        } catch (IOException | IngestionAlreadyRunningException processingFailure) {
+        } catch (IOException | UncheckedIOException | IngestionAlreadyRunningException processingFailure) {
             if (LOGGER.isErrorEnabled()) {
                 LOGGER.error(LOG_PROCESSING_FAILED, processingFailure.getClass().getSimpleName());
             }

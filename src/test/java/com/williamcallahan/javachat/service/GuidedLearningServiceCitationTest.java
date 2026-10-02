@@ -147,6 +147,8 @@ class GuidedLearningServiceCitationTest {
         assertFalse(guidanceCaptor.getValue().contains("## Work with text using `String`"));
         assertTrue(guidanceCaptor.getValue().contains("copy one complete fenced example byte-for-byte"));
         assertTrue(guidanceCaptor.getValue().contains("Do not transcribe it from memory"));
+        assertTrue(guidanceCaptor.getValue().contains("answer it from general knowledge"));
+        assertFalse(guidanceCaptor.getValue().contains("Source unavailable:"));
     }
 
     @Test
@@ -341,8 +343,7 @@ class GuidedLearningServiceCitationTest {
         ArgumentCaptor<String> guidanceCaptor = ArgumentCaptor.forClass(String.class);
         verify(chatService)
                 .buildStructuredPromptWithContextAndGuidance(any(), anyString(), any(), guidanceCaptor.capture());
-        assertTrue(guidanceCaptor.getValue().contains("clearly labeled version delta"));
-        assertTrue(guidanceCaptor.getValue().contains("adjacent same-family evidence"));
+        assertTrue(guidanceCaptor.getValue().contains("core source-attribution rules"));
     }
 
     @Test

@@ -4,17 +4,27 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
 
 const CLI_ENTRYPOINT = fileURLToPath(new URL("../bin/javachat.js", import.meta.url));
 const TEST_API_KEY = "ak_secret_0123456789abcdef0123456789abcdef";
 
-function runCli(argumentsList, environmentVariables = {}) {
+function runCli(argumentsList, environmentVariables = {}, entrypoint = CLI_ENTRYPOINT) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [CLI_ENTRYPOINT, ...argumentsList], {
+    const child = spawn(process.execPath, [entrypoint, ...argumentsList], {
       env: { ...process.env, ...environmentVariables },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -31,10 +41,48 @@ function runCli(argumentsList, environmentVariables = {}) {
   });
 }
 
+async function createFakeNpm(testDirectory) {
+  const fakeBinDirectory = join(testDirectory, "fake-bin");
+  const invocationLog = join(testDirectory, "npm-invocations.jsonl");
+  const fakeNpm = join(fakeBinDirectory, "npm");
+  await mkdir(fakeBinDirectory, { recursive: true });
+  await writeFile(
+    fakeNpm,
+    `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+const argumentsList = process.argv.slice(2);
+if (argumentsList.join(" ") === "prefix --global") {
+  process.stdout.write(process.env.TEST_NPM_GLOBAL_PREFIX + "\\n");
+  process.exit(0);
+}
+appendFileSync(process.env.TEST_NPM_INVOCATION_LOG, JSON.stringify({ argumentsList, workingDirectory: process.cwd() }) + "\\n");
+process.exit(Number(process.env.TEST_NPM_EXIT_CODE || 0));
+`,
+  );
+  await chmod(fakeNpm, 0o755);
+  return { fakeBinDirectory, invocationLog };
+}
+
+async function createInstalledCli(packageRoot, binaryPath) {
+  await mkdir(join(packageRoot, "bin"), { recursive: true });
+  await mkdir(dirname(binaryPath), { recursive: true });
+  await copyFile(CLI_ENTRYPOINT, join(packageRoot, "bin", "javachat.js"));
+  await copyFile(new URL("../package.json", import.meta.url), join(packageRoot, "package.json"));
+  await symlink(join(packageRoot, "bin", "javachat.js"), binaryPath);
+}
+
+async function readNpmInvocations(invocationLog) {
+  return (await readFile(invocationLog, "utf8"))
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((invocation) => JSON.parse(invocation));
+}
+
 async function startBrowserLogin(host, configurationHome) {
   const child = spawn(
     process.execPath,
-    [CLI_ENTRYPOINT, "login", "--host", host, "--no-browser"],
+    [CLI_ENTRYPOINT, "auth", "login", "--host", host, "--no-browser"],
     {
       env: { ...process.env, XDG_CONFIG_HOME: configurationHome },
       stdio: ["ignore", "pipe", "pipe"],
@@ -71,12 +119,158 @@ async function completeBrowserLogin(approvalUrl, apiKey = TEST_API_KEY) {
   });
 }
 
+async function writeStoredCredential(configurationHome, host, apiKey) {
+  const credentialDirectory = join(configurationHome, "javachat");
+  const credentialFile = join(credentialDirectory, "credentials.json");
+  await mkdir(credentialDirectory, { recursive: true });
+  await writeFile(
+    credentialFile,
+    JSON.stringify({ [host]: { apiKey, sessionId: "chat-stored" } }),
+  );
+  return credentialFile;
+}
+
 test("prints usage without loading credentials", async () => {
-  const cliExecution = await runCli(["--help"]);
+  const helpEnvironment = {
+    XDG_CONFIG_HOME: CLI_ENTRYPOINT,
+    JAVACHAT_API_KEY: "",
+    JAVACHAT_HOST: "not a URL",
+  };
+  const helpExecutions = await Promise.all(
+    [[], ["--help"], ["-h"]].map((helpArguments) => runCli(helpArguments, helpEnvironment)),
+  );
+
+  for (const helpExecution of helpExecutions) {
+    assert.equal(helpExecution.exitCode, 0);
+    assert.match(helpExecution.standardOutput, /javachat ask/);
+    assert.match(helpExecution.standardOutput, /javachat auth login/);
+    assert.match(helpExecution.standardOutput, /javachat auth logout/);
+    assert.match(helpExecution.standardOutput, /javachat auth status/);
+    assert.match(helpExecution.standardOutput, /javachat update/);
+    assert.match(helpExecution.standardOutput, /javachat list all/);
+    assert.match(helpExecution.standardOutput, /javachat list knowledge/);
+    assert.match(helpExecution.standardOutput, /--help, -h/);
+    assert.equal(helpExecution.standardError, "");
+  }
+  assert.equal(helpExecutions[0].standardOutput, helpExecutions[1].standardOutput);
+  assert.equal(helpExecutions[1].standardOutput, helpExecutions[2].standardOutput);
+});
+
+test("updates the global npm installation that owns the invoked command", async (testContext) => {
+  const testDirectory = await mkdtemp(join(tmpdir(), "javachat-cli-update-test-"));
+  testContext.after(() => rm(testDirectory, { recursive: true, force: true }));
+  const globalPrefix = join(testDirectory, "global-prefix");
+  const packageRoot = join(
+    globalPrefix,
+    "lib",
+    "node_modules",
+    "@wcallahan",
+    "javachat-cli",
+  );
+  const binaryPath = join(globalPrefix, "bin", "javachat");
+  await createInstalledCli(packageRoot, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(testDirectory);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      JAVACHAT_HOST: "not a URL",
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_GLOBAL_PREFIX: globalPrefix,
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
 
   assert.equal(cliExecution.exitCode, 0);
-  assert.match(cliExecution.standardOutput, /javachat login/);
-  assert.equal(cliExecution.standardError, "");
+  assert.match(cliExecution.standardOutput, /JavaChat CLI update complete/);
+  assert.equal(cliExecution.standardError, "Updating @wcallahan/javachat-cli with npm...\n");
+  assert.deepEqual(await readNpmInvocations(invocationLog), [
+    {
+      argumentsList: ["install", "--global", "@wcallahan/javachat-cli@latest"],
+      workingDirectory: await realpath(globalPrefix),
+    },
+  ]);
+});
+
+test("updates a project that declares a local JavaChat dependency", async (testContext) => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "javachat-cli-project-test-"));
+  testContext.after(() => rm(projectRoot, { recursive: true, force: true }));
+  await writeFile(
+    join(projectRoot, "package.json"),
+    JSON.stringify({ dependencies: { "@wcallahan/javachat-cli": "0.0.2" } }),
+  );
+  const packageRoot = join(projectRoot, "node_modules", "@wcallahan", "javachat-cli");
+  const binaryPath = join(projectRoot, "node_modules", ".bin", "javachat");
+  await createInstalledCli(packageRoot, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(projectRoot);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.deepEqual(await readNpmInvocations(invocationLog), [
+    {
+      argumentsList: ["install", "@wcallahan/javachat-cli@latest"],
+      workingDirectory: await realpath(projectRoot),
+    },
+  ]);
+});
+
+test("refuses to update an npm link to the repository source", async (testContext) => {
+  const testDirectory = await mkdtemp(join(tmpdir(), "javachat-cli-source-update-test-"));
+  testContext.after(() => rm(testDirectory, { recursive: true, force: true }));
+  const globalPrefix = join(testDirectory, "global-prefix");
+  const binaryPath = join(globalPrefix, "bin", "javachat");
+  await mkdir(dirname(binaryPath), { recursive: true });
+  await symlink(CLI_ENTRYPOINT, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(testDirectory);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_GLOBAL_PREFIX: globalPrefix,
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /does not replace the repository checkout/);
+  await assert.rejects(readFile(invocationLog, "utf8"), { code: "ENOENT" });
+});
+
+test("propagates an npm update failure", async (testContext) => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "javachat-cli-update-failure-test-"));
+  testContext.after(() => rm(projectRoot, { recursive: true, force: true }));
+  await writeFile(
+    join(projectRoot, "package.json"),
+    JSON.stringify({ devDependencies: { "@wcallahan/javachat-cli": "0.0.2" } }),
+  );
+  const packageRoot = join(projectRoot, "node_modules", "@wcallahan", "javachat-cli");
+  const binaryPath = join(projectRoot, "node_modules", ".bin", "javachat");
+  await createInstalledCli(packageRoot, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(projectRoot);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_EXIT_CODE: "7",
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
+
+  assert.equal(cliExecution.exitCode, 7);
+  assert.doesNotMatch(cliExecution.standardOutput, /update complete/);
 });
 
 test("prints the installed version without loading credentials", async () => {
@@ -95,7 +289,7 @@ test("treats --version after -- as question text", async (testContext) => {
   const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
   testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
 
-  const cliExecution = await runCli(["--", "--version"], {
+  const cliExecution = await runCli(["ask", "--", "--version"], {
     JAVACHAT_API_KEY: "",
     XDG_CONFIG_HOME: configurationHome,
   });
@@ -158,7 +352,7 @@ test("streams text and citations through the public API", async (testContext) =>
   assert.equal(typeof address, "object");
 
   const cliExecution = await runCli(
-    ["--host", `http://127.0.0.1:${address.port}`, "How do records work?"],
+    ["--host", `http://127.0.0.1:${address.port}`, "ask", "How do records work?"],
     { JAVACHAT_API_KEY: TEST_API_KEY },
   );
 
@@ -169,6 +363,31 @@ test("streams text and citations through the public API", async (testContext) =>
   assert.match(cliExecution.standardOutput, /https:\/\/docs\.example\/records/);
   assert.equal(cliExecution.standardError, "");
   assert.equal(identityRequestCount, 0);
+});
+
+test("prints a general-knowledge answer without inventing sources", async (testContext) => {
+  const apiServer = createServer((request, response) => {
+    assert.equal(request.url, "/api/chat/stream");
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end(
+      'event: text\ndata: {"text":"The API behaves this way.\\n\\nNote: Matching source documents for Example SDK 3 were not available to JavaChat, so this answer uses the model\'s general knowledge."}\n\n',
+    );
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const apiAddress = apiServer.address();
+  assert.equal(typeof apiAddress, "object");
+
+  const cliExecution = await runCli(
+    ["--host", `http://127.0.0.1:${apiAddress.port}`, "ask", "How does Example SDK 3 work?"],
+    { JAVACHAT_API_KEY: TEST_API_KEY },
+  );
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.match(cliExecution.standardOutput, /Matching source documents for Example SDK 3/);
+  assert.match(cliExecution.standardOutput, /model's general knowledge/);
+  assert.doesNotMatch(cliExecution.standardOutput, /Source unavailable:|Sources:/);
 });
 
 test("renders enrichment markers split across stream chunks", async (testContext) => {
@@ -193,7 +412,7 @@ test("renders enrichment markers split across stream chunks", async (testContext
   const address = apiServer.address();
 
   const cliExecution = await runCli(
-    ["--host", `http://127.0.0.1:${address.port}`, "What is a sealed interface?"],
+    ["--host", `http://127.0.0.1:${address.port}`, "ask", "What is a sealed interface?"],
     { JAVACHAT_API_KEY: TEST_API_KEY },
   );
 
@@ -223,7 +442,7 @@ test("releases an unterminated enrichment marker instead of swallowing it", asyn
   const address = apiServer.address();
 
   const cliExecution = await runCli(
-    ["--host", `http://127.0.0.1:${address.port}`, "Anything"],
+    ["--host", `http://127.0.0.1:${address.port}`, "ask", "Anything"],
     { JAVACHAT_API_KEY: TEST_API_KEY },
   );
 
@@ -250,7 +469,7 @@ test("rejects a successful non-SSE response", async (testContext) => {
   assert.equal(typeof address, "object");
 
   const cliExecution = await runCli(
-    ["--host", `http://127.0.0.1:${address.port}`, "How do records work?"],
+    ["--host", `http://127.0.0.1:${address.port}`, "ask", "How do records work?"],
     { JAVACHAT_API_KEY: TEST_API_KEY },
   );
 
@@ -344,6 +563,52 @@ test("rejects an unknown option instead of treating it as a question", async () 
   assert.match(cliExecution.standardError, /Unknown option: --hots/);
 });
 
+test("requires the ask command before question text", async () => {
+  const cliExecution = await runCli(["How do records work?"]);
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /Unknown command: How do records work\?/);
+});
+
+test("rejects removed flat authentication commands", async () => {
+  for (const flatCommand of ["login", "logout", "whoami"]) {
+    const cliExecution = await runCli([flatCommand]);
+    assert.equal(cliExecution.exitCode, 1);
+    assert.match(cliExecution.standardError, new RegExp(`Unknown command: ${flatCommand}`));
+  }
+});
+
+test("requires an authentication command", async () => {
+  const cliExecution = await runCli(["auth"]);
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /auth requires a command: login, logout, or status/);
+});
+
+test("rejects unknown authentication commands", async () => {
+  const cliExecution = await runCli(["auth", "whoami"]);
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /Unknown auth command: whoami/);
+});
+
+test("requires a supported list target", async () => {
+  const missingTarget = await runCli(["list"]);
+  const unknownTarget = await runCli(["list", "packages"]);
+
+  assert.equal(missingTarget.exitCode, 1);
+  assert.match(missingTarget.standardError, /list requires a target: all or knowledge/);
+  assert.equal(unknownTarget.exitCode, 1);
+  assert.match(unknownTarget.standardError, /Unknown list target: packages/);
+});
+
+test("rejects the removed flat knowledge command", async () => {
+  const cliExecution = await runCli(["knowledge"]);
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(cliExecution.standardError, /Unknown command: knowledge/);
+});
+
 test("allows Java option tokens after question text begins", async (testContext) => {
   let receivedQuestion = "";
   const apiServer = createServer((request, response) => {
@@ -377,7 +642,7 @@ test("allows Java option tokens after question text begins", async (testContext)
 });
 
 test("rejects --host without a value", async () => {
-  const cliExecution = await runCli(["whoami", "--host"]);
+  const cliExecution = await runCli(["auth", "status", "--host"]);
 
   assert.equal(cliExecution.exitCode, 1);
   assert.match(cliExecution.standardError, /--host requires a value/);
@@ -391,17 +656,40 @@ test("describes the offending host value when it is not a URL", async () => {
 });
 
 test("rejects stray arguments on subcommands", async () => {
-  const cliExecution = await runCli(["whoami", "extra"]);
+  const cliExecution = await runCli(["auth", "status", "extra"]);
 
   assert.equal(cliExecution.exitCode, 1);
-  assert.match(cliExecution.standardError, /javachat whoami takes no arguments/);
+  assert.match(cliExecution.standardError, /javachat auth status takes no arguments/);
+});
+
+test("auth status shows the authenticated identity", async (testContext) => {
+  const apiServer = createServer((request, response) => {
+    assert.equal(request.url, "/api/me");
+    assert.equal(request.headers.authorization, `Bearer ${TEST_API_KEY}`);
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end('{"userId":"user_cli"}');
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const apiAddress = apiServer.address();
+  assert.equal(typeof apiAddress, "object");
+  const host = `http://127.0.0.1:${apiAddress.port}`;
+
+  const cliExecution = await runCli(["auth", "--host", host, "status"], {
+    JAVACHAT_API_KEY: TEST_API_KEY,
+  });
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.equal(cliExecution.standardOutput, `user_cli at ${host}\n`);
+  assert.equal(cliExecution.standardError, "");
 });
 
 test("login points at JAVACHAT_API_KEY when it provides the authentication", async (testContext) => {
   const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
   testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
 
-  const cliExecution = await runCli(["login", "--host", "https://javachat.ai"], {
+  const cliExecution = await runCli(["auth", "login", "--host", "https://javachat.ai"], {
     JAVACHAT_API_KEY: TEST_API_KEY,
     XDG_CONFIG_HOME: configurationHome,
   });
@@ -411,31 +699,58 @@ test("login points at JAVACHAT_API_KEY when it provides the authentication", asy
   assert.doesNotMatch(cliExecution.standardError, /logout/);
 });
 
+test("auth logout revokes and removes the stored credential", async (testContext) => {
+  const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
+  testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
+  const apiServer = createServer((request, response) => {
+    assert.equal(request.method, "DELETE");
+    assert.equal(request.url, "/api/me/api-key");
+    assert.equal(request.headers.authorization, `Bearer ${TEST_API_KEY}`);
+    response.writeHead(204).end();
+  });
+  apiServer.listen(0, "127.0.0.1");
+  await once(apiServer, "listening");
+  testContext.after(() => apiServer.close());
+  const apiAddress = apiServer.address();
+  assert.equal(typeof apiAddress, "object");
+  const host = `http://127.0.0.1:${apiAddress.port}`;
+  const credentialFile = await writeStoredCredential(configurationHome, host, TEST_API_KEY);
+
+  const cliExecution = await runCli(["auth", "logout", "--host", host], {
+    JAVACHAT_API_KEY: "",
+    XDG_CONFIG_HOME: configurationHome,
+  });
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.match(cliExecution.standardOutput, /Revoked and removed the local credential/);
+  assert.equal(cliExecution.standardError, "");
+  await assert.rejects(readFile(credentialFile, "utf8"), { code: "ENOENT" });
+});
+
 test("logout explains JAVACHAT_API_KEY when no credential is stored", async (testContext) => {
   const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
   testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
 
-  const cliExecution = await runCli(["logout", "--host", "https://javachat.ai"], {
+  const cliExecution = await runCli(["auth", "logout", "--host", "https://javachat.ai"], {
     JAVACHAT_API_KEY: TEST_API_KEY,
     XDG_CONFIG_HOME: configurationHome,
   });
 
   assert.equal(cliExecution.exitCode, 0);
   assert.match(cliExecution.standardError, /authentication.*JAVACHAT_API_KEY/i);
-  assert.match(cliExecution.standardError, /run "javachat logout" again/i);
+  assert.match(cliExecution.standardError, /run "javachat auth logout" again/i);
 });
 
 test("environment authentication takes precedence over a stored logout credential", async (testContext) => {
   const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
   testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
-  const credentialDirectory = join(configurationHome, "javachat");
-  await mkdir(credentialDirectory, { recursive: true });
-  await writeFile(
-    join(credentialDirectory, "credentials.json"),
-    JSON.stringify({ "https://javachat.ai": { apiKey: "ak_secret_stored", sessionId: "chat-stored" } }),
+  const credentialFile = await writeStoredCredential(
+    configurationHome,
+    "https://javachat.ai",
+    "ak_secret_stored",
   );
 
-  const cliExecution = await runCli(["logout", "--host", "https://javachat.ai"], {
+  const cliExecution = await runCli(["auth", "logout", "--host", "https://javachat.ai"], {
     JAVACHAT_API_KEY: TEST_API_KEY,
     XDG_CONFIG_HOME: configurationHome,
   });
@@ -444,17 +759,15 @@ test("environment authentication takes precedence over a stored logout credentia
   assert.match(cliExecution.standardError, /authentication.*JAVACHAT_API_KEY/i);
   assert.match(cliExecution.standardError, /stored fallback credential/i);
   assert.doesNotMatch(cliExecution.standardOutput, /Revoked/);
-  const storedCredentials = JSON.parse(
-    await readFile(join(credentialDirectory, "credentials.json"), "utf8"),
-  );
+  const storedCredentials = JSON.parse(await readFile(credentialFile, "utf8"));
   assert.equal(storedCredentials["https://javachat.ai"].apiKey, "ak_secret_stored");
 });
 
-test("knowledge requires a credential before calling the API", async (testContext) => {
+test("list requires a credential before calling the API", async (testContext) => {
   const configurationHome = await mkdtemp(join(tmpdir(), "javachat-cli-test-"));
   testContext.after(() => rm(configurationHome, { recursive: true, force: true }));
 
-  const cliExecution = await runCli(["knowledge", "--host", "https://javachat.ai"], {
+  const cliExecution = await runCli(["list", "all", "--host", "https://javachat.ai"], {
     JAVACHAT_API_KEY: "",
     XDG_CONFIG_HOME: configurationHome,
   });
@@ -463,17 +776,40 @@ test("knowledge requires a credential before calling the API", async (testContex
   assert.match(cliExecution.standardError, /Not signed in to https:\/\/javachat\.ai/);
 });
 
-test("knowledge lists the ingested document groups", async (testContext) => {
+test("list all and list knowledge show every ingested source", async (testContext) => {
+  let requestCount = 0;
   const apiServer = createServer((request, response) => {
+    requestCount += 1;
     assert.equal(request.url, "/api/knowledge/groups");
     assert.equal(request.headers.authorization, `Bearer ${TEST_API_KEY}`);
     response.writeHead(200, { "content-type": "application/json" });
     response.end(
       JSON.stringify({
         groups: [
-          { collection: "chat-docs", kind: "DOCS", name: "oracle/javase/25/api", chunks: 10 },
-          { collection: "chat-docs", kind: "DOCS", name: "jetbrains/idea/2025/09", chunks: 1 },
-          { collection: "chat-github-repo", kind: "GITHUB", name: "https://github.com/acme/repo", chunks: 7 },
+          {
+            collection: "chat-docs",
+            kind: "DOCS",
+            name: "kotlin",
+            canonicalUrls: ["https://kotlinlang.org/docs/"],
+            ingestedVersions: ["2.4.10"],
+            chunks: 10,
+          },
+          {
+            collection: "chat-docs",
+            kind: "DOCS",
+            name: "jetbrains/idea/2025/09",
+            canonicalUrls: ["https://blog.jetbrains.com/idea/2025/09/"],
+            ingestedVersions: ["25"],
+            chunks: 1,
+          },
+          {
+            collection: "chat-github-repo",
+            kind: "GITHUB",
+            name: "https://github.com/acme/repo",
+            canonicalUrls: ["https://github.com/acme/repo"],
+            ingestedVersions: ["abc123"],
+            chunks: 7,
+          },
         ],
         totalChunks: 18,
       }),
@@ -486,21 +822,29 @@ test("knowledge lists the ingested document groups", async (testContext) => {
   assert.notEqual(apiAddress, null);
   assert.equal(typeof apiAddress, "object");
 
-  const cliExecution = await runCli(["knowledge", "--host", `http://127.0.0.1:${apiAddress.port}`], {
-    JAVACHAT_API_KEY: TEST_API_KEY,
-  });
+  const host = `http://127.0.0.1:${apiAddress.port}`;
+  const [allExecution, aliasExecution] = await Promise.all([
+    runCli(["list", "all", "--host", host], { JAVACHAT_API_KEY: TEST_API_KEY }),
+    runCli(["list", "knowledge", "--host", host], { JAVACHAT_API_KEY: TEST_API_KEY }),
+  ]);
 
-  assert.equal(cliExecution.exitCode, 0);
-  assert.match(cliExecution.standardOutput, /Knowledge base at http:\/\/127\.0\.0\.1:/);
-  assert.match(cliExecution.standardOutput, /DOCS — chat-docs/);
-  assert.match(cliExecution.standardOutput, /oracle\/javase\/25\/api \(10 chunks\)/);
-  assert.match(cliExecution.standardOutput, /jetbrains\/idea\/2025\/09 \(1 chunk\)/);
-  assert.match(cliExecution.standardOutput, /GITHUB — chat-github-repo/);
-  assert.match(cliExecution.standardOutput, /18 chunks across 3 groups in 2 collections\./);
-  assert.equal(cliExecution.standardError, "");
+  assert.equal(requestCount, 2);
+  assert.equal(allExecution.exitCode, 0);
+  assert.equal(aliasExecution.exitCode, 0);
+  assert.equal(allExecution.standardOutput, aliasExecution.standardOutput);
+  assert.match(allExecution.standardOutput, /Knowledge base at http:\/\/127\.0\.0\.1:/);
+  assert.match(allExecution.standardOutput, /DOCS — chat-docs/);
+  assert.match(allExecution.standardOutput, /kotlin \(10 chunks\)/);
+  assert.match(allExecution.standardOutput, /URL: https:\/\/kotlinlang\.org\/docs\//);
+  assert.match(allExecution.standardOutput, /Versions\/revisions: 2\.4\.10/);
+  assert.match(allExecution.standardOutput, /URL: https:\/\/github\.com\/acme\/repo/);
+  assert.match(allExecution.standardOutput, /Versions\/revisions: abc123/);
+  assert.match(allExecution.standardOutput, /18 chunks across 3 groups in 2 collections\./);
+  assert.equal(allExecution.standardError, "");
+  assert.equal(aliasExecution.standardError, "");
 });
 
-test("knowledge reports an empty knowledge base", async (testContext) => {
+test("list reports an empty knowledge base", async (testContext) => {
   const apiServer = createServer((request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
     response.end('{"groups":[],"totalChunks":0}');
@@ -512,7 +856,7 @@ test("knowledge reports an empty knowledge base", async (testContext) => {
   assert.notEqual(apiAddress, null);
   assert.equal(typeof apiAddress, "object");
 
-  const cliExecution = await runCli(["knowledge", "--host", `http://127.0.0.1:${apiAddress.port}`], {
+  const cliExecution = await runCli(["list", "all", "--host", `http://127.0.0.1:${apiAddress.port}`], {
     JAVACHAT_API_KEY: TEST_API_KEY,
   });
 
@@ -520,7 +864,7 @@ test("knowledge reports an empty knowledge base", async (testContext) => {
   assert.match(cliExecution.standardOutput, /No document groups are ingested/);
 });
 
-test("knowledge rejects a malformed group list", async (testContext) => {
+test("list rejects a malformed group list", async (testContext) => {
   const apiServer = createServer((request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
     response.end('{"groups":[{"collection":"chat-docs","kind":"DOCS"}],"totalChunks":0}');
@@ -532,7 +876,7 @@ test("knowledge rejects a malformed group list", async (testContext) => {
   assert.notEqual(apiAddress, null);
   assert.equal(typeof apiAddress, "object");
 
-  const cliExecution = await runCli(["knowledge", "--host", `http://127.0.0.1:${apiAddress.port}`], {
+  const cliExecution = await runCli(["list", "all", "--host", `http://127.0.0.1:${apiAddress.port}`], {
     JAVACHAT_API_KEY: TEST_API_KEY,
   });
 
@@ -540,11 +884,11 @@ test("knowledge rejects a malformed group list", async (testContext) => {
   assert.match(cliExecution.standardError, /malformed knowledge group/);
 });
 
-test("knowledge rejects unsafe chunk totals", async (testContext) => {
+test("list rejects unsafe chunk totals", async (testContext) => {
   const apiServer = createServer((request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(
-      '{"groups":[{"collection":"docs","kind":"DOCS","name":"java","chunks":9007199254740993}],"totalChunks":9007199254740993}',
+      '{"groups":[{"collection":"docs","kind":"DOCS","name":"java","canonicalUrls":["https://docs.example/"],"ingestedVersions":["25"],"chunks":9007199254740993}],"totalChunks":9007199254740993}',
     );
   });
   apiServer.listen(0, "127.0.0.1");
@@ -552,7 +896,7 @@ test("knowledge rejects unsafe chunk totals", async (testContext) => {
   testContext.after(() => apiServer.close());
   const apiAddress = apiServer.address();
   assert.equal(typeof apiAddress, "object");
-  const cliExecution = await runCli(["knowledge", "--host", `http://127.0.0.1:${apiAddress.port}`], {
+  const cliExecution = await runCli(["list", "all", "--host", `http://127.0.0.1:${apiAddress.port}`], {
     JAVACHAT_API_KEY: TEST_API_KEY,
   });
 
@@ -560,11 +904,11 @@ test("knowledge rejects unsafe chunk totals", async (testContext) => {
   assert.match(cliExecution.standardError, /invalid knowledge inventory/);
 });
 
-test("knowledge rejects inconsistent chunk totals", async (testContext) => {
+test("list rejects inconsistent chunk totals", async (testContext) => {
   const apiServer = createServer((request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(
-      '{"groups":[{"collection":"docs","kind":"DOCS","name":"java","chunks":3}],"totalChunks":4}',
+      '{"groups":[{"collection":"docs","kind":"DOCS","name":"java","canonicalUrls":["https://docs.example/"],"ingestedVersions":["25"],"chunks":3}],"totalChunks":4}',
     );
   });
   apiServer.listen(0, "127.0.0.1");
@@ -573,7 +917,7 @@ test("knowledge rejects inconsistent chunk totals", async (testContext) => {
   const apiAddress = apiServer.address();
   assert.equal(typeof apiAddress, "object");
 
-  const cliExecution = await runCli(["knowledge", "--host", `http://127.0.0.1:${apiAddress.port}`], {
+  const cliExecution = await runCli(["list", "all", "--host", `http://127.0.0.1:${apiAddress.port}`], {
     JAVACHAT_API_KEY: TEST_API_KEY,
   });
 
@@ -581,7 +925,7 @@ test("knowledge rejects inconsistent chunk totals", async (testContext) => {
   assert.match(cliExecution.standardError, /inconsistent knowledge inventory/);
 });
 
-test("knowledge strips terminal control characters from server strings", async (testContext) => {
+test("list strips terminal control characters from server strings", async (testContext) => {
   const apiServer = createServer((request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(
@@ -591,6 +935,8 @@ test("knowledge strips terminal control characters from server strings", async (
             collection: "chat-docs",
             kind: "DOCS",
             name: "docs/\u001b]52;c;c3Bvb2Y=\u0007evil",
+            canonicalUrls: ["https://docs.example/\u001b]52;c;c3Bvb2Y=\u0007path"],
+            ingestedVersions: ["1.0\u001b]52;c;c3Bvb2Y=\u0007"],
             chunks: 3,
           },
         ],
@@ -605,7 +951,7 @@ test("knowledge strips terminal control characters from server strings", async (
   assert.notEqual(apiAddress, null);
   assert.equal(typeof apiAddress, "object");
 
-  const cliExecution = await runCli(["knowledge", "--host", `http://127.0.0.1:${apiAddress.port}`], {
+  const cliExecution = await runCli(["list", "all", "--host", `http://127.0.0.1:${apiAddress.port}`], {
     JAVACHAT_API_KEY: TEST_API_KEY,
   });
 
@@ -614,7 +960,7 @@ test("knowledge strips terminal control characters from server strings", async (
   assert.match(cliExecution.standardOutput, /docs\/evil \(3 chunks\)/);
 });
 
-test("knowledge includes the server error body on failure", async (testContext) => {
+test("list includes the server error body on failure", async (testContext) => {
   const apiServer = createServer((request, response) => {
     response.writeHead(401, { "content-type": "application/json" });
     response.end('{"message":"API key is invalid, revoked, or expired."}');
@@ -626,7 +972,7 @@ test("knowledge includes the server error body on failure", async (testContext) 
   assert.notEqual(apiAddress, null);
   assert.equal(typeof apiAddress, "object");
 
-  const cliExecution = await runCli(["knowledge", "--host", `http://127.0.0.1:${apiAddress.port}`], {
+  const cliExecution = await runCli(["list", "knowledge", "--host", `http://127.0.0.1:${apiAddress.port}`], {
     JAVACHAT_API_KEY: TEST_API_KEY,
   });
 
