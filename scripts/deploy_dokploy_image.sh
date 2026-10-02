@@ -5,7 +5,7 @@
 set -euo pipefail
 
 : "${DOKPLOY_URL:?}" "${DOKPLOY_API_KEY:?}" "${DOKPLOY_APPLICATION_ID:?}"
-: "${IMAGE_REFERENCE:?}" "${SOURCE_COMMIT:?}" "${PUBLIC_URL:?}"
+: "${DOKPLOY_REGISTRY_ID:?}" "${IMAGE_REFERENCE:?}" "${SOURCE_COMMIT:?}" "${PUBLIC_URL:?}"
 
 if [[ ! "$IMAGE_REFERENCE" =~ @sha256:([a-f0-9]{64})$ ]]; then
   printf 'IMAGE_REFERENCE must end in an exact @sha256 digest: %s\n' "$IMAGE_REFERENCE" >&2
@@ -33,12 +33,18 @@ current_labels="$(jq --compact-output '.labelsSwarm // {}' <<<"$application")"
 target_labels="$(jq --compact-output --arg key "$revision_label" --arg commit "$SOURCE_COMMIT" \
   '.[$key] = $commit' <<<"$current_labels")"
 
-if [[ "$(jq --raw-output .sourceType <<<"$application")" != docker ]]; then
-  # A Git-built application has no image to compare against; switch its source.
+# Swarm workers pull with the registry row's credentials only when the
+# application's inline docker credentials are empty; the update schema accepts
+# strings, not null, and Dokploy treats an empty username as absent.
+if ! jq --exit-status --arg registryId "$DOKPLOY_REGISTRY_ID" \
+  '.sourceType == "docker" and .registryId == $registryId
+   and (.username // "") == "" and (.password // "") == "" and (.registryUrl // "") == ""' <<<"$application" >/dev/null; then
+  # A Git-built or differently credentialed application switches source and pull registry.
   update_request="$(jq --null-input --compact-output \
     --arg applicationId "$DOKPLOY_APPLICATION_ID" --arg dockerImage "$IMAGE_REFERENCE" \
-    --argjson labelsSwarm "$target_labels" \
-    '{applicationId: $applicationId, sourceType: "docker", dockerImage: $dockerImage, labelsSwarm: $labelsSwarm}')"
+    --arg registryId "$DOKPLOY_REGISTRY_ID" --argjson labelsSwarm "$target_labels" \
+    '{applicationId: $applicationId, sourceType: "docker", dockerImage: $dockerImage, labelsSwarm: $labelsSwarm,
+      registryId: $registryId, username: "", password: "", registryUrl: ""}')"
 else
   update_request="$(jq --null-input --compact-output \
     --arg applicationId "$DOKPLOY_APPLICATION_ID" --arg dockerImage "$IMAGE_REFERENCE" \

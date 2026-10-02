@@ -432,6 +432,7 @@ jobs:
           DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
           DOKPLOY_APPLICATION_ID: ${{ vars.DOKPLOY_APPLICATION_ID }}
+          DOKPLOY_REGISTRY_ID: ${{ vars.DOKPLOY_REGISTRY_ID }}
           IMAGE_REFERENCE: ${{ steps.index.outputs.reference }}
           SOURCE_COMMIT: ${{ github.sha }}
           PUBLIC_URL: ${{ github.ref_name == 'main' && 'https://javachat.ai' || 'https://dev.javachat.ai' }}
