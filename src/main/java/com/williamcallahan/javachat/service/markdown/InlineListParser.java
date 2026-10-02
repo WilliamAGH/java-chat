@@ -40,42 +40,47 @@ final class InlineListParser {
             return null;
         }
 
-        Element listElement = new Element(parse.primaryBlock().tagName());
-        for (String entryLabel : parse.primaryBlock().entryLabels()) {
-            listElement.appendChild(new Element("li").text(entryLabel));
-        }
-
         List<Element> additionalLists = new ArrayList<>();
         for (String nestedSegment : parse.nestedSegments()) {
             Parse nestedParse = Parse.tryParse(nestedSegment);
             if (nestedParse == null) continue;
-            Element nestedListElement = new Element(nestedParse.primaryBlock().tagName());
-            for (String entryLabel : nestedParse.primaryBlock().entryLabels()) {
-                nestedListElement.appendChild(new Element("li").text(entryLabel));
-            }
-            additionalLists.add(nestedListElement);
-            additionalLists.addAll(renderNestedListsRecursively(nestedParse, 1));
+            additionalLists.addAll(renderNestedParse(nestedParse, 1));
         }
 
-        return new Conversion(parse.leadingText(), listElement, additionalLists, parse.trailingText());
+        return new Conversion(parse.leadingText(), buildListElement(parse), additionalLists, parse.trailingText());
     }
 
-    private static List<Element> renderNestedListsRecursively(Parse parse, int depth) {
-        if (depth >= MAX_NESTED_DEPTH) {
-            return List.of();
+    /**
+     * Renders a nested {@link Parse} as a flat sibling sequence that mirrors the top-level
+     * {@link Conversion} shape: leading prose, the list element, any deeper nested lists, then
+     * trailing prose. Nested leading/trailing prose is emitted as sibling {@code <p>} elements so
+     * prose surrounding a nested list is never silently dropped.
+     */
+    private static List<Element> renderNestedParse(Parse parse, int depth) {
+        List<Element> renderedElements = new ArrayList<>();
+        if (!parse.leadingText().isBlank()) {
+            renderedElements.add(new Element("p").text(parse.leadingText()));
         }
-        List<Element> listElements = new ArrayList<>();
-        for (String nestedSegment : parse.nestedSegments()) {
-            Parse nestedParse = Parse.tryParse(nestedSegment);
-            if (nestedParse == null) continue;
-            Element nestedListElement = new Element(nestedParse.primaryBlock().tagName());
-            for (String entryLabel : nestedParse.primaryBlock().entryLabels()) {
-                nestedListElement.appendChild(new Element("li").text(entryLabel));
+        renderedElements.add(buildListElement(parse));
+        if (depth < MAX_NESTED_DEPTH) {
+            for (String nestedSegment : parse.nestedSegments()) {
+                Parse nestedParse = Parse.tryParse(nestedSegment);
+                if (nestedParse == null) continue;
+                renderedElements.addAll(renderNestedParse(nestedParse, depth + 1));
             }
-            listElements.add(nestedListElement);
-            listElements.addAll(renderNestedListsRecursively(nestedParse, depth + 1));
         }
-        return listElements;
+        if (!parse.trailingText().isBlank()) {
+            renderedElements.add(new Element("p").text(parse.trailingText()));
+        }
+        return renderedElements;
+    }
+
+    private static Element buildListElement(Parse parse) {
+        Element listElement = new Element(parse.primaryBlock().tagName());
+        for (String entryLabel : parse.primaryBlock().entryLabels()) {
+            listElement.appendChild(new Element("li").text(entryLabel));
+        }
+        return listElement;
     }
 
     /**
