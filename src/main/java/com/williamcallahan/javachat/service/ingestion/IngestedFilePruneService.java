@@ -68,27 +68,6 @@ public class IngestedFilePruneService {
     }
 
     /**
-     * Strictly prunes a file from every specified collection before deleting its local ingestion state.
-     *
-     * <p>Deferring local cleanup until every vector deletion succeeds preserves the marker needed to retry
-     * a partially completed prior-format marker prune.</p>
-     *
-     * @param collectionNames target Qdrant collection names
-     * @param sourceUrl authoritative URL key for file markers and vectors
-     * @param previousFileRecord previous file marker record, or {@code null} if unavailable
-     * @throws IOException when local marker or parsed-chunk cleanup fails
-     * @throws IllegalArgumentException when no collection names are provided or any name is blank
-     */
-    public void pruneCollectionsFileStrict(
-            List<String> collectionNames, String sourceUrl, FileIngestionRecord previousFileRecord) throws IOException {
-        Objects.requireNonNull(collectionNames, "collectionNames");
-        if (collectionNames.isEmpty()) {
-            throw new IllegalArgumentException("At least one collection name is required for file pruning");
-        }
-        pruneFileStrict(List.copyOf(collectionNames), sourceUrl, previousFileRecord);
-    }
-
-    /**
      * Removes obsolete local chunk state after a complete same-collection replacement was stored.
      *
      * <p>Collection generations own separate state roots. This operation therefore never deletes vectors or file

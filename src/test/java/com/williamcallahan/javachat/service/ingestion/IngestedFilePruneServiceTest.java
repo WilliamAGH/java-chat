@@ -1,12 +1,9 @@
 package com.williamcallahan.javachat.service.ingestion;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -25,12 +22,10 @@ import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.mockito.InOrder;
 
 /** Verifies strict multi-collection vector pruning preserves retryable local ingestion state. */
 class IngestedFilePruneServiceTest {
     private static final int LEGACY_CHUNK_HASH_PREFIX_LENGTH = 12;
-    private static final String BOOKS_COLLECTION_NAME = "books-collection";
     private static final String DOCS_COLLECTION_NAME = "docs-collection";
     private static final String SOURCE_URL = "https://docs.example.com/reference/page.html";
     private static final String REPLACEMENT_CHUNK_HASH =
@@ -42,57 +37,6 @@ class IngestedFilePruneServiceTest {
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     private static final String MARKERLESS_STALE_CHUNK_HASH =
             "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
-
-    @Test
-    void deletesEveryCollectionBeforeLocalIngestionState() throws IOException {
-        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
-        LocalStoreService localStoreService = mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileIngestionMarkerStore = mock(FileIngestionMarkerStore.class);
-        IngestedFilePruneService pruneService = new IngestedFilePruneService(
-                hybridVectorService, localStoreService, fileIngestionMarkerStore, mock(ContentHasher.class));
-        FileIngestionRecord priorIngestionRecord = new FileIngestionRecord(
-                123L,
-                456L,
-                "fingerprint",
-                "extraction-v1",
-                BOOKS_COLLECTION_NAME,
-                List.of("first-hash", "second-hash"));
-
-        pruneService.pruneCollectionsFileStrict(
-                List.of(BOOKS_COLLECTION_NAME, DOCS_COLLECTION_NAME), SOURCE_URL, priorIngestionRecord);
-
-        InOrder pruneOrder = inOrder(hybridVectorService, localStoreService, fileIngestionMarkerStore);
-        pruneOrder.verify(hybridVectorService).deleteByUrl(BOOKS_COLLECTION_NAME, SOURCE_URL);
-        pruneOrder.verify(hybridVectorService).deleteByUrl(DOCS_COLLECTION_NAME, SOURCE_URL);
-        pruneOrder.verify(localStoreService).deleteChunkIngestionMarkers(priorIngestionRecord.chunkHashes());
-        pruneOrder.verify(localStoreService).deleteParsedChunksForUrl(SOURCE_URL);
-        pruneOrder.verify(fileIngestionMarkerStore).deleteFileIngestionRecord(SOURCE_URL);
-    }
-
-    @Test
-    void retainsLocalIngestionStateWhenACollectionDeleteFails() throws IOException {
-        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
-        LocalStoreService localStoreService = mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileIngestionMarkerStore = mock(FileIngestionMarkerStore.class);
-        IngestedFilePruneService pruneService = new IngestedFilePruneService(
-                hybridVectorService, localStoreService, fileIngestionMarkerStore, mock(ContentHasher.class));
-        FileIngestionRecord priorIngestionRecord = new FileIngestionRecord(
-                123L, 456L, "fingerprint", "extraction-v1", BOOKS_COLLECTION_NAME, List.of("first-hash"));
-        doThrow(new IllegalStateException("Qdrant delete failed"))
-                .when(hybridVectorService)
-                .deleteByUrl(DOCS_COLLECTION_NAME, SOURCE_URL);
-
-        assertThrows(
-                IllegalStateException.class,
-                () -> pruneService.pruneCollectionsFileStrict(
-                        List.of(BOOKS_COLLECTION_NAME, DOCS_COLLECTION_NAME), SOURCE_URL, priorIngestionRecord));
-
-        verify(hybridVectorService).deleteByUrl(BOOKS_COLLECTION_NAME, SOURCE_URL);
-        verify(hybridVectorService).deleteByUrl(DOCS_COLLECTION_NAME, SOURCE_URL);
-        verify(localStoreService, never()).deleteChunkIngestionMarkers(anyList());
-        verify(localStoreService, never()).deleteParsedChunksForUrl(anyString());
-        verify(fileIngestionMarkerStore, never()).deleteFileIngestionRecord(anyString());
-    }
 
     @Test
     void removesLegacyStaleParsedChunkWhenFullHashesShareStoredPrefix(@TempDir Path parsedChunkDirectory)
