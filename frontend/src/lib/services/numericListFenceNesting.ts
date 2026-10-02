@@ -209,6 +209,7 @@ export function nestNumericListFences(
   const fenceState = new ListFenceState();
   let awaitedContinuationIndentation: number | null = null;
   let bodyIndentation = "";
+  let bodyDeindentation = 0;
   let targetIndentation = 0;
   let maximumSourceIndentation = COMMONMARK_MAX_FENCE_INDENTATION;
 
@@ -228,10 +229,13 @@ export function nestNumericListFences(
         );
         fenceState.close();
         bodyIndentation = "";
+        bodyDeindentation = 0;
         targetIndentation = 0;
         maximumSourceIndentation = COMMONMARK_MAX_FENCE_INDENTATION;
       } else {
-        nestedLines.push(`${bodyIndentation}${markdownLine}`);
+        const leadingSpaces = leadingSpaceCount(markdownLine);
+        const strippedLine = markdownLine.slice(Math.min(bodyDeindentation, leadingSpaces));
+        nestedLines.push(`${bodyIndentation}${strippedLine}`);
       }
       continue;
     }
@@ -259,9 +263,9 @@ export function nestNumericListFences(
         awaitedContinuationIndentation + COMMONMARK_MAX_FENCE_INDENTATION,
       );
       if (fenceCandidate) {
-        bodyIndentation = " ".repeat(
-          Math.max(0, awaitedContinuationIndentation - fenceCandidate.markerIndex),
-        );
+        const bodyShift = awaitedContinuationIndentation - fenceCandidate.markerIndex;
+        bodyIndentation = " ".repeat(Math.max(0, bodyShift));
+        bodyDeindentation = Math.max(0, -bodyShift);
         targetIndentation = awaitedContinuationIndentation;
         maximumSourceIndentation =
           awaitedContinuationIndentation + COMMONMARK_MAX_FENCE_INDENTATION;
