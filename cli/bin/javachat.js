@@ -13,7 +13,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { randomUUID, randomBytes } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { hostname, homedir, platform } from "node:os";
-import { mkdir, readFile, writeFile, chmod, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile, chmod, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { stdout, stderr, argv, exit, env } from "node:process";
 import { stripVTControlCharacters } from "node:util";
@@ -379,20 +379,25 @@ async function resolveNpmInstallTarget() {
       throw new Error('"javachat update" cannot update an ephemeral npx installation.');
     }
     const projectManifest = await readProjectManifest(projectRoot);
-    const declaresJavaChat = [
-      projectManifest.dependencies,
-      projectManifest.devDependencies,
-      projectManifest.optionalDependencies,
-    ].some((dependencyGroup) => Object.hasOwn(dependencyGroup ?? {}, CLI_PACKAGE));
-    if (!declaresJavaChat) {
-      throw new Error(
-        `The project at ${projectRoot} does not declare ${CLI_PACKAGE}; npm will not be allowed to modify it.`,
-      );
+    if (manifestDeclaresJavaChat(projectManifest)) {
+      return {
+        npmArguments: ["install", `${CLI_PACKAGE}@latest`],
+        workingDirectory: projectRoot,
+      };
     }
-    return {
-      npmArguments: ["install", `${CLI_PACKAGE}@latest`],
-      workingDirectory: projectRoot,
-    };
+    const declaringWorkspaceMember = await findDeclaringWorkspaceMember(
+      projectRoot,
+      projectManifest,
+    );
+    if (declaringWorkspaceMember) {
+      return {
+        npmArguments: ["install", `${CLI_PACKAGE}@latest`],
+        workingDirectory: declaringWorkspaceMember,
+      };
+    }
+    throw new Error(
+      `The project at ${projectRoot} does not declare ${CLI_PACKAGE}; npm will not be allowed to modify it.`,
+    );
   }
 
   const prefixResult = spawnSync("npm", ["prefix", "--global"], { encoding: "utf8" });
@@ -425,6 +430,118 @@ async function readProjectManifest(projectRoot) {
   } catch (manifestFailure) {
     throw new Error(`Could not read ${join(projectRoot, "package.json")}: ${manifestFailure.message}`);
   }
+}
+
+/** Whether a manifest lists CLI_PACKAGE under any dependency group. */
+function manifestDeclaresJavaChat(projectManifest) {
+  return [
+    projectManifest.dependencies,
+    projectManifest.devDependencies,
+    projectManifest.optionalDependencies,
+  ].some((dependencyGroup) => Object.hasOwn(dependencyGroup ?? {}, CLI_PACKAGE));
+}
+
+/**
+ * Finds the directory of a workspace member that declares CLI_PACKAGE.
+ *
+ * Under npm workspaces the invoked binary and its package are hoisted to the
+ * workspace root, so the manifest at projectRoot may not itself declare the
+ * CLI. This consults the root's `workspaces` field, expands the patterns the
+ * way npm does (literal paths plus ``*``/``**`` globs), and returns the first
+ * member directory whose manifest declares the package. Any enumeration or
+ * manifest-read failure falls through to ``null`` so the caller can refuse
+ * closed with the existing message.
+ */
+async function findDeclaringWorkspaceMember(projectRoot, rootManifest) {
+  const workspacePatterns = extractWorkspacePatterns(rootManifest);
+  if (!workspacePatterns) return null;
+  try {
+    for (const workspacePattern of workspacePatterns) {
+      for (const memberDirectory of await expandWorkspaceGlob(projectRoot, workspacePattern)) {
+        let memberManifest;
+        try {
+          memberManifest = await readProjectManifest(memberDirectory);
+        } catch {
+          continue;
+        }
+        if (manifestDeclaresJavaChat(memberManifest)) return memberDirectory;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** Normalizes the `workspaces` field into an array of pattern strings, or null. */
+function extractWorkspacePatterns(rootManifest) {
+  const workspaces = rootManifest.workspaces;
+  if (typeof workspaces === "string") return [workspaces];
+  if (Array.isArray(workspaces)) {
+    return workspaces.filter((entry) => typeof entry === "string");
+  }
+  if (workspaces && typeof workspaces === "object" && Array.isArray(workspaces.packages)) {
+    return workspaces.packages.filter((entry) => typeof entry === "string");
+  }
+  return null;
+}
+
+/** Expands a single workspace glob relative to the root into member directories. */
+async function expandWorkspaceGlob(projectRoot, pattern) {
+  const cleanPattern = pattern.replace(/^\.\//, "").replace(/\/+$/, "");
+  if (!cleanPattern) return [];
+  const memberDirectories = [];
+  await matchWorkspaceSegments(projectRoot, cleanPattern.split("/"), 0, memberDirectories);
+  return memberDirectories;
+}
+
+async function matchWorkspaceSegments(currentDirectory, segments, index, memberDirectories) {
+  if (index >= segments.length) {
+    if (existsSync(join(currentDirectory, "package.json"))) memberDirectories.push(currentDirectory);
+    return;
+  }
+  const segment = segments[index];
+  if (segment === "**") {
+    await matchWorkspaceSegments(currentDirectory, segments, index + 1, memberDirectories);
+    let directoryEntries;
+    try {
+      directoryEntries = await readdir(currentDirectory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of directoryEntries) {
+      if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules") {
+        await matchWorkspaceSegments(join(currentDirectory, entry.name), segments, index, memberDirectories);
+      }
+    }
+    return;
+  }
+  if (segment.includes("*")) {
+    const entryPattern = workspaceSegmentToRegex(segment);
+    let directoryEntries;
+    try {
+      directoryEntries = await readdir(currentDirectory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of directoryEntries) {
+      if (entry.isDirectory() && entryPattern.test(entry.name)) {
+        await matchWorkspaceSegments(join(currentDirectory, entry.name), segments, index + 1, memberDirectories);
+      }
+    }
+    return;
+  }
+  await matchWorkspaceSegments(join(currentDirectory, segment), segments, index + 1, memberDirectories);
+}
+
+function workspaceSegmentToRegex(segment) {
+  let regex = "^";
+  for (const character of segment) {
+    if (character === "*") regex += "[^/]*";
+    else if ("\\^$.+?()[]{}|".includes(character)) regex += `\\${character}`;
+    else regex += character;
+  }
+  return new RegExp(`${regex}$`);
 }
 
 /**

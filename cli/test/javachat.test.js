@@ -273,6 +273,318 @@ test("propagates an npm update failure", async (testContext) => {
   assert.doesNotMatch(cliExecution.standardOutput, /update complete/);
 });
 
+test("updates a workspace member that declares a local JavaChat dependency", async (testContext) => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "javachat-cli-workspace-test-"));
+  testContext.after(() => rm(workspaceRoot, { recursive: true, force: true }));
+  await writeFile(
+    join(workspaceRoot, "package.json"),
+    JSON.stringify({
+      name: "monorepo",
+      version: "1.0.0",
+      private: true,
+      workspaces: ["packages/*"],
+    }),
+  );
+  await mkdir(join(workspaceRoot, "packages", "app"), { recursive: true });
+  await writeFile(
+    join(workspaceRoot, "packages", "app", "package.json"),
+    JSON.stringify({
+      name: "app",
+      version: "1.0.0",
+      dependencies: { "@wcallahan/javachat-cli": "0.0.2" },
+    }),
+  );
+  await mkdir(join(workspaceRoot, "packages", "tools"), { recursive: true });
+  await writeFile(
+    join(workspaceRoot, "packages", "tools", "package.json"),
+    JSON.stringify({ name: "tools", version: "1.0.0" }),
+  );
+  const packageRoot = join(workspaceRoot, "node_modules", "@wcallahan", "javachat-cli");
+  const binaryPath = join(workspaceRoot, "node_modules", ".bin", "javachat");
+  await createInstalledCli(packageRoot, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(workspaceRoot);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.match(cliExecution.standardOutput, /JavaChat CLI update complete/);
+  assert.equal(cliExecution.standardError, "Updating @wcallahan/javachat-cli with npm...\n");
+  assert.deepEqual(await readNpmInvocations(invocationLog), [
+    {
+      argumentsList: ["install", "@wcallahan/javachat-cli@latest"],
+      workingDirectory: await realpath(join(workspaceRoot, "packages", "app")),
+    },
+  ]);
+});
+
+test("updates a workspace member that declares JavaChat as a dev dependency", async (testContext) => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "javachat-cli-workspace-dev-test-"));
+  testContext.after(() => rm(workspaceRoot, { recursive: true, force: true }));
+  await writeFile(
+    join(workspaceRoot, "package.json"),
+    JSON.stringify({
+      name: "monorepo",
+      version: "1.0.0",
+      private: true,
+      workspaces: ["packages/*"],
+    }),
+  );
+  await mkdir(join(workspaceRoot, "packages", "app"), { recursive: true });
+  await writeFile(
+    join(workspaceRoot, "packages", "app", "package.json"),
+    JSON.stringify({
+      name: "app",
+      version: "1.0.0",
+      devDependencies: { "@wcallahan/javachat-cli": "0.0.2" },
+    }),
+  );
+  const packageRoot = join(workspaceRoot, "node_modules", "@wcallahan", "javachat-cli");
+  const binaryPath = join(workspaceRoot, "node_modules", ".bin", "javachat");
+  await createInstalledCli(packageRoot, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(workspaceRoot);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.deepEqual(await readNpmInvocations(invocationLog), [
+    {
+      argumentsList: ["install", "@wcallahan/javachat-cli@latest"],
+      workingDirectory: await realpath(join(workspaceRoot, "packages", "app")),
+    },
+  ]);
+});
+
+test("updates a workspace member addressed by a literal workspace path", async (testContext) => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "javachat-cli-workspace-literal-test-"));
+  testContext.after(() => rm(workspaceRoot, { recursive: true, force: true }));
+  await writeFile(
+    join(workspaceRoot, "package.json"),
+    JSON.stringify({
+      name: "monorepo",
+      version: "1.0.0",
+      private: true,
+      workspaces: ["packages/app"],
+    }),
+  );
+  await mkdir(join(workspaceRoot, "packages", "app"), { recursive: true });
+  await writeFile(
+    join(workspaceRoot, "packages", "app", "package.json"),
+    JSON.stringify({
+      name: "app",
+      version: "1.0.0",
+      optionalDependencies: { "@wcallahan/javachat-cli": "0.0.2" },
+    }),
+  );
+  const packageRoot = join(workspaceRoot, "node_modules", "@wcallahan", "javachat-cli");
+  const binaryPath = join(workspaceRoot, "node_modules", ".bin", "javachat");
+  await createInstalledCli(packageRoot, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(workspaceRoot);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.deepEqual(await readNpmInvocations(invocationLog), [
+    {
+      argumentsList: ["install", "@wcallahan/javachat-cli@latest"],
+      workingDirectory: await realpath(join(workspaceRoot, "packages", "app")),
+    },
+  ]);
+});
+
+test("updates a nested workspace member matched by a recursive glob", async (testContext) => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "javachat-cli-workspace-nested-test-"));
+  testContext.after(() => rm(workspaceRoot, { recursive: true, force: true }));
+  await writeFile(
+    join(workspaceRoot, "package.json"),
+    JSON.stringify({
+      name: "monorepo",
+      version: "1.0.0",
+      private: true,
+      workspaces: ["packages/**"],
+    }),
+  );
+  await mkdir(join(workspaceRoot, "packages", "group", "app"), { recursive: true });
+  await writeFile(
+    join(workspaceRoot, "packages", "group", "app", "package.json"),
+    JSON.stringify({
+      name: "app",
+      version: "1.0.0",
+      dependencies: { "@wcallahan/javachat-cli": "0.0.2" },
+    }),
+  );
+  await mkdir(join(workspaceRoot, "packages", "group", "tools"), { recursive: true });
+  await writeFile(
+    join(workspaceRoot, "packages", "group", "tools", "package.json"),
+    JSON.stringify({ name: "tools", version: "1.0.0" }),
+  );
+  const packageRoot = join(workspaceRoot, "node_modules", "@wcallahan", "javachat-cli");
+  const binaryPath = join(workspaceRoot, "node_modules", ".bin", "javachat");
+  await createInstalledCli(packageRoot, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(workspaceRoot);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
+
+  assert.equal(cliExecution.exitCode, 0);
+  assert.deepEqual(await readNpmInvocations(invocationLog), [
+    {
+      argumentsList: ["install", "@wcallahan/javachat-cli@latest"],
+      workingDirectory: await realpath(join(workspaceRoot, "packages", "group", "app")),
+    },
+  ]);
+});
+
+test("updates one of several workspace members that declare JavaChat", async (testContext) => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "javachat-cli-workspace-multi-test-"));
+  testContext.after(() => rm(workspaceRoot, { recursive: true, force: true }));
+  await writeFile(
+    join(workspaceRoot, "package.json"),
+    JSON.stringify({
+      name: "monorepo",
+      version: "1.0.0",
+      private: true,
+      workspaces: ["packages/*"],
+    }),
+  );
+  await mkdir(join(workspaceRoot, "packages", "app"), { recursive: true });
+  await writeFile(
+    join(workspaceRoot, "packages", "app", "package.json"),
+    JSON.stringify({
+      name: "app",
+      version: "1.0.0",
+      dependencies: { "@wcallahan/javachat-cli": "0.0.2" },
+    }),
+  );
+  await mkdir(join(workspaceRoot, "packages", "lib"), { recursive: true });
+  await writeFile(
+    join(workspaceRoot, "packages", "lib", "package.json"),
+    JSON.stringify({
+      name: "lib",
+      version: "1.0.0",
+      dependencies: { "@wcallahan/javachat-cli": "0.0.2" },
+    }),
+  );
+  const packageRoot = join(workspaceRoot, "node_modules", "@wcallahan", "javachat-cli");
+  const binaryPath = join(workspaceRoot, "node_modules", ".bin", "javachat");
+  await createInstalledCli(packageRoot, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(workspaceRoot);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
+
+  assert.equal(cliExecution.exitCode, 0);
+  const invocations = await readNpmInvocations(invocationLog);
+  assert.equal(invocations.length, 1);
+  assert.deepEqual(invocations[0].argumentsList, ["install", "@wcallahan/javachat-cli@latest"]);
+  const expectedMemberDirectories = new Set([
+    await realpath(join(workspaceRoot, "packages", "app")),
+    await realpath(join(workspaceRoot, "packages", "lib")),
+  ]);
+  assert.ok(
+    expectedMemberDirectories.has(invocations[0].workingDirectory),
+    `npm ran in ${invocations[0].workingDirectory}`,
+  );
+  assert.notEqual(invocations[0].workingDirectory, await realpath(workspaceRoot));
+});
+
+test("refuses to update a workspaces root whose members do not declare JavaChat", async (testContext) => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "javachat-cli-workspace-refuse-test-"));
+  testContext.after(() => rm(workspaceRoot, { recursive: true, force: true }));
+  await writeFile(
+    join(workspaceRoot, "package.json"),
+    JSON.stringify({
+      name: "monorepo",
+      version: "1.0.0",
+      private: true,
+      workspaces: ["packages/*"],
+    }),
+  );
+  await mkdir(join(workspaceRoot, "packages", "app"), { recursive: true });
+  await writeFile(
+    join(workspaceRoot, "packages", "app", "package.json"),
+    JSON.stringify({ name: "app", version: "1.0.0" }),
+  );
+  const packageRoot = join(workspaceRoot, "node_modules", "@wcallahan", "javachat-cli");
+  const binaryPath = join(workspaceRoot, "node_modules", ".bin", "javachat");
+  await createInstalledCli(packageRoot, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(workspaceRoot);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(
+    cliExecution.standardError,
+    /The project at .* does not declare @wcallahan\/javachat-cli; npm will not be allowed to modify it\./,
+  );
+  await assert.rejects(readFile(invocationLog, "utf8"), { code: "ENOENT" });
+});
+
+test("refuses to update a non-workspaces project that does not declare JavaChat", async (testContext) => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "javachat-cli-project-refuse-test-"));
+  testContext.after(() => rm(projectRoot, { recursive: true, force: true }));
+  await writeFile(join(projectRoot, "package.json"), JSON.stringify({ name: "standalone", version: "1.0.0" }));
+  const packageRoot = join(projectRoot, "node_modules", "@wcallahan", "javachat-cli");
+  const binaryPath = join(projectRoot, "node_modules", ".bin", "javachat");
+  await createInstalledCli(packageRoot, binaryPath);
+  const { fakeBinDirectory, invocationLog } = await createFakeNpm(projectRoot);
+
+  const cliExecution = await runCli(
+    ["update"],
+    {
+      PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+      TEST_NPM_INVOCATION_LOG: invocationLog,
+    },
+    binaryPath,
+  );
+
+  assert.equal(cliExecution.exitCode, 1);
+  assert.match(
+    cliExecution.standardError,
+    /does not declare @wcallahan\/javachat-cli; npm will not be allowed to modify it\./,
+  );
+  await assert.rejects(readFile(invocationLog, "utf8"), { code: "ENOENT" });
+});
+
 test("prints the installed version without loading credentials", async () => {
   const cliExecution = await runCli(["--version"], {
     XDG_CONFIG_HOME: CLI_ENTRYPOINT,
