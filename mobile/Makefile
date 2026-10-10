@@ -12,6 +12,9 @@
 	ios-archive \
 	ios-export-app-store
 
+# Every xcodebuild lane compiles through Xcode's shared per-user compilation cache.
+export XCODE_XCCONFIG_FILE := $(CURDIR)/compilation-cache.xcconfig
+
 DEVELOPMENT_TEAM := NB356A75PU
 ASC_PROFILE := csweb
 DEVELOPER_ID_APPLICATION := Developer ID Application: William Callahan (NB356A75PU)
