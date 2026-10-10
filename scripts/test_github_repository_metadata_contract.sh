@@ -7,6 +7,12 @@
 
 set -euo pipefail
 
+# Git hooks export GIT_DIR and related variables; inherited, they would point
+# every git command below at the pushing repository instead of the scratch clone.
+while IFS= read -r repository_local_variable; do
+    unset "$repository_local_variable"
+done < <(git rev-parse --local-env-vars)
+
 TEST_SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_WORK_DIRECTORY="$(mktemp -d)"
 FAKE_BINARY_DIRECTORY="$TEST_WORK_DIRECTORY/bin"
