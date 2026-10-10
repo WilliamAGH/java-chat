@@ -64,6 +64,11 @@ packaging it, then submits the signed DMG to Apple's Notary service and staples
 and validates the outer ticket. Both layers therefore retain offline
 notarization evidence after the app is copied out of the disk image.
 
+Every signing lane (`desktop-archive`, `ios-archive`, `desktop-create-signed-dmg`,
+and the exports built on them) starts with `signing-session`, which runs the
+dotfiles host tool `build-keychain unlock`, so it signs from a fresh
+noninteractive SSH session.
+
 These lanes require the matching Developer ID or Apple Distribution identities,
 profiles, a valid `csweb` App Store Connect profile, and signed agreements for
 the `william@csweb.io` account. They intentionally fail instead of falling back
