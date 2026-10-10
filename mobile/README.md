@@ -10,7 +10,8 @@ authentication session and return through `javachat://sso-callback`; the typed
 callback is then completed by the canonical Clerk client in the hosted app.
 
 The desktop shell adds standard macOS Copy Link and Open in Default Browser
-actions. The iOS target is a universal iPhone and iPad app. It follows the
+actions and requires macOS 26 on Intel or Apple silicon. The iOS target is a
+universal iPhone and iPad app that requires iOS 27. It follows the
 installed-current simulator policy: use a compatible simulator already
 installed on the Mac and identify it by UDID.
 

@@ -27,17 +27,11 @@ struct WebShellView: View {
             .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
             .toolbar(removing: .title)
             .toolbar {
-                if #available(macOS 26.0, *) {
-                    ToolbarSpacer(.flexible)
-                    ToolbarItem {
-                        pageActionButtons
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                } else {
-                    ToolbarItem(placement: .primaryAction) {
-                        pageActionButtons
-                    }
+                ToolbarSpacer(.flexible)
+                ToolbarItem {
+                    pageActionButtons
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
     }
 
