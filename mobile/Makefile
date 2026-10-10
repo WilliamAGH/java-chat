@@ -1,3 +1,20 @@
+# Every lane runs on the Mac build host. Any other host (the laptop, Linux peers) forwards the goals
+# and command-line variables, each shell-quoted, to a warm mirror of this checkout there through the
+# host tool remote-slot (dotfiles, ~/.local/bin). The environment, gitignored files, and make's own
+# flags do not cross, and every output (installs, archives, receipts) stays on that host. GitHub
+# Actions jobs already run on the Mac their workflow picked.
+APPLE_BUILD_HOST := haiku-7
+ifeq ($(filter $(APPLE_BUILD_HOST),$(shell hostname -s))$(GITHUB_ACTIONS),)
+APPLE_BUILD_HOST_VARIABLES := $(strip $(foreach variable,$(sort $(.VARIABLES)),$(if $(filter command line,$(origin $(variable))),'$(variable)=$(subst ','\'',$(value $(variable)))')))
+.DEFAULT_GOAL := apple-build-host
+.PHONY: apple-build-host $(MAKECMDGOALS)
+apple-build-host:
+	remote-slot run $(APPLE_BUILD_HOST) -- make $(MAKECMDGOALS) $(APPLE_BUILD_HOST_VARIABLES)
+ifneq ($(MAKECMDGOALS),)
+$(MAKECMDGOALS): apple-build-host ; @:
+endif
+else
+
 .PHONY: \
 	signing-session \
 	desktop \
@@ -162,3 +179,4 @@ ios-export-app-store: ios-archive
 		-exportPath $(IOS_APP_STORE_EXPORT) \
 		-exportOptionsPlist iosApp/ExportOptions-AppStore.plist \
 		-allowProvisioningUpdates
+endif
