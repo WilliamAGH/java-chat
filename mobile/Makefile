@@ -1,4 +1,5 @@
 .PHONY: \
+	signing-session \
 	desktop \
 	desktop-test \
 	desktop-archive \
@@ -30,6 +31,12 @@ IOS_DISTRIBUTION_DIR := iosApp/distribution
 IOS_ARCHIVE := $(IOS_DISTRIBUTION_DIR)/JavaChat.xcarchive
 IOS_APP_STORE_EXPORT := $(IOS_DISTRIBUTION_DIR)/app-store
 
+# Signed lanes unlock this Mac's build keychain through the host tool build-keychain (dotfiles,
+# ~/.local/bin), so they run from a fresh SSH session with no console login [HH0a]; a Mac without
+# one signs from its open login keychain. CI never runs a signed lane.
+signing-session:
+	@build-keychain unlock
+
 desktop:
 	xcodebuild \
 		-project desktopApp/JavaChatDesktop.xcodeproj \
@@ -48,7 +55,7 @@ desktop-test:
 		-derivedDataPath desktopApp/build-test \
 		test CODE_SIGNING_ALLOWED=NO
 
-desktop-archive:
+desktop-archive: signing-session
 	xcodebuild \
 		-project desktopApp/JavaChatDesktop.xcodeproj \
 		-scheme JavaChatDesktop \
@@ -75,7 +82,7 @@ desktop-export-developer-id: desktop-archive
 desktop-dmg: desktop-export-developer-id
 	$(MAKE) desktop-create-signed-dmg
 
-desktop-create-signed-dmg:
+desktop-create-signed-dmg: signing-session
 	rm -rf "$(DESKTOP_DMG_STAGING)"
 	mkdir -p "$(DESKTOP_DMG_STAGING)"
 	ditto \
@@ -138,7 +145,7 @@ ios-test:
 		-derivedDataPath iosApp/build-test \
 		test CODE_SIGNING_ALLOWED=NO
 
-ios-archive:
+ios-archive: signing-session
 	xcodebuild \
 		-project iosApp/JavaChat.xcodeproj \
 		-scheme JavaChat \
