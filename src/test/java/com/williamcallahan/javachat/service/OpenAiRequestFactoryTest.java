@@ -39,7 +39,7 @@ class OpenAiRequestFactoryTest {
     private static final int TEST_COMPLETION_OUTPUT_TOKEN_BUDGET = 768;
 
     @Test
-    void defaultGatewayChatModelIsGpt54() {
+    void defaultGatewayChatModelIsClaudeHaiku55() {
         assertEquals("claude-haiku-5-5", ModelConfiguration.DEFAULT_MODEL);
     }
 
