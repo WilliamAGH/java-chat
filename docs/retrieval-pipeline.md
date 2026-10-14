@@ -252,15 +252,15 @@ When the quality message contains "less relevant" or "keyword search", an additi
 
 ### Token budgets
 
-The GPT-5.4 prompt budget is application-owned:
+The shared gateway chat prompt budget is application-owned:
 
 | Provider/model | Token budget | Constant |
 |---|---|---|
-| Shared gateway GPT-5.4 | 100,000 | `GPT54_INPUT_TOKEN_BUDGET` |
+| Shared gateway Claude Haiku 5.5 | 100,000 | `CHAT_INPUT_TOKEN_BUDGET` |
 
 Token estimation uses a conservative `(text.length() / 4) + 1` approximation (~4 characters per token for English text).
 
-GPT-5.4 RAG retrieval is reduced upstream to max 3 documents (`RAG_LIMIT_CONSTRAINED`)
+Constrained chat retrieval is reduced upstream to max 3 documents (`RAG_LIMIT_CONSTRAINED`)
 with max 600 tokens each (`RAG_TOKEN_LIMIT_CONSTRAINED`), defined in `ModelConfiguration.java`.
 
 ---

@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 CANONICAL_MODEL_PATH = "src/main/java/com/williamcallahan/javachat/config/ModelConfiguration.java"
-EXPECTED_CHAT_MODEL = "gpt-5.4"
+EXPECTED_CHAT_MODEL = "claude-haiku-5-5"
 SCAN_EXCLUSIONS =
   %r{\A(?:AGENTS\.md\z|CLAUDE\.md\z|src/test/|config/ast-grep(?:-tests)?/|scripts/lint/check-chat-model-ssot\.rb\z)}
 OPENAI_MODEL_ASSIGNMENT = /OPENAI_MODEL\s*(?::|=|"\s*,\s*")\s*([A-Za-z0-9_.\/-]+)/
@@ -16,15 +16,15 @@ def violations_for_text(text, canonical_model)
 end
 
 def run_self_test
-  raise "valid canonical model rejected" unless violations_for_text("OPENAI_MODEL=gpt-5.4", EXPECTED_CHAT_MODEL).empty?
+  raise "valid canonical model rejected" unless violations_for_text("OPENAI_MODEL=claude-haiku-5-5", EXPECTED_CHAT_MODEL).empty?
   raise "stale model accepted" unless violations_for_text("OPENAI_MODEL=gpt-5", EXPECTED_CHAT_MODEL) == ["gpt-5"]
-  qualified_model = "provider/gpt-5.4"
+  qualified_model = "provider/claude-haiku-5-5"
   unless violations_for_text("OPENAI_MODEL=#{qualified_model}", EXPECTED_CHAT_MODEL) == [qualified_model]
     raise "provider-qualified model accepted"
   end
   comma_form_stale = 'environment("OPENAI_MODEL", "gpt-5")'
   raise "comma-form stale model accepted" unless violations_for_text(comma_form_stale, EXPECTED_CHAT_MODEL) == ["gpt-5"]
-  comma_form_canonical = 'environment("OPENAI_MODEL", "gpt-5.4")'
+  comma_form_canonical = 'environment("OPENAI_MODEL", "claude-haiku-5-5")'
   raise "comma-form canonical model rejected" unless violations_for_text(comma_form_canonical, EXPECTED_CHAT_MODEL).empty?
   raise "GitHub Models inference marker accepted" unless "GitHub Models".match?(GITHUB_MODELS_INFERENCE_MARKER)
 end

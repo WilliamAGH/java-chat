@@ -15,7 +15,7 @@
   interface Props {
     /** Primary status message (e.g., "Searching the Java documentation index") */
     statusMessage?: string | null
-    /** Secondary details (e.g., "Embedding your question… · Provider: gpt-5.4") */
+    /** Secondary details (e.g., "Embedding your question… · Provider: claude-haiku-5-5") */
     statusDetails?: string | null
     /** Whether we've started receiving content (transitions to "generating" state) */
     hasContent?: boolean

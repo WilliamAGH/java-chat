@@ -8,7 +8,7 @@ package com.williamcallahan.javachat.config;
  */
 public final class ModelConfiguration {
     /** Default model identifier when none is configured. */
-    public static final String DEFAULT_MODEL = "gpt-5.4";
+    public static final String DEFAULT_MODEL = "claude-haiku-5-5";
 
     /** Estimated characters per token for conservative token counting. */
     public static final int ESTIMATED_CHARS_PER_TOKEN = 4;

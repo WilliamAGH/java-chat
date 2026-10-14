@@ -47,7 +47,7 @@ and hybrid search across the indexed JDK documentation, books, and GitHub reposi
 events carry `message`/`details` only (`code`, `retryable`, and `stage` are `null`) and always
 arrive before the `provider` event.
 
-Chat uses the shared OpenAI-compatible gateway with GPT-5.4. An unavailable, rate-limited,
+Chat uses the shared OpenAI-compatible gateway with Claude Haiku 5.5 at low reasoning effort. An unavailable, rate-limited,
 or failed gateway request terminates the stream with an `error` event; no alternate provider exists.
 
 Example:

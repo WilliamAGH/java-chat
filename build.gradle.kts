@@ -182,7 +182,7 @@ tasks.withType<Test> {
         showStackTraces = true
     }
     systemProperty("spring.profiles.active", "test")
-    environment("OPENAI_MODEL", "gpt-5.4")
+    environment("OPENAI_MODEL", "claude-haiku-5-5")
     useJUnitPlatform()
     maxHeapSize = "1024m"
     jvmArgs(

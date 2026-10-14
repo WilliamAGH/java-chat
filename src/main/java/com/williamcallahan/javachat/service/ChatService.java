@@ -189,7 +189,7 @@ public class ChatService {
         List<Document> contextDocs = retrieveTokenConstrainedOfficialDocumentation(
                 latestUserMessage, retrievalProgressListener, stageDeadlineNanos);
         logger.debug(
-                "Using GPT-5.4 retrieval context: {} documents with max {} tokens each",
+                "Using constrained retrieval context: {} documents with max {} tokens each",
                 contextDocs.size(),
                 ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
 

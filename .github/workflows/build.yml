@@ -22,6 +22,7 @@ env:
 jobs:
   writer-lease-portability:
     runs-on: macos-15
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -37,6 +38,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: frontend
@@ -86,6 +88,7 @@ jobs:
 
   build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     
     steps:
       - name: Checkout code
@@ -151,6 +154,7 @@ jobs:
       - frontend
       - build
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -210,7 +214,7 @@ jobs:
             --publish 8085:8085 \
             --env OPENAI_API_KEY=ci-smoke-token \
             --env OPENAI_BASE_URL=https://api.llm-gateway.iocloudhost.net/v1 \
-            --env OPENAI_MODEL=gpt-5.4 \
+            --env OPENAI_MODEL=claude-haiku-5-5 \
             --env APP_LOCAL_EMBEDDING_ENABLED=true \
             --env SPRING_PROFILES_ACTIVE=ci \
             --env QDRANT_HOST=qdrant \
@@ -286,7 +290,7 @@ jobs:
             --network java-chat-ci_default \
             --env OPENAI_API_KEY=ci-smoke-token \
             --env OPENAI_BASE_URL=https://api.llm-gateway.iocloudhost.net/v1 \
-            --env OPENAI_MODEL=gpt-5.4 \
+            --env OPENAI_MODEL=claude-haiku-5-5 \
             --env APP_LOCAL_EMBEDDING_ENABLED=true \
             --env SPRING_PROFILES_ACTIVE=ci \
             --env SPRING_APPLICATION_NAME="$conflicting_runtime_name" \

@@ -40,7 +40,7 @@ class OpenAiRequestFactoryTest {
 
     @Test
     void defaultGatewayChatModelIsGpt54() {
-        assertEquals("gpt-5.4", ModelConfiguration.DEFAULT_MODEL);
+        assertEquals("claude-haiku-5-5", ModelConfiguration.DEFAULT_MODEL);
     }
 
     @Test
@@ -155,7 +155,7 @@ class OpenAiRequestFactoryTest {
     }
 
     @Test
-    void applicationDefaultsLeaveReasoningEffortUnset() throws IOException {
+    void applicationDefaultsUseTestedHaikuReasoningEffort() throws IOException {
         Properties applicationProperties = new Properties();
         InputStream applicationPropertiesStream =
                 OpenAiRequestFactoryTest.class.getResourceAsStream("/application.properties");
@@ -165,7 +165,7 @@ class OpenAiRequestFactoryTest {
             applicationProperties.load(applicationPropertiesStream);
         }
 
-        assertFalse(applicationProperties.containsKey("app.llm.reasoning-effort"));
+        assertEquals("low", applicationProperties.getProperty("app.llm.reasoning-effort"));
     }
 
     @Test
