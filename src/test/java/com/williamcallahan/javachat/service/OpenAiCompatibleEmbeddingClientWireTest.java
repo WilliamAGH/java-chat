@@ -78,6 +78,7 @@ class OpenAiCompatibleEmbeddingClientWireTest {
                 exchange.getRequestURI().getPath(),
                 exchange.getRequestHeaders().getFirst("Authorization"),
                 exchange.getRequestHeaders().getFirst("X-Tier"),
+                exchange.getRequestHeaders().getFirst("X-User-ID"),
                 embeddingRequest));
 
         ArrayNode inputTexts = (ArrayNode) embeddingRequest.path("input");
@@ -116,6 +117,9 @@ class OpenAiCompatibleEmbeddingClientWireTest {
         assertEquals("Bearer " + TEST_API_KEY, capturedRequest.authorizationHeader());
         assertEquals(expectedTier, capturedRequest.tierHeader());
         assertEquals(
+                "java-chat:embeddings:" + (expectedTier.equals("batch") ? "batch" : "live"),
+                capturedRequest.workloadHeader());
+        assertEquals(
                 EMBEDDING_MODEL,
                 capturedRequest.embeddingRequest().path("model").asText());
         assertEquals(
@@ -129,5 +133,6 @@ class OpenAiCompatibleEmbeddingClientWireTest {
             String requestPath,
             String authorizationHeader,
             String tierHeader,
+            String workloadHeader,
             JsonNode embeddingRequest) {}
 }

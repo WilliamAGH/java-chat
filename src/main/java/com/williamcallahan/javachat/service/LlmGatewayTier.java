@@ -15,6 +15,8 @@ public enum LlmGatewayTier {
 
     /** HTTP header used by the gateway to classify request capacity. */
     public static final String REQUEST_TIER_HEADER = "X-Tier";
+    /** HTTP header used by the gateway to attribute the request workload. */
+    public static final String REQUEST_WORKLOAD_HEADER = "X-User-ID";
 
     private final String requestHeader;
 
@@ -29,5 +31,13 @@ public enum LlmGatewayTier {
      */
     public String requestHeader() {
         return requestHeader;
+    }
+
+    /** Returns the stable Java Chat workload label for this request tier. */
+    public String workloadHeader(String operation) {
+        if (operation == null || operation.isBlank()) {
+            throw new IllegalArgumentException("operation must be non-blank");
+        }
+        return "java-chat:" + operation + ":" + (this == LIVE ? "live" : "batch");
     }
 }
