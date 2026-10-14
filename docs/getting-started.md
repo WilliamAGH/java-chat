@@ -22,7 +22,7 @@ Configure the shared gateway `OPENAI_BASE_URL` and `OPENAI_API_KEY` used by embe
 
 Set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and a non-blank gateway `OPENAI_MODEL` alias (the default is `claude-haiku-5-5`).
 Java Chat uses the shared gateway only and does not dispatch failed requests to another provider.
-Leave `app.llm.reasoning-effort` unset to preserve the gateway/model default; set one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` only for an explicit override.
+Chat uses the tested `app.llm.reasoning-effort=low` setting; supported overrides are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
 
 3) Start the fresh generation-specific Qdrant 1.18.3 Compose project (optional but required for full RAG):
 

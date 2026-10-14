@@ -141,7 +141,7 @@ class OpenAiRequestFactoryTest {
     }
 
     @Test
-    void jsonCompletionOmitsTheConfiguredReasoningEffort() {
+    void jsonCompletionReservesItsOutputBudgetForVisibleJson() {
         OpenAiRequestFactory requestFactory = createRequestFactory("max");
 
         ResponseCreateParams jsonCompletionParams =
@@ -149,9 +149,10 @@ class OpenAiRequestFactoryTest {
 
         assertTrue(
                 jsonCompletionParams.text().orElseThrow().format().orElseThrow().isJsonObject());
-        assertTrue(
-                jsonCompletionParams.reasoning().isEmpty(),
-                "JSON completions inherit the gateway default so reasoning tokens cannot starve the output budget");
+        assertEquals(128L, jsonCompletionParams.maxOutputTokens().orElseThrow());
+        assertEquals(
+                ReasoningEffort.NONE,
+                jsonCompletionParams.reasoning().orElseThrow().effort().orElseThrow());
     }
 
     @Test

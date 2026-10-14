@@ -2,13 +2,17 @@ id: java-no-obsolete-gpt5-chat-model
 valid:
   - |
       class ChatModelConfig {
-          private static final String MODEL = "gpt-5.4";
+          private static final String MODEL = "claude-haiku-5-5";
       }
   - |
       class OtherModelConfig {
           private static final String MODEL = "o3-mini";
       }
 invalid:
+  - |
+      class ObsoleteChatModelConfig {
+          private static final String MODEL = "gpt-5.4";
+      }
   - |
       class ProviderQualifiedChatModelConfig {
           private static final String MODEL = "provider/gpt-5.4";

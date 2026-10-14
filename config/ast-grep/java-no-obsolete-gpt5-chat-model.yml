@@ -12,7 +12,4 @@ files:
   - 'src/main/java/**'
 rule:
   kind: string_literal
-  all:
-    - regex: '^"(?i:(?:[^"/:]+[/:])*gpt-5[^"]*)"$'
-    - not:
-        regex: '^"gpt-5\.4"$'
+  regex: '^"(?i:(?:[^"/:]+[/:])*gpt-5[^"]*)"$'
