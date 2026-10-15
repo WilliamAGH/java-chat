@@ -13,6 +13,7 @@ import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.GuidedLearningService;
+import com.williamcallahan.javachat.service.LlmGatewayTier;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RetrievalService;
@@ -339,6 +340,7 @@ public class GuidedLearningController extends BaseController {
                     // Stream with provider transparency - surfaces which LLM is responding
                     return openAIStreamingService
                             .streamResponse(
+                                    LlmGatewayTier.Purpose.GUIDED_LEARNING,
                                     promptOutcome.structuredPrompt(),
                                     appProperties.getLlm().getTemperature())
                             .flatMapMany(streamingResult -> {

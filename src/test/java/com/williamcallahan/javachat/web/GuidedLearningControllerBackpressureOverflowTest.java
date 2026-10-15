@@ -28,6 +28,7 @@ import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
+import com.williamcallahan.javachat.service.LlmGatewayTier;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
@@ -106,7 +107,8 @@ class GuidedLearningControllerBackpressureOverflowTest {
         when(guidedLearningService.citationOutcomeForRetainedContext(
                         any(GuidedLearningService.GuidedChatPromptOutcome.class), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
-        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+        when(streamingService.streamResponse(
+                        eq(LlmGatewayTier.Purpose.GUIDED_LEARNING), any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(
                         partialAnswerThenOverflow, RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(streamBufferOverflowFailure))

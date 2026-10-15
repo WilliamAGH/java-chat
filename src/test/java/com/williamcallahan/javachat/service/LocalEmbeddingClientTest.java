@@ -67,8 +67,10 @@ class LocalEmbeddingClientTest {
         try {
             LocalEmbeddingClient localEmbeddingClient =
                     new LocalEmbeddingClient(baseUrl, "local-model", 3, 2, new RestTemplateBuilder());
-            List<float[]> embeddingVectors =
-                    localEmbeddingClient.embed(List.of("alpha", "beta", "gamma"), LlmGatewayTier.LIVE);
+            List<float[]> embeddingVectors = localEmbeddingClient.embed(
+                    LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING,
+                    List.of("alpha", "beta", "gamma"),
+                    LlmGatewayTier.LIVE);
 
             assertEquals(2, requestCounter.get());
             assertEquals(List.of(2, 1), observedBatchSizes);
@@ -101,7 +103,8 @@ class LocalEmbeddingClientTest {
                     new LocalEmbeddingClient(baseUrl, "local-model", 3, 8, new RestTemplateBuilder());
             EmbeddingServiceUnavailableException thrownException = assertThrows(
                     EmbeddingServiceUnavailableException.class,
-                    () -> localEmbeddingClient.embed(List.of("alpha"), LlmGatewayTier.LIVE));
+                    () -> localEmbeddingClient.embed(
+                            LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING, List.of("alpha"), LlmGatewayTier.LIVE));
             assertTrue(thrownException.getMessage().contains("dimension mismatch"));
         } finally {
             httpServer.stop(0);
@@ -141,7 +144,10 @@ class LocalEmbeddingClientTest {
                     () -> assertThrows(
                             EmbeddingServiceTemporarilyUnavailableException.class,
                             () -> localEmbeddingClient.embed(
-                                    List.of("first", "second"), LlmGatewayTier.LIVE, MULTI_BATCH_OPERATION_BUDGET)));
+                                    LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING,
+                                    List.of("first", "second"),
+                                    LlmGatewayTier.LIVE,
+                                    MULTI_BATCH_OPERATION_BUDGET)));
 
             assertTrue(deadlineFailure.getMessage().contains("Local embedding"));
             TimeoutException socketDeadlineFailure =
@@ -174,7 +180,11 @@ class LocalEmbeddingClientTest {
 
             EmbeddingServiceTemporarilyUnavailableException deadlineFailure = assertThrows(
                     EmbeddingServiceTemporarilyUnavailableException.class,
-                    () -> localEmbeddingClient.embed(List.of("expired"), LlmGatewayTier.LIVE, Duration.ZERO));
+                    () -> localEmbeddingClient.embed(
+                            LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING,
+                            List.of("expired"),
+                            LlmGatewayTier.LIVE,
+                            Duration.ZERO));
 
             assertInstanceOf(TimeoutException.class, deadlineFailure.getCause());
             assertEquals(0, requestCounter.get());
@@ -195,7 +205,10 @@ class LocalEmbeddingClientTest {
 
         EmbeddingServiceTemporarilyUnavailableException transportFailure = assertThrows(
                 EmbeddingServiceTemporarilyUnavailableException.class,
-                () -> localEmbeddingClient.embed(List.of("transport failure"), LlmGatewayTier.LIVE));
+                () -> localEmbeddingClient.embed(
+                        LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING,
+                        List.of("transport failure"),
+                        LlmGatewayTier.LIVE));
 
         ResourceAccessException typedTransportFailure =
                 assertInstanceOf(ResourceAccessException.class, transportFailure.getCause());
@@ -213,7 +226,10 @@ class LocalEmbeddingClientTest {
 
         EmbeddingServiceTemporarilyUnavailableException transportTimeout = assertThrows(
                 EmbeddingServiceTemporarilyUnavailableException.class,
-                () -> localEmbeddingClient.embed(List.of("transport timeout"), LlmGatewayTier.LIVE));
+                () -> localEmbeddingClient.embed(
+                        LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING,
+                        List.of("transport timeout"),
+                        LlmGatewayTier.LIVE));
 
         TimeoutException timeoutFailure = assertInstanceOf(TimeoutException.class, transportTimeout.getCause());
         ResourceAccessException typedTransportFailure =

@@ -73,7 +73,8 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
     }
 
     @Override
-    public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier) {
+    public List<float[]> embed(LlmGatewayTier.Purpose purpose, List<String> texts, LlmGatewayTier requestTier) {
+        Objects.requireNonNull(purpose, "purpose");
         Objects.requireNonNull(requestTier, "requestTier");
         if (texts == null || texts.isEmpty()) {
             return List.of();
@@ -89,7 +90,9 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
      * template whose connect and read timeouts cannot exceed the remaining budget.</p>
      */
     @Override
-    public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier, Duration requestTimeout) {
+    public List<float[]> embed(
+            LlmGatewayTier.Purpose purpose, List<String> texts, LlmGatewayTier requestTier, Duration requestTimeout) {
+        Objects.requireNonNull(purpose, "purpose");
         Objects.requireNonNull(requestTier, "requestTier");
         Duration requiredRequestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout");
         if (texts == null || texts.isEmpty()) {

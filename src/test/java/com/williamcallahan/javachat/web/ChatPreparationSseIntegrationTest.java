@@ -24,6 +24,7 @@ import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.EmbeddingClient;
 import com.williamcallahan.javachat.service.EmbeddingModelKeepAlive;
 import com.williamcallahan.javachat.service.ExternalServiceHealth;
+import com.williamcallahan.javachat.service.LlmGatewayTier;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
@@ -130,7 +131,8 @@ class ChatPreparationSseIntegrationTest {
         when(chatService.citationOutcomeForRetainedContext(
                         eq(USER_QUERY), any(ChatService.StructuredPromptOutcome.class), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
-        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+        when(streamingService.streamResponse(
+                        eq(LlmGatewayTier.Purpose.CHAT_ANSWER), any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(
                         new StreamingResult(Flux.just("Complete"), RateLimitService.ApiProvider.OPENAI, List.of())));
         doAnswer(ignoredInvocation -> {

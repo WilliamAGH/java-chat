@@ -73,7 +73,11 @@ public class EnrichmentService {
         }
 
         String enrichmentJson = openAIStreamingService
-                .completeJsonObject(prompt.toString(), enrichmentTemperature, enrichmentOutputTokenBudget)
+                .completeJsonObject(
+                        LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT,
+                        prompt.toString(),
+                        enrichmentTemperature,
+                        enrichmentOutputTokenBudget)
                 .block();
         if (enrichmentJson == null || enrichmentJson.isBlank()) {
             throw new IllegalStateException("LLM returned empty enrichment response");

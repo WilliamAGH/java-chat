@@ -46,7 +46,11 @@ class EnrichmentServiceCacheTest {
             EnrichmentService enrichmentService = applicationContext.getBean(EnrichmentService.class);
             OpenAIStreamingService streamingService = applicationContext.getBean(OpenAIStreamingService.class);
             given(streamingService.isAvailable()).willReturn(true);
-            given(streamingService.completeJsonObject(anyString(), eq(ENRICHMENT_TEMPERATURE), anyInt()))
+            given(streamingService.completeJsonObject(
+                            eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT),
+                            anyString(),
+                            eq(ENRICHMENT_TEMPERATURE),
+                            anyInt()))
                     .willReturn(Mono.just(ENRICHMENT_INITIAL_JSON))
                     .willReturn(Mono.just(ENRICHMENT_FRESH_JSON));
 
@@ -61,7 +65,11 @@ class EnrichmentServiceCacheTest {
             assertThat(freshContextEnrichment.getHints()).containsExactly(ENRICHMENT_FRESH_HINT);
             assertThat(repeatedInitialContextEnrichment.getHints()).containsExactly(ENRICHMENT_INITIAL_HINT);
             verify(streamingService, times(ENRICHMENT_CACHE_MISS_COMPLETION_COUNT))
-                    .completeJsonObject(anyString(), eq(ENRICHMENT_TEMPERATURE), anyInt());
+                    .completeJsonObject(
+                            eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT),
+                            anyString(),
+                            eq(ENRICHMENT_TEMPERATURE),
+                            anyInt());
         }
     }
 

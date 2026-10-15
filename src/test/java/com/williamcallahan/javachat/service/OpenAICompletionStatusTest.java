@@ -30,6 +30,7 @@ import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailu
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ModelConfiguration;
+import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -40,7 +41,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import reactor.test.StepVerifier;
 
@@ -53,8 +54,15 @@ class OpenAICompletionStatusTest {
     private static final String PROVIDER_REFUSAL = "I cannot help with that request.";
 
     @ParameterizedTest
-    @ValueSource(strings = {"production-z", "production-a", "batch"})
-    void jsonCompletionSendsMatchingWorkloadTierAndNoReasoning(String requestTier) throws IOException {
+    @CsvSource({
+        "production-z,MARKDOWN_ENRICHMENT,false",
+        "production-a,SEARCH_RERANK,false",
+        "batch,MARKDOWN_ENRICHMENT,false",
+        "production-z,CHAT_ANSWER,true",
+        "production-z,GUIDED_LEARNING,true"
+    })
+    void completionSendsMatchingWorkloadTier(String requestTier, LlmGatewayTier.Purpose purpose, boolean streaming)
+            throws IOException {
         AtomicReference<CapturedCompletionRequest> capturedRequest = new AtomicReference<>();
         HttpServer gatewayServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         gatewayServer.createContext("/v1/responses", exchange -> {
@@ -70,7 +78,17 @@ class OpenAICompletionStatusTest {
                       "status":"completed","content":[{"type":"output_text",
                       "text":"{\\"ok\\":true}","annotations":[]}]}]}
                     """.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            if (streaming) {
+                String completedResponse =
+                        new ObjectMapper().readTree(responseBody).toString();
+                responseBody = ("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\","
+                                + "\"sequence_number\":1,\"item_id\":\"msg_wire\",\"output_index\":0,\"content_index\":0,"
+                                + "\"delta\":\"{\\\"ok\\\":true}\"}\n\nevent: response.completed\ndata: "
+                                + "{\"type\":\"response.completed\",\"sequence_number\":2,\"response\":"
+                                + completedResponse + "}\n\n")
+                        .getBytes(StandardCharsets.UTF_8);
+            }
+            exchange.getResponseHeaders().set("Content-Type", streaming ? "text/event-stream" : "application/json");
             exchange.sendResponseHeaders(200, responseBody.length);
             try (var responseStream = exchange.getResponseBody()) {
                 responseStream.write(responseBody);
@@ -94,11 +112,22 @@ class OpenAICompletionStatusTest {
                     "openAiClient",
                     configuredClient.withOptions(options -> options.baseUrl(
                             "http://127.0.0.1:" + gatewayServer.getAddress().getPort() + "/v1")));
-            assertEquals(
-                    "{\"ok\":true}",
-                    streamingService
-                            .completeJsonObject("Return a JSON object with ok true", 0.0, 512)
-                            .block(Duration.ofSeconds(10)));
+            if (streaming) {
+                assertEquals(
+                        "{\"ok\":true}",
+                        streamingService
+                                .streamResponse(purpose, StructuredPrompt.fromRawPrompt("Return ok true", 1), 0.0)
+                                .flatMapMany(StreamingResult::textChunks)
+                                .collectList()
+                                .map(chunks -> String.join("", chunks))
+                                .block(Duration.ofSeconds(10)));
+            } else {
+                assertEquals(
+                        "{\"ok\":true}",
+                        streamingService
+                                .completeJsonObject(purpose, "Return a JSON object with ok true", 0.0, 512)
+                                .block(Duration.ofSeconds(10)));
+            }
         } finally {
             streamingService.shutdown();
             gatewayServer.stop(0);
@@ -107,12 +136,19 @@ class OpenAICompletionStatusTest {
         assertNotNull(gatewayRequest);
         assertEquals(requestTier, gatewayRequest.tierHeader());
         assertEquals(
-                "java-chat:chat-completions:" + (requestTier.equals("batch") ? "batch" : "live"),
+                (requestTier.equals("batch") ? LlmGatewayTier.BATCH : LlmGatewayTier.LIVE).workloadHeader(purpose),
                 gatewayRequest.workloadHeader());
-        assertEquals(512, gatewayRequest.requestBody().path("max_output_tokens").asInt());
-        assertEquals(
-                "none",
-                gatewayRequest.requestBody().path("reasoning").path("effort").asText());
+        if (!streaming) {
+            assertEquals(
+                    512, gatewayRequest.requestBody().path("max_output_tokens").asInt());
+            assertEquals(
+                    "none",
+                    gatewayRequest
+                            .requestBody()
+                            .path("reasoning")
+                            .path("effort")
+                            .asText());
+        }
     }
 
     @Test
@@ -129,7 +165,7 @@ class OpenAICompletionStatusTest {
                 .thenReturn(providerCompletionFuture);
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
-        StepVerifier.create(streamingService.complete("prompt", 0.7))
+        StepVerifier.create(streamingService.complete(LlmGatewayTier.Purpose.CHAT_ANSWER, "prompt", 0.7))
                 .then(() -> providerCompletionFuture.complete(providerCompletion))
                 .expectNext(PROVIDER_REFUSAL)
                 .verifyComplete();
@@ -238,7 +274,7 @@ class OpenAICompletionStatusTest {
                 .thenReturn(providerCompletionFuture);
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
-        StepVerifier.create(streamingService.complete("prompt", 0.7))
+        StepVerifier.create(streamingService.complete(LlmGatewayTier.Purpose.CHAT_ANSWER, "prompt", 0.7))
                 .thenCancel()
                 .verify();
 
@@ -260,7 +296,7 @@ class OpenAICompletionStatusTest {
                 .thenReturn(CompletableFuture.completedFuture(completedCompletion));
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
-        StepVerifier.create(streamingService.complete("prompt", 0.7))
+        StepVerifier.create(streamingService.complete(LlmGatewayTier.Purpose.CHAT_ANSWER, "prompt", 0.7))
                 .expectErrorSatisfies(completionFailure -> {
                     OpenAiResponseException terminalFailure =
                             assertInstanceOf(OpenAiResponseException.class, completionFailure);
@@ -276,7 +312,7 @@ class OpenAICompletionStatusTest {
             verify(completionFailureScenario.providerCompletion(), never()).output();
         }
         if (completionFailureScenario.expectsConfiguredProviderBackoff()) {
-            StepVerifier.create(streamingService.complete("prompt", 0.7))
+            StepVerifier.create(streamingService.complete(LlmGatewayTier.Purpose.CHAT_ANSWER, "prompt", 0.7))
                     .expectError(ConfiguredProviderTemporarilyUnavailableException.class)
                     .verify();
             verify(responseService).create(any(ResponseCreateParams.class), any(RequestOptions.class));
@@ -284,7 +320,7 @@ class OpenAICompletionStatusTest {
             return;
         }
 
-        StepVerifier.create(streamingService.complete("prompt", 0.7))
+        StepVerifier.create(streamingService.complete(LlmGatewayTier.Purpose.CHAT_ANSWER, "prompt", 0.7))
                 .expectNext(VISIBLE_COMPLETION)
                 .verifyComplete();
         verify(responseService, times(EXPECTED_PROVIDER_REQUEST_COUNT_AFTER_READMISSION))

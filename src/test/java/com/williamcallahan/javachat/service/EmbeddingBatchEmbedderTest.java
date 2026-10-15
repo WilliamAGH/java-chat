@@ -34,8 +34,10 @@ class EmbeddingBatchEmbedderTest {
                 EMBEDDING_DIMENSIONS,
                 (requestIndex, textBatch) -> repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR));
 
-        List<float[]> embeddingVectors =
-                EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(THREE_BATCH_DOCUMENT_COUNT));
+        List<float[]> embeddingVectors = EmbeddingBatchEmbedder.embedDocuments(
+                LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING,
+                embeddingClient,
+                sequentialDocuments(THREE_BATCH_DOCUMENT_COUNT));
 
         assertEquals(THREE_BATCH_DOCUMENT_COUNT, embeddingVectors.size());
         assertEquals(3, embeddingClient.requestedTextBatches.size());
@@ -62,8 +64,8 @@ class EmbeddingBatchEmbedderTest {
                         .map(documentText -> new float[] {documentIndexFromText(documentText)})
                         .toList());
 
-        List<float[]> embeddingVectors =
-                EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(documentCount));
+        List<float[]> embeddingVectors = EmbeddingBatchEmbedder.embedDocuments(
+                LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING, embeddingClient, sequentialDocuments(documentCount));
 
         for (int documentIndex = 0; documentIndex < documentCount; documentIndex++) {
             assertArrayEquals(new float[] {documentIndex}, embeddingVectors.get(documentIndex));
@@ -81,7 +83,10 @@ class EmbeddingBatchEmbedderTest {
 
         EmbeddingServiceUnavailableException mismatchFailure = assertThrows(
                 EmbeddingServiceUnavailableException.class,
-                () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(documentCount)));
+                () -> EmbeddingBatchEmbedder.embedDocuments(
+                        LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING,
+                        embeddingClient,
+                        sequentialDocuments(documentCount)));
 
         assertTrue(mismatchFailure.getMessage().contains("expected 1 but received 0"));
         assertTrue(mismatchFailure
@@ -108,7 +113,10 @@ class EmbeddingBatchEmbedderTest {
 
         EmbeddingServiceUnavailableException batchFailure = assertThrows(
                 EmbeddingServiceUnavailableException.class,
-                () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(documentCount)));
+                () -> EmbeddingBatchEmbedder.embedDocuments(
+                        LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING,
+                        embeddingClient,
+                        sequentialDocuments(documentCount)));
 
         assertSame(providerFailure, batchFailure.getCause());
         int secondBatchStartIndex = EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE;
@@ -130,7 +138,8 @@ class EmbeddingBatchEmbedderTest {
 
         EmbeddingServiceUnavailableException dimensionFailure = assertThrows(
                 EmbeddingServiceUnavailableException.class,
-                () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(2)));
+                () -> EmbeddingBatchEmbedder.embedDocuments(
+                        LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING, embeddingClient, sequentialDocuments(2)));
 
         assertTrue(dimensionFailure.getMessage().contains("document index 0"));
         assertTrue(dimensionFailure.getMessage().contains("expected 2 but received 1"));
@@ -146,7 +155,8 @@ class EmbeddingBatchEmbedderTest {
                 EMBEDDING_DIMENSIONS,
                 (requestIndex, textBatch) -> repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR));
 
-        List<float[]> embeddingVectors = EmbeddingBatchEmbedder.embedDocuments(embeddingClient, representativeCorpus);
+        List<float[]> embeddingVectors = EmbeddingBatchEmbedder.embedDocuments(
+                LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING, embeddingClient, representativeCorpus);
 
         int expectedRequestCount = Math.ceilDiv(
                 REPRESENTATIVE_JAVA_CORPUS_CHUNK_COUNT, EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE);
@@ -178,7 +188,8 @@ class EmbeddingBatchEmbedderTest {
                     return repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR);
                 });
 
-        EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(documentCount));
+        EmbeddingBatchEmbedder.embedDocuments(
+                LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING, embeddingClient, sequentialDocuments(documentCount));
 
         assertEquals(MINIMUM_PARALLEL_REQUEST_COUNT, embeddingClient.maximumConcurrentRequests.get());
     }
@@ -191,7 +202,8 @@ class EmbeddingBatchEmbedderTest {
                     return repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR);
                 });
 
-        EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1));
+        EmbeddingBatchEmbedder.embedDocuments(
+                LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING, embeddingClient, sequentialDocuments(1));
 
         assertEquals(1, embeddingClient.requestedTextBatches.size());
     }
@@ -227,7 +239,9 @@ class EmbeddingBatchEmbedderTest {
         assertThrows(
                 EmbeddingServiceUnavailableException.class,
                 () -> EmbeddingBatchEmbedder.embedDocuments(
-                        embeddingClient, sequentialDocuments(EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE * 2)));
+                        LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING,
+                        embeddingClient,
+                        sequentialDocuments(EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE * 2)));
 
         assertTrue(blockedRequestInterrupted.get());
     }
@@ -240,7 +254,8 @@ class EmbeddingBatchEmbedderTest {
                 EMBEDDING_DIMENSIONS,
                 (requestIndex, textBatch) -> repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR));
 
-        EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(documentCount));
+        EmbeddingBatchEmbedder.embedDocuments(
+                LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING, embeddingClient, sequentialDocuments(documentCount));
 
         assertTrue(embeddingClient.maximumConcurrentRequests.get()
                 <= EmbeddingBatchEmbedder.MAX_CONCURRENT_EMBEDDING_REQUESTS);
@@ -257,7 +272,8 @@ class EmbeddingBatchEmbedderTest {
                     return repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR);
                 });
 
-        List<float[]> embeddingVectors = EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1));
+        List<float[]> embeddingVectors = EmbeddingBatchEmbedder.embedDocuments(
+                LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING, embeddingClient, sequentialDocuments(1));
 
         assertEquals(1, embeddingVectors.size());
         assertEquals(EmbeddingBatchEmbedder.MAX_EMBEDDING_ATTEMPTS, providerAttempts.get());
@@ -274,7 +290,8 @@ class EmbeddingBatchEmbedderTest {
 
         assertThrows(
                 EmbeddingServiceUnavailableException.class,
-                () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1)));
+                () -> EmbeddingBatchEmbedder.embedDocuments(
+                        LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING, embeddingClient, sequentialDocuments(1)));
 
         assertEquals(1, providerAttempts.get());
     }
@@ -290,7 +307,8 @@ class EmbeddingBatchEmbedderTest {
 
         assertThrows(
                 EmbeddingServiceUnavailableException.class,
-                () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1)));
+                () -> EmbeddingBatchEmbedder.embedDocuments(
+                        LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING, embeddingClient, sequentialDocuments(1)));
 
         assertEquals(EmbeddingBatchEmbedder.MAX_EMBEDDING_ATTEMPTS, providerAttempts.get());
     }
@@ -308,7 +326,8 @@ class EmbeddingBatchEmbedderTest {
         try {
             EmbeddingServiceUnavailableException batchFailure = assertThrows(
                     EmbeddingServiceUnavailableException.class,
-                    () -> EmbeddingBatchEmbedder.embedDocuments(embeddingClient, sequentialDocuments(1)));
+                    () -> EmbeddingBatchEmbedder.embedDocuments(
+                            LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING, embeddingClient, sequentialDocuments(1)));
 
             assertTrue(Thread.currentThread().isInterrupted());
             assertTrue(batchFailure.getCause() instanceof InterruptedException);
@@ -355,7 +374,7 @@ class EmbeddingBatchEmbedderTest {
         }
 
         @Override
-        public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier) {
+        public List<float[]> embed(LlmGatewayTier.Purpose purpose, List<String> texts, LlmGatewayTier requestTier) {
             int requestIndex = requestSequence.getAndIncrement();
             requestedTextBatches.add(List.copyOf(texts));
             requestedTiers.add(requestTier);
@@ -369,8 +388,12 @@ class EmbeddingBatchEmbedderTest {
         }
 
         @Override
-        public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier, java.time.Duration requestTimeout) {
-            return embed(texts, requestTier);
+        public List<float[]> embed(
+                LlmGatewayTier.Purpose purpose,
+                List<String> texts,
+                LlmGatewayTier requestTier,
+                java.time.Duration requestTimeout) {
+            return embed(purpose, texts, requestTier);
         }
 
         @Override

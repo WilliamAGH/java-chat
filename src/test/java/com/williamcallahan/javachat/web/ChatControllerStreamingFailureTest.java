@@ -42,6 +42,7 @@ import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
+import com.williamcallahan.javachat.service.LlmGatewayTier;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RerankingFailureException;
@@ -321,7 +322,8 @@ class ChatControllerStreamingFailureTest {
         assertEquals(Boolean.TRUE, timeoutError.retryable());
         assertEquals(STATUS_STAGE_RETRIEVAL, timeoutError.stage());
         assertFalse(serializedTimeoutError.contains(UPSTREAM_SECRET_MESSAGE));
-        verify(streamingService, never()).streamResponse(any(StructuredPrompt.class), anyDouble());
+        verify(streamingService, never())
+                .streamResponse(eq(LlmGatewayTier.Purpose.CHAT_ANSWER), any(StructuredPrompt.class), anyDouble());
         List<ILoggingEvent> retrievalTimeoutWarnings = pipelineLogEvents.events().stream()
                 .filter(logEvent -> logEvent.getLevel() == Level.WARN
                         && "Response preparation timeout".equals(logEvent.getFormattedMessage()))
@@ -423,7 +425,8 @@ class ChatControllerStreamingFailureTest {
         when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY), any(), anyLong()))
                 .thenReturn(
                         new ChatService.StructuredPromptOutcome(StructuredPrompt.fromRawPrompt("test", 1), List.of()));
-        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+        when(streamingService.streamResponse(
+                        eq(LlmGatewayTier.Purpose.CHAT_ANSWER), any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.never());
 
         ExecutorService subscriptionExecutor = Executors.newSingleThreadExecutor();
@@ -528,7 +531,8 @@ class ChatControllerStreamingFailureTest {
                     "blocked retrieval should terminate after cancellation");
             assertNull(streamFailure.get());
             verifyNoInteractions(chatService, retrievalService);
-            verify(streamingService, never()).streamResponse(any(StructuredPrompt.class), anyDouble());
+            verify(streamingService, never())
+                    .streamResponse(eq(LlmGatewayTier.Purpose.CHAT_ANSWER), any(StructuredPrompt.class), anyDouble());
             verify(chatMemoryService, never()).addExchange(eq(SESSION_ID), eq(USER_QUERY), any());
         } finally {
             releaseRetrieval.countDown();
@@ -608,7 +612,8 @@ class ChatControllerStreamingFailureTest {
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(officialCitation), 0));
         when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
-        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+        when(streamingService.streamResponse(
+                        eq(LlmGatewayTier.Purpose.CHAT_ANSWER), any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(
                         Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI, List.of("official-prompt-document"))));
 
@@ -666,7 +671,8 @@ class ChatControllerStreamingFailureTest {
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(exactOverloadCitation), 1));
         when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
-        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+        when(streamingService.streamResponse(
+                        eq(LlmGatewayTier.Purpose.CHAT_ANSWER), any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(
                         Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI, List.of("broad-prompt-document"))));
 
@@ -733,7 +739,8 @@ class ChatControllerStreamingFailureTest {
                         eq(USER_QUERY), any(ChatService.StructuredPromptOutcome.class), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(
                         List.of(new Citation("https://example.com", "Example", "", "")), 2));
-        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+        when(streamingService.streamResponse(
+                        eq(LlmGatewayTier.Purpose.CHAT_ANSWER), any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(
                         new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI, List.of())));
 
@@ -795,7 +802,8 @@ class ChatControllerStreamingFailureTest {
         when(chatService.citationOutcomeForRetainedContext(
                         eq(USER_QUERY), any(ChatService.StructuredPromptOutcome.class), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
-        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+        when(streamingService.streamResponse(
+                        eq(LlmGatewayTier.Purpose.CHAT_ANSWER), any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(
                         partialAnswerThenOverflow, RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(streamBufferOverflowFailure))
@@ -847,7 +855,8 @@ class ChatControllerStreamingFailureTest {
         when(chatService.citationOutcomeForRetainedContext(
                         eq(USER_QUERY), any(ChatService.StructuredPromptOutcome.class), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
-        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+        when(streamingService.streamResponse(
+                        eq(LlmGatewayTier.Purpose.CHAT_ANSWER), any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(
                         Flux.error(streamingFailure), RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(streamingFailure)).thenReturn(retryable);

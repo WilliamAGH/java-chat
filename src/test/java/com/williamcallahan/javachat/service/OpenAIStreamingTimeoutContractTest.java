@@ -65,7 +65,7 @@ class OpenAIStreamingTimeoutContractTest {
         ReflectionTestUtils.setField(streamingService, "streamingRequestTimeoutSeconds", 600L);
 
         assertThrows(OpenAiStreamingFailureException.class, () -> streamingService
-                .streamResponse(structuredPrompt, 0.4)
+                .streamResponse(LlmGatewayTier.Purpose.CHAT_ANSWER, structuredPrompt, 0.4)
                 .flatMapMany(StreamingResult::textChunks)
                 .blockLast(Duration.ofSeconds(10)));
 

@@ -92,7 +92,7 @@ public class HybridVectorService {
         Objects.requireNonNull(collectionKind, NULL_MESSAGE_COLLECTION_KIND);
         String collectionName =
                 Objects.requireNonNull(resolveCollectionName(collectionKind), NULL_MESSAGE_COLLECTION_NAME);
-        doUpsert(collectionName, documents);
+        doUpsert(indexingPurpose(collectionKind), collectionName, documents);
     }
 
     /**
@@ -109,7 +109,7 @@ public class HybridVectorService {
         if (collectionName.isBlank()) {
             throw new IllegalArgumentException("collectionName must not be blank");
         }
-        doUpsert(collectionName, documents);
+        doUpsert(LlmGatewayTier.Purpose.REPOSITORY_INDEX_EMBEDDING, collectionName, documents);
     }
 
     /**
@@ -129,7 +129,7 @@ public class HybridVectorService {
         Objects.requireNonNull(collectionKind, NULL_MESSAGE_COLLECTION_KIND);
         String collectionName =
                 Objects.requireNonNull(resolveCollectionName(collectionKind), NULL_MESSAGE_COLLECTION_NAME);
-        replaceUrlDocuments(collectionName, sourceUrl, replacementDocuments);
+        replaceUrlDocuments(indexingPurpose(collectionKind), collectionName, sourceUrl, replacementDocuments);
     }
 
     /**
@@ -140,6 +140,15 @@ public class HybridVectorService {
      * @param replacementDocuments complete replacement document set with stable UUID identities
      */
     public void replaceUrlDocuments(String collectionName, String sourceUrl, List<Document> replacementDocuments) {
+        replaceUrlDocuments(
+                LlmGatewayTier.Purpose.REPOSITORY_INDEX_EMBEDDING, collectionName, sourceUrl, replacementDocuments);
+    }
+
+    private void replaceUrlDocuments(
+            LlmGatewayTier.Purpose purpose,
+            String collectionName,
+            String sourceUrl,
+            List<Document> replacementDocuments) {
         Objects.requireNonNull(collectionName, NULL_MESSAGE_COLLECTION_NAME);
         if (collectionName.isBlank()) {
             throw new IllegalArgumentException("collectionName must not be blank");
@@ -158,7 +167,7 @@ public class HybridVectorService {
         Set<PointId> replacementPointIds = replacementPointIds(requiredReplacementDocuments);
         Set<PointId> priorPointIds = scrollPointIdsForUrl(collectionName, requiredSourceUrl);
 
-        doUpsert(collectionName, requiredReplacementDocuments);
+        doUpsert(purpose, collectionName, requiredReplacementDocuments);
 
         priorPointIds.removeAll(replacementPointIds);
         deletePointIds(collectionName, priorPointIds);
@@ -448,7 +457,16 @@ public class HybridVectorService {
         };
     }
 
-    private void doUpsert(String collectionName, List<Document> documents) {
+    private static LlmGatewayTier.Purpose indexingPurpose(QdrantCollectionKind collectionKind) {
+        return switch (collectionKind) {
+            case BOOKS -> LlmGatewayTier.Purpose.BOOK_INDEX_EMBEDDING;
+            case DOCS -> LlmGatewayTier.Purpose.DOCUMENTATION_INDEX_EMBEDDING;
+            case ARTICLES -> LlmGatewayTier.Purpose.ARTICLE_INDEX_EMBEDDING;
+            case PDFS -> LlmGatewayTier.Purpose.PDF_INDEX_EMBEDDING;
+        };
+    }
+
+    private void doUpsert(LlmGatewayTier.Purpose purpose, String collectionName, List<Document> documents) {
         Objects.requireNonNull(documents, "documents");
         if (documents.isEmpty()) {
             return;
@@ -457,8 +475,8 @@ public class HybridVectorService {
         String denseVectorName = appProperties.getQdrant().getDenseVectorName();
         String sparseVectorName = appProperties.getQdrant().getSparseVectorName();
 
-        List<float[]> embeddings =
-                Objects.requireNonNull(EmbeddingBatchEmbedder.embedDocuments(embeddingClient, documents), "embeddings");
+        List<float[]> embeddings = Objects.requireNonNull(
+                EmbeddingBatchEmbedder.embedDocuments(purpose, embeddingClient, documents), "embeddings");
         if (embeddings.size() != documents.size()) {
             throw new IllegalStateException(
                     "Embedding count mismatch: expected " + documents.size() + " but received " + embeddings.size());

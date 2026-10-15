@@ -49,13 +49,16 @@ class OpenAiCompatibleEmbeddingClientWireTest {
                                 TEST_LIVE_MAX_CONCURRENT_REQUESTS, TEST_UNTHROTTLED_REQUESTS_PER_SECOND),
                         OpenAiCompatibleEmbeddingClient.RequestLimits.batch(
                                 TEST_BATCH_MAX_CONCURRENT_REQUESTS, TEST_UNTHROTTLED_REQUESTS_PER_SECOND)))) {
-            List<float[]> liveEmbeddings = embeddingClient.embed(List.of("user retrieval"), LlmGatewayTier.LIVE);
+            List<float[]> liveEmbeddings = embeddingClient.embed(
+                    LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING, List.of("user retrieval"), LlmGatewayTier.LIVE);
             List<String> batchInputs = new ArrayList<>();
             for (int inputIndex = 0; inputIndex < BATCH_INPUT_COUNT; inputIndex++) {
                 batchInputs.add("ingestion input " + inputIndex);
             }
-            List<float[]> batchEmbeddings = embeddingClient.embed(batchInputs, LlmGatewayTier.BATCH);
+            List<float[]> batchEmbeddings = embeddingClient.embed(
+                    LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING, batchInputs, LlmGatewayTier.BATCH);
 
+            embeddingClient.warmUp();
             assertEquals(1, liveEmbeddings.size());
             assertEquals(EMBEDDING_DIMENSIONS, liveEmbeddings.getFirst().length);
             assertEquals(BATCH_INPUT_COUNT, batchEmbeddings.size());
@@ -64,7 +67,8 @@ class OpenAiCompatibleEmbeddingClientWireTest {
             embeddingServer.stop(0);
         }
 
-        assertEquals(2, capturedRequests.size());
+        assertEquals(3, capturedRequests.size());
+        assertEquals("java-chat:embeddingWarmup:batch", capturedRequests.get(2).workloadHeader());
         assertGatewayRequest(capturedRequests.get(0), "production-z", 1);
         assertGatewayRequest(capturedRequests.get(1), "batch", BATCH_INPUT_COUNT);
     }
@@ -117,7 +121,9 @@ class OpenAiCompatibleEmbeddingClientWireTest {
         assertEquals("Bearer " + TEST_API_KEY, capturedRequest.authorizationHeader());
         assertEquals(expectedTier, capturedRequest.tierHeader());
         assertEquals(
-                "java-chat:embeddings:" + (expectedTier.equals("batch") ? "batch" : "live"),
+                (expectedTier.equals("batch")
+                        ? "java-chat:contentIndexEmbedding:batch"
+                        : "java-chat:searchQueryEmbedding:live"),
                 capturedRequest.workloadHeader());
         assertEquals(
                 EMBEDDING_MODEL,

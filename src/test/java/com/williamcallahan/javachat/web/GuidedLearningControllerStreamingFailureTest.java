@@ -36,6 +36,7 @@ import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.EmbeddingServiceTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.GuidedLearningService;
+import com.williamcallahan.javachat.service.LlmGatewayTier;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
@@ -115,7 +116,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.citationOutcomeForRetainedContext(
                         any(GuidedLearningService.GuidedChatPromptOutcome.class), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
-        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+        when(streamingService.streamResponse(
+                        eq(LlmGatewayTier.Purpose.GUIDED_LEARNING), any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(
                         Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(terminalFailure)).thenReturn(true);
@@ -156,7 +158,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.citationOutcomeForRetainedContext(
                         any(GuidedLearningService.GuidedChatPromptOutcome.class), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
-        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+        when(streamingService.streamResponse(
+                        eq(LlmGatewayTier.Purpose.GUIDED_LEARNING), any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(
                         Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI, List.of())));
 
@@ -296,7 +299,8 @@ class GuidedLearningControllerStreamingFailureTest {
                         .counter()
                         .count());
         assertEquals(0, controllerErrorCount());
-        verify(streamingService, never()).streamResponse(any(StructuredPrompt.class), anyDouble());
+        verify(streamingService, never())
+                .streamResponse(eq(LlmGatewayTier.Purpose.GUIDED_LEARNING), any(StructuredPrompt.class), anyDouble());
     }
 
     @Test
@@ -312,7 +316,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.citationOutcomeForRetainedContext(
                         any(GuidedLearningService.GuidedChatPromptOutcome.class), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
-        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+        when(streamingService.streamResponse(
+                        eq(LlmGatewayTier.Purpose.GUIDED_LEARNING), any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(
                         Flux.error(upstreamFailure), RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(upstreamFailure)).thenReturn(false);

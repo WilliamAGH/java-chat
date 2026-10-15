@@ -106,7 +106,11 @@ public class HybridSearchService {
 
         float[] denseVector = queryEncoding
                 .embeddingClient()
-                .embed(query, LlmGatewayTier.LIVE, remainingStageBudget(stageDeadlineNanos));
+                .embed(
+                        LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING,
+                        query,
+                        LlmGatewayTier.LIVE,
+                        remainingStageBudget(stageDeadlineNanos));
         LexicalSparseVectorEncoder.SparseVector sparseVector =
                 queryEncoding.sparseVectorEncoder().encode(query);
         Duration queryTimeout = qdrantQueryExecutor.queryTimeout();

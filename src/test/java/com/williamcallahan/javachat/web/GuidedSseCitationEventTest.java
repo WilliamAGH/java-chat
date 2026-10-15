@@ -31,6 +31,7 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
+import com.williamcallahan.javachat.service.LlmGatewayTier;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.QdrantPayloadFieldSchema;
@@ -113,7 +114,8 @@ class GuidedSseCitationEventTest {
         GuidedLearningService.GuidedChatPromptOutcome promptOutcome = new GuidedLearningService.GuidedChatPromptOutcome(
                 StructuredPrompt.fromRawPrompt("test", 1),
                 List.of(lessonContextDocument, truncatedLessonContextDocument));
-        given(openAIStreamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+        given(openAIStreamingService.streamResponse(
+                        eq(LlmGatewayTier.Purpose.GUIDED_LEARNING), any(StructuredPrompt.class), anyDouble()))
                 .willReturn(Mono.just(new StreamingResult(
                         Flux.just("Hello"),
                         RateLimitService.ApiProvider.OPENAI,
@@ -162,7 +164,8 @@ class GuidedSseCitationEventTest {
         given(chatMemoryService.getHistory(anyString())).willReturn(List.of());
         GuidedLearningService.GuidedChatPromptOutcome promptOutcome = new GuidedLearningService.GuidedChatPromptOutcome(
                 StructuredPrompt.fromRawPrompt("test", 1), List.of(lessonContextDocument));
-        given(openAIStreamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+        given(openAIStreamingService.streamResponse(
+                        eq(LlmGatewayTier.Purpose.GUIDED_LEARNING), any(StructuredPrompt.class), anyDouble()))
                 .willReturn(Mono.just(new StreamingResult(
                         Flux.just("Hello"),
                         RateLimitService.ApiProvider.OPENAI,

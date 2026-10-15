@@ -109,7 +109,11 @@ class HybridSearchServiceTest {
         appProperties.getQdrant().setDensePrefetchHnswEf(TEST_DENSE_PREFETCH_HNSW_EF);
         appProperties.getQdrant().setQueryTimeout(DISPATCH_BUDGET_TEST_TIMEOUT);
 
-        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+        when(embeddingClient.embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(HYBRID_QUERY),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class)))
                 .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L, 3L), List.of(2.0f, 1.0f)));
@@ -154,7 +158,11 @@ class HybridSearchServiceTest {
 
     @Test
     void primaryHybridSearchDoesNotTreatProjectTypeSyntaxAsAnOfficialJavadocConstraint() {
-        when(embeddingClient.embed(eq(EXACT_JAVA_API_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+        when(embeddingClient.embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(EXACT_JAVA_API_QUERY),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class)))
                 .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(EXACT_JAVA_API_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
@@ -179,7 +187,11 @@ class HybridSearchServiceTest {
 
     @Test
     void multipleVersionScopesShareOneEncodingAndRetainIndependentResultBudgets() {
-        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+        when(embeddingClient.embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(HYBRID_QUERY),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class)))
                 .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
@@ -218,7 +230,12 @@ class HybridSearchServiceTest {
                         appProperties.getQdrant().getCollections().getDocs(),
                         appProperties.getQdrant().getCollections().getPdfs())
                 .contains(queryRequest.getCollectionName())));
-        verify(embeddingClient, times(1)).embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class));
+        verify(embeddingClient, times(1))
+                .embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(HYBRID_QUERY),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class));
         verify(sparseEncoder, times(1)).encode(HYBRID_QUERY);
         verify(gitHubCollectionDiscovery, never()).getDiscoveredCollections();
     }
@@ -230,9 +247,17 @@ class HybridSearchServiceTest {
         int collectionCount = appProperties.getQdrant().getCollections().all().size();
         CountDownLatch allFanOutsDispatched = new CountDownLatch(collectionCount * 2);
         List<SettableFuture<List<ScoredPoint>>> heldQueryFutures = new CopyOnWriteArrayList<>();
-        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+        when(embeddingClient.embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(HYBRID_QUERY),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class)))
                 .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
-        when(embeddingClient.embed(eq(SECOND_HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+        when(embeddingClient.embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(SECOND_HYBRID_QUERY),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class)))
                 .thenReturn(new float[] {0.3f, 0.2f, 0.1f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
@@ -276,11 +301,15 @@ class HybridSearchServiceTest {
         appProperties.getQdrant().setQueryTimeout(GENEROUS_QUERY_TIMEOUT);
         List<Duration> capturedEmbeddingBudgets = new ArrayList<>();
         doAnswer(invocation -> {
-                    capturedEmbeddingBudgets.add(invocation.getArgument(2));
+                    capturedEmbeddingBudgets.add(invocation.getArgument(3));
                     return new float[] {0.1f, 0.2f, 0.3f};
                 })
                 .when(embeddingClient)
-                .embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class));
+                .embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(HYBRID_QUERY),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class));
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
         List<Duration> capturedQueryTimeouts = new ArrayList<>();
@@ -310,7 +339,11 @@ class HybridSearchServiceTest {
     @Test
     void collectionTimeoutReportsEffectiveStageBudgetInsteadOfConfiguredFullTimeout() {
         appProperties.getQdrant().setQueryTimeout(GENEROUS_QUERY_TIMEOUT);
-        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+        when(embeddingClient.embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(HYBRID_QUERY),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class)))
                 .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
@@ -600,7 +633,11 @@ class HybridSearchServiceTest {
     @Test
     void sharesOneDispatchDeadlineAcrossMultipleStalledHybridQueries() {
         appProperties.getQdrant().setQueryTimeout(SHARED_QUERY_TIMEOUT);
-        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+        when(embeddingClient.embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(HYBRID_QUERY),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class)))
                 .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
@@ -638,7 +675,11 @@ class HybridSearchServiceTest {
     @Test
     void exhaustedDispatchBudgetFailsUndispatchedCollectionsImmediately() {
         appProperties.getQdrant().setQueryTimeout(EXHAUSTED_DISPATCH_QUERY_TIMEOUT);
-        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+        when(embeddingClient.embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(HYBRID_QUERY),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class)))
                 .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
@@ -664,7 +705,11 @@ class HybridSearchServiceTest {
 
     @Test
     void interruptionAfterFanOutCancelsEveryPendingQuery() throws InterruptedException {
-        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+        when(embeddingClient.embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(HYBRID_QUERY),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class)))
                 .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
@@ -728,7 +773,11 @@ class HybridSearchServiceTest {
 
     @Test
     void unavailableGrpcFailureRemainsTypedAndRetryable() {
-        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+        when(embeddingClient.embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(HYBRID_QUERY),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class)))
                 .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
@@ -753,7 +802,11 @@ class HybridSearchServiceTest {
 
     @Test
     void permissionDeniedGrpcFailureRemainsTypedAndPermanent() {
-        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+        when(embeddingClient.embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(HYBRID_QUERY),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class)))
                 .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
@@ -778,7 +831,11 @@ class HybridSearchServiceTest {
 
     @Test
     void deadlineExceededGrpcFailureBecomesTimeoutCauseAndRetainsGrpcFailure() {
-        when(embeddingClient.embed(eq(HYBRID_QUERY), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+        when(embeddingClient.embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(HYBRID_QUERY),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class)))
                 .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode(HYBRID_QUERY))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
@@ -822,7 +879,11 @@ class HybridSearchServiceTest {
     }
 
     private void stubPartialFailureQueryResponses(String queryText) {
-        when(embeddingClient.embed(eq(queryText), eq(LlmGatewayTier.LIVE), any(Duration.class)))
+        when(embeddingClient.embed(
+                        eq(LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING),
+                        eq(queryText),
+                        eq(LlmGatewayTier.LIVE),
+                        any(Duration.class)))
                 .thenReturn(new float[] {0.5f, 0.1f, 0.4f});
         when(sparseEncoder.encode(queryText))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(2L), List.of(1.0f)));
