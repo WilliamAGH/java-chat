@@ -288,7 +288,12 @@ public class RerankerService {
     private Optional<String> callLlmForReranking(String prompt, Duration rerankRequestTimeout) {
         try {
             return openAIStreamingService
-                    .completeJsonObject(prompt, rerankerTemperature, rerankerOutputTokenBudget, rerankRequestTimeout)
+                    .completeJsonObject(
+                            LlmGatewayTier.Purpose.SEARCH_RERANK,
+                            prompt,
+                            rerankerTemperature,
+                            rerankerOutputTokenBudget,
+                            rerankRequestTimeout)
                     .doOnError(
                             timeoutOrApiError -> log.debug("Reranker LLM call timed out or failed", timeoutOrApiError))
                     .blockOptional();

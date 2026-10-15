@@ -16,6 +16,7 @@ import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException;
 import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
+import com.williamcallahan.javachat.service.LlmGatewayTier;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RerankingFailureException;
 import com.williamcallahan.javachat.service.RetrievalService;
@@ -179,6 +180,7 @@ public class ChatController extends BaseController {
                     // Stream with provider transparency - surfaces which LLM is responding
                     return openAIStreamingService
                             .streamResponse(
+                                    LlmGatewayTier.Purpose.CHAT_ANSWER,
                                     promptOutcome.structuredPrompt(),
                                     appProperties.getLlm().getTemperature())
                             .flatMapMany(streamingResult -> {

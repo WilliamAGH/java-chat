@@ -90,7 +90,7 @@ class OpenAIStreamingProviderFailureTest {
                 .thenReturn(CompletableFuture.failedFuture(upstreamFailure));
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
-        StepVerifier.create(streamingService.complete("test", TEST_TEMPERATURE))
+        StepVerifier.create(streamingService.complete(LlmGatewayTier.Purpose.CHAT_ANSWER, "test", TEST_TEMPERATURE))
                 .expectErrorSatisfies(completionFailure -> assertSame(upstreamFailure, completionFailure))
                 .verify();
 
@@ -132,7 +132,7 @@ class OpenAIStreamingProviderFailureTest {
                         RateLimitService.ApiProvider.OPENAI, upstreamRateLimitFailure);
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
-        StepVerifier.create(streamingService.complete("test", TEST_TEMPERATURE))
+        StepVerifier.create(streamingService.complete(LlmGatewayTier.Purpose.CHAT_ANSWER, "test", TEST_TEMPERATURE))
                 .expectErrorSatisfies(completionFailure -> {
                     assertSame(upstreamRateLimitFailure, completionFailure);
                     assertEquals(1, completionFailure.getSuppressed().length);
@@ -187,7 +187,10 @@ class OpenAIStreamingProviderFailureTest {
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
         StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), TEST_TEMPERATURE)
+                        .streamResponse(
+                                LlmGatewayTier.Purpose.CHAT_ANSWER,
+                                StructuredPrompt.fromRawPrompt("test", 1),
+                                TEST_TEMPERATURE)
                         .flatMapMany(StreamingResult::textChunks))
                 .expectErrorSatisfies(streamingFailure -> {
                     OpenAiStreamingFailureException terminalFailure =
@@ -212,7 +215,8 @@ class OpenAIStreamingProviderFailureTest {
         OpenAIStreamingService streamingService = configuredStreamingService(mock(RateLimitService.class));
 
         IllegalStateException unavailableFailure = assertThrows(IllegalStateException.class, () -> streamingService
-                .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), TEST_TEMPERATURE)
+                .streamResponse(
+                        LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), TEST_TEMPERATURE)
                 .block());
 
         assertFalse(streamingService.isRecoverableStreamingFailure(unavailableFailure));
@@ -271,7 +275,7 @@ class OpenAIStreamingProviderFailureTest {
 
     private static void assertCompletionPreservesUpstreamFailure(
             OpenAIStreamingService streamingService, RateLimitException expectedUpstreamFailure) {
-        StepVerifier.create(streamingService.complete("test", TEST_TEMPERATURE))
+        StepVerifier.create(streamingService.complete(LlmGatewayTier.Purpose.CHAT_ANSWER, "test", TEST_TEMPERATURE))
                 .expectErrorSatisfies(completionFailure -> {
                     assertSame(expectedUpstreamFailure, completionFailure);
                     assertSuppressedDecisionFailure(expectedUpstreamFailure, RATE_LIMIT_HEADERS_MISSING_MESSAGE);
@@ -282,7 +286,10 @@ class OpenAIStreamingProviderFailureTest {
     private static void assertStreamingPreservesUpstreamFailure(
             OpenAIStreamingService streamingService, RateLimitException expectedUpstreamFailure) {
         StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), TEST_TEMPERATURE)
+                        .streamResponse(
+                                LlmGatewayTier.Purpose.CHAT_ANSWER,
+                                StructuredPrompt.fromRawPrompt("test", 1),
+                                TEST_TEMPERATURE)
                         .flatMapMany(StreamingResult::textChunks))
                 .expectErrorSatisfies(streamingFailure -> {
                     OpenAiStreamingFailureException terminalFailure =

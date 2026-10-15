@@ -32,7 +32,8 @@ class EmbeddingProviderFailureTest {
                     new LocalEmbeddingClient(baseUrl, "local-test-model", 12, 8, new RestTemplateBuilder());
             EmbeddingServiceUnavailableException thrown = assertThrows(
                     EmbeddingServiceUnavailableException.class,
-                    () -> localClient.embed(List.of("hello"), LlmGatewayTier.LIVE));
+                    () -> localClient.embed(
+                            LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING, List.of("hello"), LlmGatewayTier.LIVE));
 
             assertTrue(thrown.getMessage().contains("HTTP 500"));
         } finally {
@@ -57,7 +58,8 @@ class EmbeddingProviderFailureTest {
                 OpenAiCompatibleEmbeddingClient.create(baseUrl, "test-key", gatewaySettings)) {
             EmbeddingServiceUnavailableException thrown = assertThrows(
                     EmbeddingServiceUnavailableException.class,
-                    () -> remoteClient.embed(List.of("hello"), LlmGatewayTier.LIVE));
+                    () -> remoteClient.embed(
+                            LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING, List.of("hello"), LlmGatewayTier.LIVE));
 
             assertTrue(thrown.getMessage().contains("HTTP 401"));
             assertNotNull(thrown.getCause());

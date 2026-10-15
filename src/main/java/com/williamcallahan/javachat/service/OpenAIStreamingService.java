@@ -113,7 +113,9 @@ public class OpenAIStreamingService {
     }
 
     /** Retains selected-provider and context-document provenance alongside the response stream. */
-    public Mono<StreamingResult> streamResponse(StructuredPrompt structuredPrompt, double temperature) {
+    public Mono<StreamingResult> streamResponse(
+            LlmGatewayTier.Purpose purpose, StructuredPrompt structuredPrompt, double temperature) {
+        java.util.Objects.requireNonNull(purpose, "purpose");
         log.debug("Starting OpenAI stream with structured prompt");
 
         return Mono.<StreamingResult>defer(() -> {
@@ -125,8 +127,8 @@ public class OpenAIStreamingService {
                     RateLimitService.ApiProvider configuredProvider = providerRoutingService.configuredProvider();
                     OpenAiPreparedRequest preparedStreamingRequest =
                             requestFactory.prepareStreamingRequest(structuredPrompt, temperature);
-                    Flux<String> responseTextChunks =
-                            executeStreamingWithConfiguredProvider(preparedStreamingRequest, configuredProvider);
+                    Flux<String> responseTextChunks = executeStreamingWithConfiguredProvider(
+                            preparedStreamingRequest, configuredProvider, purpose);
                     List<String> contextDocumentIds =
                             preparedStreamingRequest.structuredPrompt().contextDocuments().stream()
                                     .map(ContextDocumentSegment::documentId)
@@ -137,34 +139,56 @@ public class OpenAIStreamingService {
     }
 
     /** Uses the configured output budget for a non-streaming text completion. */
-    public Mono<String> complete(String prompt, double temperature) {
-        return executeCompletion(prompt, temperature, CompletionRequestConfiguration.defaultText());
+    public Mono<String> complete(LlmGatewayTier.Purpose purpose, String prompt, double temperature) {
+        return executeCompletion(purpose, prompt, temperature, CompletionRequestConfiguration.defaultText());
     }
 
     /** Preserves the caller's output budget for a non-streaming text completion. */
-    public Mono<String> complete(String prompt, double temperature, int maximumOutputTokens) {
+    public Mono<String> complete(
+            LlmGatewayTier.Purpose purpose, String prompt, double temperature, int maximumOutputTokens) {
         return Mono.defer(() -> executeCompletion(
-                prompt, temperature, CompletionRequestConfiguration.boundedText(maximumOutputTokens)));
+                purpose, prompt, temperature, CompletionRequestConfiguration.boundedText(maximumOutputTokens)));
     }
 
     /** Requires a JSON object within the caller's output budget and the default request timeout. */
-    public Mono<String> completeJsonObject(String prompt, double temperature, int maximumOutputTokens) {
+    public Mono<String> completeJsonObject(
+            LlmGatewayTier.Purpose purpose, String prompt, double temperature, int maximumOutputTokens) {
         return completeJsonObject(
-                prompt, temperature, maximumOutputTokens, CompletionRequestConfiguration.defaultRequestTimeout());
+                purpose,
+                prompt,
+                temperature,
+                maximumOutputTokens,
+                CompletionRequestConfiguration.defaultRequestTimeout());
     }
 
     /** Requires a JSON object within both the caller's output budget and whole-request timeout. */
     public Mono<String> completeJsonObject(
-            String prompt, double temperature, int maximumOutputTokens, Duration requestTimeout) {
+            LlmGatewayTier.Purpose purpose,
+            String prompt,
+            double temperature,
+            int maximumOutputTokens,
+            Duration requestTimeout) {
         return Mono.defer(() -> executeCompletion(
-                prompt, temperature, CompletionRequestConfiguration.jsonObject(maximumOutputTokens, requestTimeout)));
+                purpose,
+                prompt,
+                temperature,
+                CompletionRequestConfiguration.jsonObject(maximumOutputTokens, requestTimeout)));
     }
 
     private Mono<String> executeCompletion(
-            String prompt, double temperature, CompletionRequestConfiguration configuration) {
+            LlmGatewayTier.Purpose purpose,
+            String prompt,
+            double temperature,
+            CompletionRequestConfiguration configuration) {
+        java.util.Objects.requireNonNull(purpose, "purpose");
         return Mono.defer(() -> {
             RateLimitService.ApiProvider configuredProvider = providerRoutingService.configuredProvider();
-            ResponseCreateParams requestParameters = buildCompletionRequest(prompt, temperature, configuration);
+            ResponseCreateParams requestParameters =
+                    buildCompletionRequest(prompt, temperature, configuration).toBuilder()
+                            .putAdditionalHeader(
+                                    LlmGatewayTier.REQUEST_WORKLOAD_HEADER,
+                                    workloadTier().workloadHeader(purpose))
+                            .build();
             RequestOptions requestOptions = RequestOptions.builder()
                     .timeout(Timeout.builder()
                             .request(configuration.requestTimeout())
@@ -219,7 +243,9 @@ public class OpenAIStreamingService {
     }
 
     private Flux<String> executeStreamingWithConfiguredProvider(
-            OpenAiPreparedRequest preparedStreamingRequest, RateLimitService.ApiProvider configuredProvider) {
+            OpenAiPreparedRequest preparedStreamingRequest,
+            RateLimitService.ApiProvider configuredProvider,
+            LlmGatewayTier.Purpose purpose) {
         log.info(
                 "[LLM] Streaming started (structured, providerId={}, model={})",
                 configuredProvider.ordinal(),
@@ -229,7 +255,13 @@ public class OpenAIStreamingService {
             OpenAiProviderCandidate providerAdmission = requireConfiguredProviderAdmission();
             AtomicBoolean emittedVisibleText = new AtomicBoolean(false);
             return executeStreamingRequest(
-                            providerAdmission.client(), preparedStreamingRequest.responseParams(), configuredProvider)
+                            providerAdmission.client(),
+                            preparedStreamingRequest.responseParams().toBuilder()
+                                    .putAdditionalHeader(
+                                            LlmGatewayTier.REQUEST_WORKLOAD_HEADER,
+                                            workloadTier().workloadHeader(purpose))
+                                    .build(),
+                            configuredProvider)
                     .doOnNext(textChunk -> {
                         if (UnicodeVisibleContent.hasVisibleContent(textChunk)) {
                             emittedVisibleText.set(true);
@@ -375,8 +407,6 @@ public class OpenAIStreamingService {
 
     private OpenAIClient createClient(String apiKey, String baseUrl) {
         String requestTier = resolvedLlmGatewayTier();
-        LlmGatewayTier workloadTier =
-                LlmGatewayTier.BATCH.requestHeader().equals(requestTier) ? LlmGatewayTier.BATCH : LlmGatewayTier.LIVE;
         return OpenAIOkHttpClient.builder()
                 .apiKey(apiKey)
                 .baseUrl(OpenAiSdkUrlNormalizer.normalize(baseUrl))
@@ -384,8 +414,13 @@ public class OpenAIStreamingService {
                 // SDK retry sleeps interfere with reactive cancellation.
                 .maxRetries(0)
                 .putHeader(LlmGatewayTier.REQUEST_TIER_HEADER, requestTier)
-                .putHeader(LlmGatewayTier.REQUEST_WORKLOAD_HEADER, workloadTier.workloadHeader("chat-completions"))
                 .build();
+    }
+
+    private LlmGatewayTier workloadTier() {
+        return LlmGatewayTier.BATCH.requestHeader().equals(resolvedLlmGatewayTier())
+                ? LlmGatewayTier.BATCH
+                : LlmGatewayTier.LIVE;
     }
 
     private String resolvedLlmGatewayTier() {

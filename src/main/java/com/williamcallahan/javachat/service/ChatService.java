@@ -76,7 +76,7 @@ public class ChatService {
                 buildStructuredPromptWithContextAndGuidance(history, latestUserMessage, contextDocs, guidance);
 
         return openAIStreamingService
-                .streamResponse(structuredPrompt, temperature)
+                .streamResponse(LlmGatewayTier.Purpose.CHAT_ANSWER, structuredPrompt, temperature)
                 .flatMapMany(streamingResult -> streamingResult.textChunks());
     }
 

@@ -14,11 +14,12 @@ public interface EmbeddingClient {
     /**
      * Produces one dense embedding vector per input text, preserving input order.
      *
+     * @param purpose application job responsible for the request
      * @param texts input texts
      * @param requestTier gateway capacity tier for this embedding request
      * @return embedding vectors in the same order as {@code texts}
      */
-    List<float[]> embed(List<String> texts, LlmGatewayTier requestTier);
+    List<float[]> embed(LlmGatewayTier.Purpose purpose, List<String> texts, LlmGatewayTier requestTier);
 
     /**
      * Produces one dense embedding vector per input text within a caller-owned budget.
@@ -29,12 +30,14 @@ public interface EmbeddingClient {
      * {@code requestTimeout} and the tier's configured request timeout, keeping the
      * configured timeout meaningful as a per-request ceiling.</p>
      *
+     * @param purpose application job responsible for the request
      * @param texts input texts
      * @param requestTier gateway capacity tier for this embedding request
      * @param requestTimeout caller-owned budget bounding the whole embedding operation
      * @return embedding vectors in the same order as {@code texts}
      */
-    List<float[]> embed(List<String> texts, LlmGatewayTier requestTier, Duration requestTimeout);
+    List<float[]> embed(
+            LlmGatewayTier.Purpose purpose, List<String> texts, LlmGatewayTier requestTier, Duration requestTimeout);
 
     /**
      * Returns the provider model identifier used for embedding requests.
@@ -46,14 +49,16 @@ public interface EmbeddingClient {
     /**
      * Produces a dense embedding vector for a single text.
      *
+     * @param purpose application job responsible for the request
      * @param text input text
      * @param requestTier gateway capacity tier for this embedding request
      * @return embedding vector
      */
-    default float[] embed(String text, LlmGatewayTier requestTier) {
+    default float[] embed(LlmGatewayTier.Purpose purpose, String text, LlmGatewayTier requestTier) {
+        Objects.requireNonNull(purpose, "purpose");
         Objects.requireNonNull(requestTier, "requestTier");
         String safeText = Objects.requireNonNullElse(text, "");
-        List<float[]> embeddingVectors = embed(List.of(safeText), requestTier);
+        List<float[]> embeddingVectors = embed(purpose, List.of(safeText), requestTier);
         if (embeddingVectors.isEmpty()) {
             throw new EmbeddingServiceUnavailableException("Embedding response was empty");
         }
@@ -63,16 +68,19 @@ public interface EmbeddingClient {
     /**
      * Produces a dense embedding vector for a single text within a caller-owned budget.
      *
+     * @param purpose application job responsible for the request
      * @param text input text
      * @param requestTier gateway capacity tier for this embedding request
      * @param requestTimeout caller-owned budget bounding the whole embedding operation
      * @return embedding vector
      */
-    default float[] embed(String text, LlmGatewayTier requestTier, Duration requestTimeout) {
+    default float[] embed(
+            LlmGatewayTier.Purpose purpose, String text, LlmGatewayTier requestTier, Duration requestTimeout) {
+        Objects.requireNonNull(purpose, "purpose");
         Objects.requireNonNull(requestTier, "requestTier");
         Objects.requireNonNull(requestTimeout, "requestTimeout");
         String safeText = Objects.requireNonNullElse(text, "");
-        List<float[]> embeddingVectors = embed(List.of(safeText), requestTier, requestTimeout);
+        List<float[]> embeddingVectors = embed(purpose, List.of(safeText), requestTier, requestTimeout);
         if (embeddingVectors.isEmpty()) {
             throw new EmbeddingServiceUnavailableException("Embedding response was empty");
         }
@@ -90,7 +98,7 @@ public interface EmbeddingClient {
      * Issues a minimal embedding request so the provider keeps its model resident.
      *
      * <p>Implementations must call their provider-specific request path directly instead
-     * of delegating to {@link #embed(List, LlmGatewayTier)}. The RAG pipeline logging aspect advises
+     * of delegating to {@link #embed(LlmGatewayTier.Purpose, List, LlmGatewayTier)}. The RAG pipeline logging aspect advises
      * public {@code embed} executions, so routing scheduled probes around that method
      * keeps "STEP 1" pipeline logs scoped to real requests.</p>
      *

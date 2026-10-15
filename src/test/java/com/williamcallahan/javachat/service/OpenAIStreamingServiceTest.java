@@ -152,7 +152,8 @@ class OpenAIStreamingServiceTest {
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
         StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .streamResponse(
+                                LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                         .flatMapMany(StreamingResult::textChunks))
                 .expectNext("")
                 .expectErrorSatisfies(failure -> {
@@ -181,7 +182,8 @@ class OpenAIStreamingServiceTest {
                     streamingServiceForProviderStream(rateLimitService, providerStream);
 
             StepVerifier.create(streamingService
-                            .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                            .streamResponse(
+                                    LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                             .flatMapMany(StreamingResult::textChunks))
                     .expectNext(invisibleText)
                     .expectErrorSatisfies(failure ->
@@ -274,7 +276,8 @@ class OpenAIStreamingServiceTest {
                     streamingServiceForProviderStream(rateLimitService, providerStream);
 
             StepVerifier.create(streamingService
-                            .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                            .streamResponse(
+                                    LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                             .flatMapMany(StreamingResult::textChunks))
                     .expectErrorSatisfies(failure -> assertInstanceOf(
                             OpenAIException.class,
@@ -295,7 +298,8 @@ class OpenAIStreamingServiceTest {
         OpenAIStreamingService streamingService = streamingServiceForProviderStream(rateLimitService, providerStream);
 
         StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .streamResponse(
+                                LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                         .flatMapMany(StreamingResult::textChunks))
                 .expectNext("truncated response")
                 .expectErrorSatisfies(failure -> {
@@ -323,7 +327,8 @@ class OpenAIStreamingServiceTest {
         OpenAIStreamingService streamingService = streamingServiceForProviderStream(rateLimitService, providerStream);
 
         StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .streamResponse(
+                                LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                         .flatMapMany(StreamingResult::textChunks))
                 .expectNext("visible response")
                 .verifyComplete();
@@ -344,7 +349,8 @@ class OpenAIStreamingServiceTest {
         OpenAIStreamingService streamingService = streamingServiceForProviderStream(rateLimitService, providerStream);
 
         StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .streamResponse(
+                                LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                         .flatMapMany(StreamingResult::textChunks))
                 .expectNext("I cannot help with that request.")
                 .verifyComplete();
@@ -368,7 +374,8 @@ class OpenAIStreamingServiceTest {
         OpenAIStreamingService streamingService = streamingServiceForProviderStream(rateLimitService, providerStream);
 
         StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .streamResponse(
+                                LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                         .flatMapMany(StreamingResult::textChunks))
                 .expectErrorSatisfies(failure -> {
                     OpenAiResponseException upstreamFailure = assertInstanceOf(
@@ -381,7 +388,8 @@ class OpenAIStreamingServiceTest {
                 .verify();
 
         StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .streamResponse(
+                                LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                         .flatMapMany(StreamingResult::textChunks))
                 .expectError(ConfiguredProviderTemporarilyUnavailableException.class)
                 .verify();
@@ -404,7 +412,8 @@ class OpenAIStreamingServiceTest {
         OpenAIStreamingService streamingService = streamingServiceForProviderStream(rateLimitService, providerStream);
 
         StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .streamResponse(
+                                LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                         .flatMapMany(StreamingResult::textChunks))
                 .expectErrorSatisfies(failure -> {
                     OpenAiResponseException upstreamFailure = assertInstanceOf(
@@ -419,7 +428,8 @@ class OpenAIStreamingServiceTest {
                 .verify();
 
         StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .streamResponse(
+                                LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                         .flatMapMany(StreamingResult::textChunks))
                 .expectError(ConfiguredProviderTemporarilyUnavailableException.class)
                 .verify();
@@ -446,7 +456,8 @@ class OpenAIStreamingServiceTest {
                     streamingServiceForProviderStream(rateLimitService, providerStream);
 
             StepVerifier.create(streamingService
-                            .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                            .streamResponse(
+                                    LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                             .flatMapMany(StreamingResult::textChunks))
                     .expectErrorSatisfies(failure -> {
                         OpenAiResponseException upstreamFailure = assertInstanceOf(
@@ -479,14 +490,15 @@ class OpenAIStreamingServiceTest {
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
         StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .streamResponse(
+                                LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                         .flatMapMany(StreamingResult::textChunks))
                 .expectErrorSatisfies(failure -> {
                     assertInstanceOf(ConfiguredProviderTemporarilyUnavailableException.class, failure);
                     assertTrue(streamingService.isRecoverableStreamingFailure(failure));
                 })
                 .verify();
-        StepVerifier.create(streamingService.complete("test", 0.7))
+        StepVerifier.create(streamingService.complete(LlmGatewayTier.Purpose.CHAT_ANSWER, "test", 0.7))
                 .expectErrorSatisfies(failure -> {
                     assertInstanceOf(ConfiguredProviderTemporarilyUnavailableException.class, failure);
                     assertTrue(streamingService.isRecoverableStreamingFailure(failure));
@@ -510,7 +522,7 @@ class OpenAIStreamingServiceTest {
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
         StreamingResult streamingResult = Objects.requireNonNull(streamingService
-                .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                .streamResponse(LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                 .block());
         InternalServerException gatewayTimeout = InternalServerException.builder()
                 .statusCode(504)
@@ -551,8 +563,9 @@ class OpenAIStreamingServiceTest {
                 List.of(),
                 new CurrentQuerySegment("Explain the retained reference", 50));
 
-        StreamingResult streamingResult = Objects.requireNonNull(
-                streamingService.streamResponse(oversizedPrompt, 0.7).block());
+        StreamingResult streamingResult = Objects.requireNonNull(streamingService
+                .streamResponse(LlmGatewayTier.Purpose.CHAT_ANSWER, oversizedPrompt, 0.7)
+                .block());
 
         assertEquals(List.of("retained-context-document"), streamingResult.contextDocumentIds());
         verifyNoInteractions(openAiClient);
@@ -578,7 +591,7 @@ class OpenAIStreamingServiceTest {
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
         StreamingResult streamingResult = Objects.requireNonNull(streamingService
-                .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                .streamResponse(LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                 .block());
 
         assertEquals(RateLimitService.ApiProvider.OPENAI, streamingResult.provider());
@@ -621,7 +634,8 @@ class OpenAIStreamingServiceTest {
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
         StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .streamResponse(
+                                LlmGatewayTier.Purpose.CHAT_ANSWER, StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                         .flatMapMany(StreamingResult::textChunks))
                 .expectNext("first token")
                 .expectErrorSatisfies(failure -> {
@@ -654,7 +668,7 @@ class OpenAIStreamingServiceTest {
                 .thenReturn(providerCompletionFuture);
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
-        StepVerifier.create(streamingService.complete("prompt", 0.7))
+        StepVerifier.create(streamingService.complete(LlmGatewayTier.Purpose.CHAT_ANSWER, "prompt", 0.7))
                 .then(() -> providerCompletionFuture.completeExceptionally(upstreamFailure))
                 .expectErrorSatisfies(completionFailure -> assertSame(upstreamFailure, completionFailure))
                 .verify();
@@ -666,15 +680,23 @@ class OpenAIStreamingServiceTest {
     void invalidCompletionConfigurationFailsOnSubscription() {
         OpenAIStreamingService streamingService = createStreamingService();
 
-        assertCompletionFailure(streamingService.complete("prompt", 0.7, 0), "maximumOutputTokens must be positive");
-        assertCompletionFailure(streamingService.complete("prompt", 0.7, -1), "maximumOutputTokens must be positive");
         assertCompletionFailure(
-                streamingService.completeJsonObject("prompt", 0.7, 128, null), "requestTimeout must be positive");
+                streamingService.complete(LlmGatewayTier.Purpose.CHAT_ANSWER, "prompt", 0.7, 0),
+                "maximumOutputTokens must be positive");
         assertCompletionFailure(
-                streamingService.completeJsonObject("prompt", 0.7, 128, Duration.ZERO),
+                streamingService.complete(LlmGatewayTier.Purpose.CHAT_ANSWER, "prompt", 0.7, -1),
+                "maximumOutputTokens must be positive");
+        assertCompletionFailure(
+                streamingService.completeJsonObject(
+                        LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT, "prompt", 0.7, 128, null),
                 "requestTimeout must be positive");
         assertCompletionFailure(
-                streamingService.completeJsonObject("prompt", 0.7, 128, Duration.ofSeconds(-1)),
+                streamingService.completeJsonObject(
+                        LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT, "prompt", 0.7, 128, Duration.ZERO),
+                "requestTimeout must be positive");
+        assertCompletionFailure(
+                streamingService.completeJsonObject(
+                        LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT, "prompt", 0.7, 128, Duration.ofSeconds(-1)),
                 "requestTimeout must be positive");
     }
 

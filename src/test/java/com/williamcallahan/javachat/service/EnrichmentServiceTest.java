@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -50,7 +51,8 @@ class EnrichmentServiceTest {
 
     @Test
     void enrichUsesJsonObjectCompletionBoundary() {
-        when(openAIStreamingService.completeJsonObject(anyString(), anyDouble(), anyInt()))
+        when(openAIStreamingService.completeJsonObject(
+                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble(), anyInt()))
                 .thenReturn(Mono.just("{\"hints\":[\"Use List.copyOf for an unmodifiable snapshot.\"]}"));
 
         Enrichment enrichment =
@@ -58,13 +60,16 @@ class EnrichmentServiceTest {
 
         assertEquals(ENRICHMENT_JDK_VERSION, enrichment.getJdkVersion());
         assertEquals(List.of("Use List.copyOf for an unmodifiable snapshot."), enrichment.getHints());
-        verify(openAIStreamingService).completeJsonObject(anyString(), anyDouble(), anyInt());
-        verify(openAIStreamingService, never()).complete(anyString(), anyDouble());
+        verify(openAIStreamingService)
+                .completeJsonObject(eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble(), anyInt());
+        verify(openAIStreamingService, never())
+                .complete(eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble());
     }
 
     @Test
     void enrichRejectsUnexpectedPreambleWithBraces() {
-        when(openAIStreamingService.completeJsonObject(anyString(), anyDouble(), anyInt()))
+        when(openAIStreamingService.completeJsonObject(
+                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble(), anyInt()))
                 .thenReturn(Mono.just("Here is the JSON (see {docs} for details):\n{\"hints\":[\"tip\"]}"));
 
         IllegalStateException jsonContractFailure = assertThrows(
@@ -78,7 +83,8 @@ class EnrichmentServiceTest {
 
     @Test
     void enrichRejectsMalformedJsonObject() {
-        when(openAIStreamingService.completeJsonObject(anyString(), anyDouble(), anyInt()))
+        when(openAIStreamingService.completeJsonObject(
+                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble(), anyInt()))
                 .thenReturn(Mono.just("{\"hints\":["));
 
         IllegalStateException jsonContractFailure = assertThrows(
@@ -92,7 +98,8 @@ class EnrichmentServiceTest {
 
     @Test
     void enrichRejectsUnknownResponseFields() {
-        when(openAIStreamingService.completeJsonObject(anyString(), anyDouble(), anyInt()))
+        when(openAIStreamingService.completeJsonObject(
+                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble(), anyInt()))
                 .thenReturn(Mono.just("{\"hint\":[\"Use the documented API.\"]}"));
 
         IllegalStateException jsonContractFailure = assertThrows(
@@ -106,7 +113,8 @@ class EnrichmentServiceTest {
 
     @Test
     void enrichRejectsDuplicateResponseFields() {
-        when(openAIStreamingService.completeJsonObject(anyString(), anyDouble(), anyInt()))
+        when(openAIStreamingService.completeJsonObject(
+                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble(), anyInt()))
                 .thenReturn(Mono.just("{\"hints\":[\"first\"],\"hints\":[\"second\"]}"));
 
         IllegalStateException jsonContractFailure = assertThrows(
@@ -127,7 +135,8 @@ class EnrichmentServiceTest {
                 "{\"jdkVersion\":25}");
 
         for (String invalidEnrichmentJson : invalidEnrichmentJsonValues) {
-            when(openAIStreamingService.completeJsonObject(anyString(), anyDouble(), anyInt()))
+            when(openAIStreamingService.completeJsonObject(
+                            eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble(), anyInt()))
                     .thenReturn(Mono.just(invalidEnrichmentJson));
 
             IllegalStateException jsonContractFailure = assertThrows(

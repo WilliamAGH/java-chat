@@ -262,9 +262,10 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     }
 
     @Override
-    public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier) {
+    public List<float[]> embed(LlmGatewayTier.Purpose purpose, List<String> texts, LlmGatewayTier requestTier) {
+        Objects.requireNonNull(purpose, "purpose");
         Objects.requireNonNull(requestTier, "requestTier");
-        return embed(texts, requestTier, requestTimeoutFor(requestTier));
+        return embed(purpose, texts, requestTier, requestTimeoutFor(requestTier));
     }
 
     /**
@@ -275,7 +276,9 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
      * caller observes exactly the configured timeout.</p>
      */
     @Override
-    public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier, Duration requestTimeout) {
+    public List<float[]> embed(
+            LlmGatewayTier.Purpose purpose, List<String> texts, LlmGatewayTier requestTier, Duration requestTimeout) {
+        Objects.requireNonNull(purpose, "purpose");
         Objects.requireNonNull(requestTier, "requestTier");
         Duration requiredRequestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout");
         if (texts == null || texts.isEmpty()) {
@@ -283,7 +286,8 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         }
         activeForegroundEmbeddingCount.incrementAndGet();
         try {
-            return createEmbeddings(texts, requestTier, tighterRequestTimeout(requestTier, requiredRequestTimeout));
+            return createEmbeddings(
+                    purpose, texts, requestTier, tighterRequestTimeout(requestTier, requiredRequestTimeout));
         } finally {
             activeForegroundEmbeddingCount.decrementAndGet();
         }
@@ -310,7 +314,11 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
             throw new EmbeddingProbeDeferredException("foreground embedding work is active");
         }
         try {
-            createEmbeddings(List.of(EMBEDDING_WARM_UP_PROBE_TEXT), LlmGatewayTier.BATCH, batchRequestTimeout);
+            createEmbeddings(
+                    LlmGatewayTier.Purpose.EMBEDDING_WARMUP,
+                    List.of(EMBEDDING_WARM_UP_PROBE_TEXT),
+                    LlmGatewayTier.BATCH,
+                    batchRequestTimeout);
         } catch (EmbeddingProviderCooldownRejectionException cooldownRejection) {
             throw new EmbeddingProbeDeferredException("the batch-tier provider cooldown is active");
         }
@@ -321,9 +329,11 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         return modelName;
     }
 
-    private List<float[]> createEmbeddings(List<String> texts, LlmGatewayTier requestTier, Duration requestTimeout) {
+    private List<float[]> createEmbeddings(
+            LlmGatewayTier.Purpose purpose, List<String> texts, LlmGatewayTier requestTier, Duration requestTimeout) {
         EmbeddingCreateParams embeddingRequest = EmbeddingCreateParams.builder()
                 .model(modelName)
+                .putAdditionalHeader(LlmGatewayTier.REQUEST_WORKLOAD_HEADER, requestTier.workloadHeader(purpose))
                 .inputOfArrayOfStrings(texts)
                 .build();
         Semaphore requestPermits = requestPermitsFor(requestTier);
@@ -737,7 +747,6 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
                 .apiKey(apiKey)
                 .baseUrl(baseUrl)
                 .putHeader(LlmGatewayTier.REQUEST_TIER_HEADER, requestTier.requestHeader())
-                .putHeader(LlmGatewayTier.REQUEST_WORKLOAD_HEADER, requestTier.workloadHeader("embeddings"))
                 .maxRetries(0);
         return clientBuilder.build();
     }

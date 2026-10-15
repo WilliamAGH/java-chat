@@ -175,12 +175,16 @@ class EmbeddingModelKeepAliveTest {
         }
 
         @Override
-        public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier) {
+        public List<float[]> embed(LlmGatewayTier.Purpose purpose, List<String> texts, LlmGatewayTier requestTier) {
             throw new AssertionError("keep-alive probes must not call embed(List, LlmGatewayTier)");
         }
 
         @Override
-        public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier, java.time.Duration requestTimeout) {
+        public List<float[]> embed(
+                LlmGatewayTier.Purpose purpose,
+                List<String> texts,
+                LlmGatewayTier requestTier,
+                java.time.Duration requestTimeout) {
             throw new AssertionError("keep-alive probes must not call embed(List, LlmGatewayTier, Duration)");
         }
 

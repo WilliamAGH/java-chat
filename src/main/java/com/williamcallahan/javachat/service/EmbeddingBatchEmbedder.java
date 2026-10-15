@@ -26,7 +26,9 @@ final class EmbeddingBatchEmbedder {
 
     private EmbeddingBatchEmbedder() {}
 
-    static List<float[]> embedDocuments(EmbeddingClient embeddingClient, List<Document> documents) {
+    static List<float[]> embedDocuments(
+            LlmGatewayTier.Purpose purpose, EmbeddingClient embeddingClient, List<Document> documents) {
+        Objects.requireNonNull(purpose, "purpose");
         Objects.requireNonNull(embeddingClient, "embeddingClient");
         Objects.requireNonNull(documents, "documents");
 
@@ -50,8 +52,8 @@ final class EmbeddingBatchEmbedder {
                 int requestWaveEndIndex =
                         Math.min(requestWaveStartIndex + MAX_CONCURRENT_EMBEDDING_REQUESTS, embeddingRequestCount);
                 List<Future<List<float[]>>> embeddingWave = IntStream.range(currentWaveStartIndex, requestWaveEndIndex)
-                        .mapToObj(requestIndex -> embeddingExecutor.submit(() ->
-                                embedRequest(embeddingClient, documents, requestIndex, expectedEmbeddingDimensions)))
+                        .mapToObj(requestIndex -> embeddingExecutor.submit(() -> embedRequest(
+                                purpose, embeddingClient, documents, requestIndex, expectedEmbeddingDimensions)))
                         .toList();
                 for (Future<List<float[]>> embeddingRequest : embeddingWave) {
                     try {
@@ -79,6 +81,7 @@ final class EmbeddingBatchEmbedder {
     }
 
     private static List<float[]> embedRequest(
+            LlmGatewayTier.Purpose purpose,
             EmbeddingClient embeddingClient,
             List<Document> documents,
             int requestIndex,
@@ -86,6 +89,7 @@ final class EmbeddingBatchEmbedder {
         int batchStartIndex = requestIndex * EMBEDDING_REQUEST_BATCH_SIZE;
         int batchEndIndex = Math.min(batchStartIndex + EMBEDDING_REQUEST_BATCH_SIZE, documents.size());
         return embedSingleBatch(
+                purpose,
                 embeddingClient,
                 documents.subList(batchStartIndex, batchEndIndex),
                 batchStartIndex,
@@ -100,6 +104,7 @@ final class EmbeddingBatchEmbedder {
      * callers can identify which documents caused the failure.</p>
      */
     private static List<float[]> embedSingleBatch(
+            LlmGatewayTier.Purpose purpose,
             EmbeddingClient embeddingClient,
             List<Document> documentBatch,
             int batchStartIndex,
@@ -115,7 +120,7 @@ final class EmbeddingBatchEmbedder {
 
         List<float[]> batchEmbeddings;
         try {
-            batchEmbeddings = embedWithRetry(embeddingClient, textBatch);
+            batchEmbeddings = embedWithRetry(purpose, embeddingClient, textBatch);
         } catch (EmbeddingServiceUnavailableException embeddingFailure) {
             String firstBatchUrl = extractDocumentUrl(documentBatch.getFirst(), batchStartIndex);
             String lastBatchUrl = extractDocumentUrl(documentBatch.getLast(), batchEndIndex - 1);
@@ -151,10 +156,11 @@ final class EmbeddingBatchEmbedder {
         return batchEmbeddings;
     }
 
-    private static List<float[]> embedWithRetry(EmbeddingClient embeddingClient, List<String> textBatch) {
+    private static List<float[]> embedWithRetry(
+            LlmGatewayTier.Purpose purpose, EmbeddingClient embeddingClient, List<String> textBatch) {
         for (int embeddingAttempt = 1; embeddingAttempt <= MAX_EMBEDDING_ATTEMPTS; embeddingAttempt++) {
             try {
-                return embeddingClient.embed(textBatch, LlmGatewayTier.BATCH);
+                return embeddingClient.embed(purpose, textBatch, LlmGatewayTier.BATCH);
             } catch (EmbeddingServiceTemporarilyUnavailableException temporaryFailure) {
                 if (embeddingAttempt == MAX_EMBEDDING_ATTEMPTS) {
                     throw temporaryFailure;
