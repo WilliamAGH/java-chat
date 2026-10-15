@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.openai.client.OpenAIClient;
 import com.openai.client.OpenAIClientAsync;
 import com.openai.core.RequestOptions;
+import com.openai.core.Timeout;
 import com.openai.models.responses.ResponseCreateParams;
 import com.openai.services.async.ResponseServiceAsync;
 import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureException;
@@ -17,6 +18,7 @@ import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailu
 import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import java.time.Duration;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -69,9 +71,9 @@ class OpenAIStreamingTimeoutContractTest {
 
         RequestOptions gatewayRequest = capturedRequest.get();
         assertNotNull(gatewayRequest);
-        assertEquals(Duration.ofSeconds(600), gatewayRequest.getTimeout().request());
-        assertEquals(
-                gatewayRequest.getTimeout().request(),
-                gatewayRequest.getTimeout().read());
+        Timeout requestTimeout =
+                Objects.requireNonNull(gatewayRequest.getTimeout(), "Streaming requests must specify their timeout");
+        assertEquals(Duration.ofSeconds(600), requestTimeout.request());
+        assertEquals(requestTimeout.request(), requestTimeout.read());
     }
 }
