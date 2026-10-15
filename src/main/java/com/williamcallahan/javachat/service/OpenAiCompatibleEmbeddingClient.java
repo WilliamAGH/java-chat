@@ -737,6 +737,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
                 .apiKey(apiKey)
                 .baseUrl(baseUrl)
                 .putHeader(LlmGatewayTier.REQUEST_TIER_HEADER, requestTier.requestHeader())
+                .putHeader(LlmGatewayTier.REQUEST_WORKLOAD_HEADER, requestTier.workloadHeader("embeddings"))
                 .maxRetries(0);
         return clientBuilder.build();
     }

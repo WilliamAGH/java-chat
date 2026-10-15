@@ -19,10 +19,10 @@ Common variables:
 
 - `OPENAI_API_KEY` (shared-gateway auth)
 - `OPENAI_BASE_URL` (`https://api.llm-gateway.iocloudhost.net/v1` for Java Chat deployments)
-- `OPENAI_MODEL` (non-blank gateway chat alias; default `gpt-5.4`)
+- `OPENAI_MODEL` (non-blank gateway chat alias; default `claude-haiku-5-5`)
 - `OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS` (default `90`; bounds the complete SDK call and the visible-output deadline, which shares this same budget)
 
-Non-secret generation policy is owned by `app.llm` in `application.properties`: `temperature`, optional `reasoning-effort`, `completion-output-token-budget`, `enrichment-output-token-budget`, `reranker-temperature`, `reranker-output-token-budget`, and `configured-provider-backoff-seconds`. `gpt-5.4` is a reasoning generation whose upstream accepts only the default temperature (`1.0`) on the Responses API, so both temperature settings stay at `1.0`; any other value fails upstream with `HTTP 400`. `reasoning-effort` is absent by default, preserving the gateway/model default; set it only for an explicit override. Invalid values fail startup. The override applies only to chat generation (streaming and text completions); JSON-object completions (reranker, enrichment) always inherit the gateway/model default so reasoning tokens cannot starve their small output budgets. Java Chat forwards the universal reasoning values `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` without model inspection; the gateway owns upstream capability translation. A deterministic gateway `HTTP 422 unpreservable_reasoning_intent` means no provider can preserve the configured effort — lower or unset `reasoning-effort`; retrying unchanged cannot succeed.
+Non-secret generation policy is owned by `app.llm` in `application.properties`: `temperature`, `reasoning-effort`, `completion-output-token-budget`, `enrichment-output-token-budget`, `reranker-temperature`, `reranker-output-token-budget`, and `configured-provider-backoff-seconds`. The tested default is Claude Haiku 5.5 with `reasoning-effort=low`, which preserved quality while reducing latency and cost in the Java Chat matrix; both temperature settings stay at `1.0` and the gateway owns provider-specific sampling constraints. The override applies only to chat generation (streaming and text completions); JSON-object completions (reranker, enrichment) always inherit the gateway/model default so reasoning tokens cannot starve their small output budgets. Java Chat forwards the universal reasoning values `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` without model inspection; the gateway owns upstream capability translation. A deterministic gateway `HTTP 422 unpreservable_reasoning_intent` means no provider can preserve the configured effort — lower or unset `reasoning-effort`; retrying unchanged cannot succeed.
 
 ### Shared LLM gateway
 
@@ -32,7 +32,7 @@ Configure chat through the shared gateway with:
 OPENAI_API_KEY=lgw-...
 OPENAI_BASE_URL=https://api.llm-gateway.iocloudhost.net/v1
 # Default; any non-blank gateway alias is supported.
-OPENAI_MODEL=gpt-5.4
+OPENAI_MODEL=claude-haiku-5-5
 ```
 
 Java Chat sends chat and embedding requests to the same configured gateway URL and credential.

@@ -1,4 +1,22 @@
+# Every lane runs on the Mac build host. Any other host (the laptop, Linux peers) forwards the goals
+# and command-line variables, each shell-quoted, to a warm mirror of this checkout there through the
+# host tool remote-slot (dotfiles, ~/.local/bin). The environment, gitignored files, and make's own
+# flags do not cross, and every output (installs, archives, receipts) stays on that host. GitHub
+# Actions jobs already run on the Mac their workflow picked.
+APPLE_BUILD_HOST := haiku-7
+ifeq ($(filter $(APPLE_BUILD_HOST),$(shell hostname -s))$(GITHUB_ACTIONS),)
+APPLE_BUILD_HOST_VARIABLES := $(strip $(foreach variable,$(sort $(.VARIABLES)),$(if $(filter command line,$(origin $(variable))),'$(variable)=$(subst ','\'',$(value $(variable)))')))
+.DEFAULT_GOAL := apple-build-host
+.PHONY: apple-build-host $(MAKECMDGOALS)
+apple-build-host:
+	remote-slot run $(APPLE_BUILD_HOST) -- make $(MAKECMDGOALS) $(APPLE_BUILD_HOST_VARIABLES)
+ifneq ($(MAKECMDGOALS),)
+$(MAKECMDGOALS): apple-build-host ; @:
+endif
+else
+
 .PHONY: \
+	signing-session \
 	desktop \
 	desktop-test \
 	desktop-archive \
@@ -11,6 +29,9 @@
 	ios-test \
 	ios-archive \
 	ios-export-app-store
+
+# Every xcodebuild lane compiles through Xcode's shared per-user compilation cache.
+export XCODE_XCCONFIG_FILE := $(CURDIR)/compilation-cache.xcconfig
 
 DEVELOPMENT_TEAM := NB356A75PU
 ASC_PROFILE := csweb
@@ -26,6 +47,12 @@ DESKTOP_DMG := $(DESKTOP_DISTRIBUTION_DIR)/JavaChat.dmg
 IOS_DISTRIBUTION_DIR := iosApp/distribution
 IOS_ARCHIVE := $(IOS_DISTRIBUTION_DIR)/JavaChat.xcarchive
 IOS_APP_STORE_EXPORT := $(IOS_DISTRIBUTION_DIR)/app-store
+
+# Signed lanes unlock this Mac's build keychain through the host tool build-keychain (dotfiles,
+# ~/.local/bin), so they run from a fresh SSH session with no console login [HH0a]; a Mac without
+# one signs from its open login keychain. CI never runs a signed lane.
+signing-session:
+	@build-keychain unlock
 
 desktop:
 	xcodebuild \
@@ -45,7 +72,7 @@ desktop-test:
 		-derivedDataPath desktopApp/build-test \
 		test CODE_SIGNING_ALLOWED=NO
 
-desktop-archive:
+desktop-archive: signing-session
 	xcodebuild \
 		-project desktopApp/JavaChatDesktop.xcodeproj \
 		-scheme JavaChatDesktop \
@@ -72,7 +99,7 @@ desktop-export-developer-id: desktop-archive
 desktop-dmg: desktop-export-developer-id
 	$(MAKE) desktop-create-signed-dmg
 
-desktop-create-signed-dmg:
+desktop-create-signed-dmg: signing-session
 	rm -rf "$(DESKTOP_DMG_STAGING)"
 	mkdir -p "$(DESKTOP_DMG_STAGING)"
 	ditto \
@@ -135,7 +162,7 @@ ios-test:
 		-derivedDataPath iosApp/build-test \
 		test CODE_SIGNING_ALLOWED=NO
 
-ios-archive:
+ios-archive: signing-session
 	xcodebuild \
 		-project iosApp/JavaChat.xcodeproj \
 		-scheme JavaChat \
@@ -152,3 +179,4 @@ ios-export-app-store: ios-archive
 		-exportPath $(IOS_APP_STORE_EXPORT) \
 		-exportOptionsPlist iosApp/ExportOptions-AppStore.plist \
 		-allowProvisioningUpdates
+endif

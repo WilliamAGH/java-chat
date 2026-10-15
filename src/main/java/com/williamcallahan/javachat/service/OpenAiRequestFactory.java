@@ -237,10 +237,10 @@ public final class OpenAiRequestFactory {
         if (Double.isFinite(temperature)) {
             builder.temperature(temperature);
         }
-        // The reasoning-effort override is a chat-generation knob. JSON-object completions own
-        // small output budgets (reranker/enrichment) whose visible JSON answer reasoning tokens
-        // would starve, so those calls inherit the gateway/model default instead.
-        if (!requireJsonObject) {
+        // Reranker/enrichment caps reserve their entire budget for visible JSON.
+        if (requireJsonObject) {
+            builder.reasoning(Reasoning.builder().effort(ReasoningEffort.NONE).build());
+        } else {
             reasoningEffort.ifPresent(effort ->
                     builder.reasoning(Reasoning.builder().effort(effort).build()));
         }

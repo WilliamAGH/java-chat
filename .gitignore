@@ -103,3 +103,5 @@ screenshots/review/
 screenshots/asc-review/
 ### Stray debug/dogfood captures at the screenshots root (annotated browser shots) ###
 /screenshots/*.png
+### Agent task worktrees ###
+.worktrees/

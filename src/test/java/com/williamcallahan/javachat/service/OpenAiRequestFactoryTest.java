@@ -39,8 +39,8 @@ class OpenAiRequestFactoryTest {
     private static final int TEST_COMPLETION_OUTPUT_TOKEN_BUDGET = 768;
 
     @Test
-    void defaultGatewayChatModelIsGpt54() {
-        assertEquals("gpt-5.4", ModelConfiguration.DEFAULT_MODEL);
+    void defaultGatewayChatModelIsClaudeHaiku55() {
+        assertEquals("claude-haiku-5-5", ModelConfiguration.DEFAULT_MODEL);
     }
 
     @Test
@@ -141,7 +141,7 @@ class OpenAiRequestFactoryTest {
     }
 
     @Test
-    void jsonCompletionOmitsTheConfiguredReasoningEffort() {
+    void jsonCompletionReservesItsOutputBudgetForVisibleJson() {
         OpenAiRequestFactory requestFactory = createRequestFactory("max");
 
         ResponseCreateParams jsonCompletionParams =
@@ -149,13 +149,14 @@ class OpenAiRequestFactoryTest {
 
         assertTrue(
                 jsonCompletionParams.text().orElseThrow().format().orElseThrow().isJsonObject());
-        assertTrue(
-                jsonCompletionParams.reasoning().isEmpty(),
-                "JSON completions inherit the gateway default so reasoning tokens cannot starve the output budget");
+        assertEquals(128L, jsonCompletionParams.maxOutputTokens().orElseThrow());
+        assertEquals(
+                ReasoningEffort.NONE,
+                jsonCompletionParams.reasoning().orElseThrow().effort().orElseThrow());
     }
 
     @Test
-    void applicationDefaultsLeaveReasoningEffortUnset() throws IOException {
+    void applicationDefaultsUseTestedHaikuReasoningEffort() throws IOException {
         Properties applicationProperties = new Properties();
         InputStream applicationPropertiesStream =
                 OpenAiRequestFactoryTest.class.getResourceAsStream("/application.properties");
@@ -165,7 +166,7 @@ class OpenAiRequestFactoryTest {
             applicationProperties.load(applicationPropertiesStream);
         }
 
-        assertFalse(applicationProperties.containsKey("app.llm.reasoning-effort"));
+        assertEquals("low", applicationProperties.getProperty("app.llm.reasoning-effort"));
     }
 
     @Test

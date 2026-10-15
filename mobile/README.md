@@ -10,7 +10,8 @@ authentication session and return through `javachat://sso-callback`; the typed
 callback is then completed by the canonical Clerk client in the hosted app.
 
 The desktop shell adds standard macOS Copy Link and Open in Default Browser
-actions. The iOS target is a universal iPhone and iPad app. It follows the
+actions and requires macOS 26 on Intel or Apple silicon. The iOS target is a
+universal iPhone and iPad app that requires iOS 27. It follows the
 installed-current simulator policy: use a compatible simulator already
 installed on the Mac and identify it by UDID.
 
@@ -62,6 +63,16 @@ profile with strict authentication to notarize and staple the app before
 packaging it, then submits the signed DMG to Apple's Notary service and staples
 and validates the outer ticket. Both layers therefore retain offline
 notarization evidence after the app is copied out of the disk image.
+
+Every signing lane (`desktop-archive`, `ios-archive`, `desktop-create-signed-dmg`,
+and the exports built on them) starts with `signing-session`, which runs the
+dotfiles host tool `build-keychain unlock`, so it signs from a fresh
+noninteractive SSH session.
+
+`haiku-7` runs every lane in `mobile/Makefile`. From any other host, `make -C mobile <lane>`
+forwards the goals and command-line variables to the dotfiles host tool `remote-slot`, which
+mirrors this checkout's exact bytes into a warm `.worktrees/remote-slot-<n>` on `haiku-7` and runs
+the lane there; its outputs stay on `haiku-7`.
 
 These lanes require the matching Developer ID or Apple Distribution identities,
 profiles, a valid `csweb` App Store Connect profile, and signed agreements for

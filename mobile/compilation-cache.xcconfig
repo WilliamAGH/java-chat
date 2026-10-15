@@ -1,0 +1,6 @@
+// Loaded by every Make lane through XCODE_XCCONFIG_FILE, so package targets are
+// cached too. The cache sits at Xcode's per-user default, not in each lane's
+// DerivedData, so a lane rebuilt from an empty DerivedData replays what it
+// compiled before, and every lane and checkout reuses compiled packages.
+COMPILATION_CACHE_ENABLE_CACHING = YES
+COMPILATION_CACHE_CAS_PATH = $(HOME)/Library/Developer/Xcode/DerivedData/CompilationCache.noindex

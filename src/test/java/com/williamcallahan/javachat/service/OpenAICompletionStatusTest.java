@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -10,6 +11,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.client.OpenAIClient;
 import com.openai.client.OpenAIClientAsync;
 import com.openai.core.RequestOptions;
@@ -22,13 +25,22 @@ import com.openai.models.responses.ResponseOutputRefusal;
 import com.openai.models.responses.ResponseOutputText;
 import com.openai.models.responses.ResponseStatus;
 import com.openai.services.async.ResponseServiceAsync;
+import com.sun.net.httpserver.HttpServer;
 import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureReporter;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.ModelConfiguration;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import reactor.test.StepVerifier;
 
@@ -39,6 +51,69 @@ class OpenAICompletionStatusTest {
     private static final int EXPECTED_PROVIDER_REQUEST_COUNT_AFTER_READMISSION = 2;
     private static final String VISIBLE_COMPLETION = "Visible completion";
     private static final String PROVIDER_REFUSAL = "I cannot help with that request.";
+
+    @ParameterizedTest
+    @ValueSource(strings = {"production-z", "production-a", "batch"})
+    void jsonCompletionSendsMatchingWorkloadTierAndNoReasoning(String requestTier) throws IOException {
+        AtomicReference<CapturedCompletionRequest> capturedRequest = new AtomicReference<>();
+        HttpServer gatewayServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        gatewayServer.createContext("/v1/responses", exchange -> {
+            JsonNode requestBody = new ObjectMapper().readTree(exchange.getRequestBody());
+            capturedRequest.set(new CapturedCompletionRequest(
+                    exchange.getRequestHeaders().getFirst("X-Tier"),
+                    exchange.getRequestHeaders().getFirst("X-User-ID"),
+                    requestBody));
+            byte[] responseBody = """
+                    {"id":"resp_wire","object":"response","created_at":0,
+                     "model":"wire-test-model","status":"completed",
+                     "output":[{"id":"msg_wire","type":"message","role":"assistant",
+                      "status":"completed","content":[{"type":"output_text",
+                      "text":"{\\"ok\\":true}","annotations":[]}]}]}
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, responseBody.length);
+            try (var responseStream = exchange.getResponseBody()) {
+                responseStream.write(responseBody);
+            }
+        });
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
+                .thenReturn(true);
+        OpenAIStreamingService streamingService = configuredStreamingService(rateLimitService);
+        ReflectionTestUtils.setField(streamingService, "openaiApiKey", "wire-test-api-key");
+        ReflectionTestUtils.setField(streamingService, "openaiBaseUrl", "https://api.llm-gateway.iocloudhost.net/v1");
+        ReflectionTestUtils.setField(streamingService, "llmGatewayTier", requestTier);
+        gatewayServer.start();
+        try {
+            streamingService.initializeClient();
+            OpenAIClient configuredClient = assertInstanceOf(
+                    OpenAIClient.class, ReflectionTestUtils.getField(streamingService, "openAiClient"));
+            // Redirect only the test transport while retaining the application's configured headers.
+            ReflectionTestUtils.setField(
+                    streamingService,
+                    "openAiClient",
+                    configuredClient.withOptions(options -> options.baseUrl(
+                            "http://127.0.0.1:" + gatewayServer.getAddress().getPort() + "/v1")));
+            assertEquals(
+                    "{\"ok\":true}",
+                    streamingService
+                            .completeJsonObject("Return a JSON object with ok true", 0.0, 512)
+                            .block(Duration.ofSeconds(10)));
+        } finally {
+            streamingService.shutdown();
+            gatewayServer.stop(0);
+        }
+        CapturedCompletionRequest gatewayRequest = capturedRequest.get();
+        assertNotNull(gatewayRequest);
+        assertEquals(requestTier, gatewayRequest.tierHeader());
+        assertEquals(
+                "java-chat:chat-completions:" + (requestTier.equals("batch") ? "batch" : "live"),
+                gatewayRequest.workloadHeader());
+        assertEquals(512, gatewayRequest.requestBody().path("max_output_tokens").asInt());
+        assertEquals(
+                "none",
+                gatewayRequest.requestBody().path("reasoning").path("effort").asText());
+    }
 
     @Test
     void completionRecordsSuccessOnlyAfterCompletedStatus() {
@@ -286,7 +361,8 @@ class OpenAICompletionStatusTest {
     }
 
     private static OpenAiRequestFactory testRequestFactory() {
-        return new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.4", configuredLlmProperties());
+        return new OpenAiRequestFactory(
+                new Chunker(), new PromptTruncator(), ModelConfiguration.DEFAULT_MODEL, configuredLlmProperties());
     }
 
     private static ResponseServiceAsync mockAsyncResponseService(OpenAIClient openAiClient) {
@@ -296,6 +372,8 @@ class OpenAICompletionStatusTest {
         when(asyncClient.responses()).thenReturn(responseService);
         return responseService;
     }
+
+    private record CapturedCompletionRequest(String tierHeader, String workloadHeader, JsonNode requestBody) {}
 
     private record CompletionFailureScenario(
             Response providerCompletion,
