@@ -24,6 +24,20 @@ class QueryVersionExtractorTest {
     }
 
     @Test
+    void extractsOxfordCommaEnumerationWithoutDroppingFinalRelease() {
+        // Oxford-comma form keeps the final release (the bug: ", and" was two connectors in sequence)
+        assertEquals(List.of("21", "25", "26"), QueryVersionExtractor.extractVersionNumbers("Java SE 21, 25, and 26"));
+        // Longer Oxford-comma chain generalizes beyond three releases
+        assertEquals(
+                List.of("21", "22", "23", "25"),
+                QueryVersionExtractor.extractVersionNumbers("Java 21, 22, 23, and 25"));
+        // All-comma chain (no trailing "and") keeps every release
+        assertEquals(List.of("21", "22", "25"), QueryVersionExtractor.extractVersionNumbers("Java 21, 22, 25"));
+        // Non-Oxford "and" (no comma before "and") keeps every release
+        assertEquals(List.of("21", "22", "25"), QueryVersionExtractor.extractVersionNumbers("Java 21, 22 and 25"));
+    }
+
+    @Test
     void ignoresUnprefixedNumbersOutsideAComparisonChain() {
         assertEquals(List.of("21"), QueryVersionExtractor.extractVersionNumbers("Java 21 with 50 examples"));
         assertEquals(
