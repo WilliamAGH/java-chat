@@ -41,22 +41,6 @@ public record StructuredPrompt(
     }
 
     /**
-     * Calculates total estimated tokens across all segments.
-     *
-     * @return sum of all segment token estimates
-     */
-    public int totalEstimatedTokens() {
-        int total = system.estimatedTokens() + currentQuery.estimatedTokens();
-        for (ContextDocumentSegment contextDocument : contextDocuments) {
-            total += contextDocument.estimatedTokens();
-        }
-        for (ConversationTurnSegment conversationTurn : conversationHistory) {
-            total += conversationTurn.estimatedTokens();
-        }
-        return total;
-    }
-
-    /**
      * Renders the complete prompt to a string for consumers that require one text value.
      *
      * <p>Segments are joined with paragraph separators in order: system instructions,
