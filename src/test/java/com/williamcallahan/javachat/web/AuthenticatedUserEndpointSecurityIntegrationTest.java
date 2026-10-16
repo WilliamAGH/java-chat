@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
+import com.williamcallahan.javachat.adapters.in.web.security.ClerkApiKeyAuthenticationFilter;
 import com.williamcallahan.javachat.adapters.out.clerk.ClerkApiKeyVerifier;
 import com.williamcallahan.javachat.application.auth.ApiKeyOperationUnavailableException;
 import com.williamcallahan.javachat.application.auth.VerifiedApiKey;
@@ -170,6 +171,31 @@ class AuthenticatedUserEndpointSecurityIntegrationTest {
             assertFalse(revocationLogEvent.getFormattedMessage().contains(CLERK_API_KEY_SECRET));
             assertFalse(revocationLogEvent.getFormattedMessage().contains(CLERK_API_KEY_ID));
             assertFalse(revocationLogEvent.getFormattedMessage().contains(CLERK_USER_ID));
+        }
+    }
+
+    @Test
+    void unavailableApiKeyVerificationReturns503AndLogsOneFailure() throws Exception {
+        ApiKeyOperationUnavailableException verificationFailure =
+                new ApiKeyOperationUnavailableException("Clerk returned an incomplete API key identity");
+        when(clerkApiKeyVerifier.verify(CLERK_API_KEY_SECRET)).thenThrow(verificationFailure);
+        Logger filterLogger = (Logger) LoggerFactory.getLogger(ClerkApiKeyAuthenticationFilter.class);
+
+        try (ExpectedLogEvents verificationLogEvents = ExpectedLogEvents.capture(filterLogger)) {
+            mockMvc.perform(get("/api/me").header("Authorization", "Bearer " + CLERK_API_KEY_SECRET))
+                    .andExpect(status().isServiceUnavailable())
+                    .andExpect(jsonPath("$.status").value("error"))
+                    .andExpect(jsonPath("$.message")
+                            .value("API key verification is temporarily unavailable. Please retry."));
+
+            assertEquals(1, verificationLogEvents.events().size());
+            ILoggingEvent verificationLogEvent = verificationLogEvents.events().getFirst();
+            assertEquals(Level.ERROR, verificationLogEvent.getLevel());
+            assertEquals("Clerk API key verification was unavailable", verificationLogEvent.getFormattedMessage());
+            assertEquals(
+                    ApiKeyOperationUnavailableException.class.getName(),
+                    verificationLogEvent.getThrowableProxy().getClassName());
+            assertFalse(verificationLogEvent.getFormattedMessage().contains(CLERK_API_KEY_SECRET));
         }
     }
 
