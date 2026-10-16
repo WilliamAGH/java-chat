@@ -4,6 +4,9 @@
 # flags do not cross, and every output (installs, archives, receipts) stays on that host. GitHub
 # Actions jobs already run on the Mac their workflow picked.
 APPLE_BUILD_HOST := haiku-7
+# haiku-7 is the only Apple build host: an override sent builds to haiku-50, the user's Mac.
+# GitHub Actions names its own runner, which is haiku-7.
+$(if $(and $(filter command line,$(origin APPLE_BUILD_HOST)),$(if $(GITHUB_ACTIONS),,1)),$(error APPLE_BUILD_HOST=$(APPLE_BUILD_HOST) refused: Apple lanes build only on haiku-7, so drop the override and this lane forwards there through remote-slot))
 ifeq ($(filter $(APPLE_BUILD_HOST),$(shell hostname -s))$(GITHUB_ACTIONS),)
 APPLE_BUILD_HOST_VARIABLES := $(strip $(foreach variable,$(sort $(.VARIABLES)),$(if $(filter command line,$(origin $(variable))),'$(variable)=$(subst ','\'',$(value $(variable)))')))
 .DEFAULT_GOAL := apple-build-host
