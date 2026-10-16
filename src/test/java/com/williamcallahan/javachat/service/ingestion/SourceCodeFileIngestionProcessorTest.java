@@ -672,6 +672,117 @@ class SourceCodeFileIngestionProcessorTest {
         assertTrue(sourceFileProcessing.fileUrl().startsWith("https://github.com/owner/repo/blob/main/src/Empty.java"));
     }
 
+    @Test
+    void oversizedPreviouslyIngestedFilePrunesStalePriorState(@TempDir Path temporaryDirectory) throws IOException {
+        IngestionProcessorHarness harness = ingestionProcessorHarness(temporaryDirectory, "BigFile.java");
+        Files.writeString(
+                harness.sourceFilePath(),
+                "a".repeat((int) SourceCodeFileIngestionProcessor.MAX_FILE_SIZE_BYTES + 1),
+                StandardCharsets.UTF_8);
+
+        SourceFileProcessingResult sourceFileProcessing = harness.ingestionProcessor()
+                .process(harness.repositoryContext(Set.of(harness.sourceUrl())), harness.sourceFilePath());
+
+        assertFalse(sourceFileProcessing.outcome().processed());
+        assertTrue(sourceFileProcessing.outcome().failure().isEmpty());
+        assertEquals(harness.sourceUrl(), sourceFileProcessing.fileUrl());
+        verify(harness.ingestedFilePruneService())
+                .pruneCollectionFileStrict(TARGET_COLLECTION_NAME, harness.sourceUrl(), null);
+        verify(harness.fileIngestionMarkerStore(), never()).readFileIngestionRecord(anyString());
+        verifyNoInteractions(harness.chunkProcessingService());
+    }
+
+    @Test
+    void oversizedNeverIngestedFileSkipsWithoutPruning(@TempDir Path temporaryDirectory) throws IOException {
+        IngestionProcessorHarness harness = ingestionProcessorHarness(temporaryDirectory, "BigFile.java");
+        Files.writeString(
+                harness.sourceFilePath(),
+                "a".repeat((int) SourceCodeFileIngestionProcessor.MAX_FILE_SIZE_BYTES + 1),
+                StandardCharsets.UTF_8);
+
+        SourceFileProcessingResult sourceFileProcessing =
+                harness.ingestionProcessor().process(harness.repositoryContext(Set.of()), harness.sourceFilePath());
+
+        assertFalse(sourceFileProcessing.outcome().processed());
+        assertTrue(sourceFileProcessing.outcome().failure().isEmpty());
+        assertEquals(harness.sourceUrl(), sourceFileProcessing.fileUrl());
+        verifyNoInteractions(harness.ingestedFilePruneService());
+        verifyNoInteractions(harness.fileIngestionMarkerStore());
+        verifyNoInteractions(harness.chunkProcessingService());
+    }
+
+    @Test
+    void oversizedFileWithUnrelatedStoredUrlSkipsWithoutPruning(@TempDir Path temporaryDirectory) throws IOException {
+        IngestionProcessorHarness harness = ingestionProcessorHarness(temporaryDirectory, "BigFile.java");
+        Files.writeString(
+                harness.sourceFilePath(),
+                "a".repeat((int) SourceCodeFileIngestionProcessor.MAX_FILE_SIZE_BYTES + 1),
+                StandardCharsets.UTF_8);
+        String unrelatedStoredUrl = "https://github.com/openai/java-chat/blob/main/src/Unrelated.java";
+
+        SourceFileProcessingResult sourceFileProcessing = harness.ingestionProcessor()
+                .process(harness.repositoryContext(Set.of(unrelatedStoredUrl)), harness.sourceFilePath());
+
+        assertFalse(sourceFileProcessing.outcome().processed());
+        assertEquals(harness.sourceUrl(), sourceFileProcessing.fileUrl());
+        verifyNoInteractions(harness.ingestedFilePruneService());
+    }
+
+    @Test
+    void oversizedPruneFailureKeepsSkipOutcome(@TempDir Path temporaryDirectory) throws IOException {
+        IngestionProcessorHarness harness = ingestionProcessorHarness(temporaryDirectory, "BigFile.java");
+        Files.writeString(
+                harness.sourceFilePath(),
+                "a".repeat((int) SourceCodeFileIngestionProcessor.MAX_FILE_SIZE_BYTES + 1),
+                StandardCharsets.UTF_8);
+        Mockito.doThrow(new IOException("prune failed"))
+                .when(harness.ingestedFilePruneService())
+                .pruneCollectionFileStrict(TARGET_COLLECTION_NAME, harness.sourceUrl(), null);
+
+        SourceFileProcessingResult sourceFileProcessing = harness.ingestionProcessor()
+                .process(harness.repositoryContext(Set.of(harness.sourceUrl())), harness.sourceFilePath());
+
+        assertFalse(sourceFileProcessing.outcome().processed());
+        assertTrue(
+                sourceFileProcessing.outcome().failure().isEmpty(),
+                "Prune failure must not escalate a skip to a failure");
+        assertEquals(harness.sourceUrl(), sourceFileProcessing.fileUrl());
+        verify(harness.ingestedFilePruneService())
+                .pruneCollectionFileStrict(TARGET_COLLECTION_NAME, harness.sourceUrl(), null);
+    }
+
+    @Test
+    void binaryPreviouslyIngestedFilePrunesStalePriorState(@TempDir Path temporaryDirectory) throws IOException {
+        IngestionProcessorHarness harness = ingestionProcessorHarness(temporaryDirectory, "Binary.java");
+        Files.write(harness.sourceFilePath(), new byte[] {(byte) 0xFF, (byte) 0xFE, 0x00, (byte) 0xAD});
+
+        SourceFileProcessingResult sourceFileProcessing = harness.ingestionProcessor()
+                .process(harness.repositoryContext(Set.of(harness.sourceUrl())), harness.sourceFilePath());
+
+        assertFalse(sourceFileProcessing.outcome().processed());
+        assertTrue(sourceFileProcessing.outcome().failure().isEmpty());
+        verify(harness.ingestedFilePruneService())
+                .pruneCollectionFileStrict(TARGET_COLLECTION_NAME, harness.sourceUrl(), null);
+        verifyNoInteractions(harness.chunkProcessingService());
+        verify(harness.fileIngestionMarkerStore(), never()).readFileIngestionRecord(anyString());
+    }
+
+    @Test
+    void blankPreviouslyIngestedFilePrunesStalePriorState(@TempDir Path temporaryDirectory) throws IOException {
+        IngestionProcessorHarness harness = ingestionProcessorHarness(temporaryDirectory, "Empty.java");
+        Files.writeString(harness.sourceFilePath(), "", StandardCharsets.UTF_8);
+
+        SourceFileProcessingResult sourceFileProcessing = harness.ingestionProcessor()
+                .process(harness.repositoryContext(Set.of(harness.sourceUrl())), harness.sourceFilePath());
+
+        assertFalse(sourceFileProcessing.outcome().processed());
+        assertTrue(sourceFileProcessing.outcome().failure().isEmpty());
+        verify(harness.ingestedFilePruneService())
+                .pruneCollectionFileStrict(TARGET_COLLECTION_NAME, harness.sourceUrl(), null);
+        verifyNoInteractions(harness.chunkProcessingService());
+        verify(harness.fileIngestionMarkerStore(), never()).readFileIngestionRecord(anyString());
+    }
+
     private static SourceCodeFileIngestionProcessor.RepositoryIngestionContext repositoryContext(
             Path repositoryRoot, GitHubRepoMetadata repositoryMetadata) {
         return new SourceCodeFileIngestionProcessor.RepositoryIngestionContext(
@@ -738,6 +849,71 @@ class SourceCodeFileIngestionProcessorTest {
             HybridVectorService hybridVectorService,
             LocalStoreService localStoreService,
             FileIngestionMarkerStore fileIngestionMarkerStore,
+            IngestedFilePruneService ingestedFilePruneService,
+            Path repositoryRoot,
+            Path sourceFilePath,
+            GitHubRepoMetadata repositoryMetadata,
+            String sourceUrl) {
+        private SourceCodeFileIngestionProcessor.RepositoryIngestionContext repositoryContext(
+                Set<String> storedFileUrls) {
+            return new SourceCodeFileIngestionProcessor.RepositoryIngestionContext(
+                    repositoryRoot, repositoryMetadata, storedFileUrls);
+        }
+    }
+
+    private static IngestionProcessorHarness ingestionProcessorHarness(Path temporaryDirectory, String sourceFileName)
+            throws IOException {
+        ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
+        HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
+        LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
+        FileIngestionMarkerStore fileIngestionMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
+        ContentHasher contentHasher = Mockito.mock(ContentHasher.class);
+        IngestedFilePruneService ingestedFilePruneService = Mockito.mock(IngestedFilePruneService.class);
+        SourceCodeFileIngestionProcessor ingestionProcessor = new SourceCodeFileIngestionProcessor(
+                new IngestionStorageServices(
+                        hybridVectorService,
+                        chunkProcessingService,
+                        contentHasher,
+                        localStoreService,
+                        fileIngestionMarkerStore,
+                        Mockito.mock(QdrantCollectionRouter.class)),
+                Mockito.mock(ProgressTracker.class),
+                ingestedFilePruneService);
+        Path repositoryRoot = temporaryDirectory.resolve("repository");
+        Path sourceFilePath = repositoryRoot.resolve("src").resolve(sourceFileName);
+        Files.createDirectories(Objects.requireNonNull(sourceFilePath.getParent(), "sourceFilePath parent"));
+        GitHubRepoMetadata repositoryMetadata = new GitHubRepoMetadata(
+                repositoryRoot.toString(),
+                GitHubRepositoryIdentity.of("openai", "java-chat"),
+                TARGET_COLLECTION_NAME,
+                "main",
+                "abcdef123456",
+                "MIT",
+                "Example repository");
+        String encodedSourceFileName =
+                URLEncoder.encode(sourceFileName, StandardCharsets.UTF_8).replace("+", "%20");
+        String sourceUrl = "https://github.com/openai/java-chat/blob/main/src/" + encodedSourceFileName;
+        return new IngestionProcessorHarness(
+                ingestionProcessor,
+                chunkProcessingService,
+                hybridVectorService,
+                localStoreService,
+                fileIngestionMarkerStore,
+                contentHasher,
+                ingestedFilePruneService,
+                repositoryRoot,
+                sourceFilePath,
+                repositoryMetadata,
+                sourceUrl);
+    }
+
+    private record IngestionProcessorHarness(
+            SourceCodeFileIngestionProcessor ingestionProcessor,
+            ChunkProcessingService chunkProcessingService,
+            HybridVectorService hybridVectorService,
+            LocalStoreService localStoreService,
+            FileIngestionMarkerStore fileIngestionMarkerStore,
+            ContentHasher contentHasher,
             IngestedFilePruneService ingestedFilePruneService,
             Path repositoryRoot,
             Path sourceFilePath,

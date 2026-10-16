@@ -162,6 +162,14 @@
         <Bug pattern="CRLF_INJECTION_LOGS"/>
         <Class name="com.williamcallahan.javachat.service.ingestion.LocalDocsFileIngestionProcessor"/>
     </Match>
+    <!--
+        SourceCodeFileIngestionProcessor logs repository file paths via renderPathForLog, which
+        escapes CR/LF before formatting; FindSecBugs cannot follow the custom sanitizer.
+    -->
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.ingestion.SourceCodeFileIngestionProcessor"/>
+    </Match>
     <Match>
         <Bug pattern="CRLF_INJECTION_LOGS"/>
         <Class name="com.williamcallahan.javachat.web.ChatController"/>
