@@ -257,7 +257,7 @@ class LocalDocsDirectoryIngestionServiceTest {
                 .thenReturn(
                         Optional.empty(),
                         Optional.of(new IngestionBacklogStatus(
-                                IngestionBacklogStatus.Lifecycle.PARTIAL, 2, 1, 0, 1, 0, 1, 0, "java")));
+                                IngestionBacklogStatus.Lifecycle.PARTIAL, 2, 1, 0, 1, 0, 0, 1, 0, "java")));
         LocalDocsDirectoryIngestionService directoryIngestionService = new LocalDocsDirectoryIngestionService(
                 fileProcessor, ingestionRunStore, configuredDocumentationRoot.toString());
 
