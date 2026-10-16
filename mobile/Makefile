@@ -3,7 +3,9 @@
 # host tool remote-slot (dotfiles, ~/.local/bin). The environment, gitignored files, and make's own
 # flags do not cross, and every output (installs, archives, receipts) stays on that host. GitHub
 # Actions jobs already run on the Mac their workflow picked.
-APPLE_BUILD_HOST := $(if $(GITHUB_ACTIONS),,$(or $(shell remote-slot apple-host 2>/dev/null),$(error The dotfiles host tool remote-slot names the Mac build host; install it)))
+ifeq ($(filter command line,$(origin APPLE_BUILD_HOST))$(GITHUB_ACTIONS),)
+APPLE_BUILD_HOST := $(or $(shell remote-slot apple-host),$(error remote-slot apple-host named no Mac build host; update the dotfiles host tool remote-slot or pass APPLE_BUILD_HOST))
+endif
 ifeq ($(filter $(APPLE_BUILD_HOST),$(shell hostname -s))$(GITHUB_ACTIONS),)
 APPLE_BUILD_HOST_VARIABLES := $(strip $(foreach variable,$(sort $(.VARIABLES)),$(if $(filter command line,$(origin $(variable))),'$(variable)=$(subst ','\'',$(value $(variable)))')))
 .DEFAULT_GOAL := apple-build-host
