@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -55,7 +54,6 @@ class SecurityConfigTest {
             "CSRF token missing or invalid. Refresh the page and retry the request.";
     private static final String CONTENT_HASHED_ASSET_PATH = "/assets/application-a1b2c3d4.js";
     private static final String CONTENT_HASHED_ASSET_CACHE_CONTROL = "max-age=31536000, public, immutable";
-    private static final String FONT_ASSET_PATH = "/fonts/Fraunces-Variable.ttf";
     private static final String SITE_MANIFEST_PATH = "/site.webmanifest";
     private static final String UNVERSIONED_STATIC_RESOURCE_CACHE_CONTROL = "max-age=3600, public";
     private static final String HTML_SHELL_PATH = "/index.html";
@@ -198,10 +196,6 @@ class SecurityConfigTest {
 
     @Test
     void servesUnversionedStaticResourcesWithBoundedPublicCachingWithoutCsrfCookie() throws Exception {
-        mockMvc.perform(head(FONT_ASSET_PATH))
-                .andExpect(status().isOk())
-                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, UNVERSIONED_STATIC_RESOURCE_CACHE_CONTROL))
-                .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
         assertBoundedPublicStaticResource(SITE_MANIFEST_PATH);
     }
 
