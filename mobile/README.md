@@ -69,10 +69,10 @@ and the exports built on them) starts with `signing-session`, which runs the
 dotfiles host tool `build-keychain unlock`, so it signs from a fresh
 noninteractive SSH session.
 
-`haiku-7` runs every lane in `mobile/Makefile`. From any other host, `make -C mobile <lane>`
-forwards the goals and command-line variables to the dotfiles host tool `remote-slot`, which
-mirrors this checkout's exact bytes into a warm `.worktrees/remote-slot-<n>` on `haiku-7` and runs
-the lane there; its outputs stay on `haiku-7`.
+The Mac build host that `remote-slot apple-host` names runs every lane in `mobile/Makefile`. From
+any other host, `make -C mobile <lane>` forwards the goals and command-line variables to the
+dotfiles host tool `remote-slot`, which mirrors this checkout's exact bytes into a warm
+`.worktrees/remote-slot-<n>` on that host and runs the lane there; its outputs stay on that host.
 
 These lanes require the matching Developer ID or Apple Distribution identities,
 profiles, a valid `csweb` App Store Connect profile, and signed agreements for
