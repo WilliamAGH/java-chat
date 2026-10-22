@@ -184,4 +184,101 @@ describe("numeric list fence nesting", () => {
     expect(nestedMarkdown).toContain("200. Template 199\n     ```text\n     {{name}}\n     ```");
     expect(structuralLexSpy).toHaveBeenCalledOnce();
   });
+
+  it("lifts a flush-left code body under continuation-indented rails into the list item", () => {
+    for (const fenceMarker of ["```", "~~~"]) {
+      for (const lineSeparator of ["\n", "\r\n", "\r"]) {
+        const markdown = [
+          "1. Step one",
+          `   ${fenceMarker}java`,
+          "int x = 1;",
+          "int y = 2;",
+          `   ${fenceMarker}`,
+          "2. Step two",
+        ].join(lineSeparator);
+
+        for (const isStreaming of [false, true]) {
+          const renderedContainer = renderMarkdown(markdown, isStreaming);
+          const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
+
+          expect(nestedCodeBlocks).toHaveLength(1);
+          expect(nestedCodeBlocks[0].textContent).toContain("int x = 1;\nint y = 2;");
+          expect(renderedContainer.querySelectorAll("ol > li")).toHaveLength(2);
+          expect(renderedContainer.querySelectorAll("ol > li")[1].textContent).toContain(
+            "Step two",
+          );
+          expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
+        }
+      }
+    }
+  });
+
+  it("lifts a mixed-indentation method body under continuation-indented rails into the list item", () => {
+    for (const fenceMarker of ["```", "~~~"]) {
+      for (const isStreaming of [false, true]) {
+        const markdown = [
+          "1. Define a method that prints a greeting.",
+          `   ${fenceMarker}java`,
+          "public void greet() {",
+          '    System.out.println("Hello");',
+          "}",
+          `   ${fenceMarker}`,
+          "2. Call the method from main.",
+        ].join("\n");
+
+        const renderedContainer = renderMarkdown(markdown, isStreaming);
+        const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
+
+        expect(nestedCodeBlocks).toHaveLength(1);
+        expect(nestedCodeBlocks[0].textContent).toContain("public void greet() {");
+        expect(nestedCodeBlocks[0].textContent).toContain('System.out.println("Hello");');
+        expect(nestedCodeBlocks[0].textContent).toContain("\n}\n");
+        expect(renderedContainer.querySelectorAll("ol > li")).toHaveLength(2);
+        expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
+      }
+    }
+  });
+
+  it("rescues an identical flush-left body regardless of the opening fence's column", () => {
+    for (const fenceMarker of ["```", "~~~"]) {
+      for (const openingIndentation of ["", "   "]) {
+        for (const closingOffset of [0, 1, 2, 3]) {
+          const closingIndentation = " ".repeat(3 + closingOffset);
+          const markdown = [
+            "1. Template example",
+            `${openingIndentation}${fenceMarker}text`,
+            "template body",
+            `${closingIndentation}${fenceMarker}`,
+          ].join("\n");
+
+          for (const isStreaming of [false, true]) {
+            const renderedContainer = renderMarkdown(markdown, isStreaming);
+            const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
+
+            expect(nestedCodeBlocks).toHaveLength(1);
+            expect(nestedCodeBlocks[0].textContent).toContain("template body");
+            expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
+          }
+        }
+      }
+    }
+  });
+
+  it("preserves over-indented body content under a flush-left opening fence", () => {
+    for (const fenceMarker of ["```", "~~~"]) {
+      for (const isStreaming of [false, true]) {
+        const markdown = ["1. Step", `${fenceMarker}java`, "     int x = 1;", fenceMarker].join(
+          "\n",
+        );
+
+        const renderedContainer = renderMarkdown(markdown, isStreaming);
+        const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
+
+        expect(nestedCodeBlocks).toHaveLength(1);
+        expect(nestedCodeBlocks[0].textContent?.startsWith("     ")).toBe(true);
+        expect(nestedCodeBlocks[0].textContent).toContain("     int x = 1;");
+        expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
+      }
+    }
+  });
 });
