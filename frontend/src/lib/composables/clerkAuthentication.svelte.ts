@@ -71,9 +71,10 @@ export async function loadClerkAuthentication(): Promise<void> {
   }
   const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
   if (!publishableKey) {
-    // Deliberate per-deployment switch, not an error: production builds omit
-    // VITE_CLERK_PUBLISHABLE_KEY until Clerk launches there, so auth controls
-    // stay hidden. Dev deployments and local .env.local provide the key.
+    // Deliberate switch, not an error: a build without VITE_CLERK_PUBLISHABLE_KEY
+    // (a local run with no .env.local) keeps auth controls hidden. Deployed
+    // builds receive the key as a Docker build arg; vite.config.ts rejects a
+    // value that is not a Clerk publishable key.
     console.info("Clerk authentication disabled: no VITE_CLERK_PUBLISHABLE_KEY in this build.");
     clerkAuthentication.phase = "disabled";
     return;
