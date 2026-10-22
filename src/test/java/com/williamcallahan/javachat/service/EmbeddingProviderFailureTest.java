@@ -61,9 +61,9 @@ class EmbeddingProviderFailureTest {
                     () -> remoteClient.embed(
                             LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING, List.of("hello"), LlmGatewayTier.LIVE));
 
-            assertTrue(thrown.getMessage().contains("HTTP 401"));
+            assertTrue(thrown.getMessage().contains("HTTP 401"), thrown::getMessage);
             assertNotNull(thrown.getCause());
-            assertTrue(thrown.getCause().getMessage().contains("401"));
+            assertTrue(thrown.getCause().getMessage().contains("401"), thrown.getCause()::getMessage);
         } finally {
             httpServer.stop(0);
             serverExecutor.shutdownNow();
