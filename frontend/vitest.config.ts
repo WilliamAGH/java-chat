@@ -11,6 +11,10 @@ export default defineConfig({
     globals: true,
     include: ["src/**/*.{test,spec}.{js,ts}"],
     setupFiles: ["./src/test/setup.ts"],
+    // The Docker frontend stage runs tests with the deploy's Clerk key in its
+    // environment; without this, App.test.ts starts a live Clerk.load() whose
+    // storage writes outlive jsdom teardown. Tests that need a key stub it.
+    env: { VITE_CLERK_PUBLISHABLE_KEY: "" },
     testTimeout: COMPONENT_TEST_TIMEOUT_MS,
     coverage: {
       provider: "v8",

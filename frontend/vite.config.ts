@@ -19,6 +19,12 @@ const SIMPLE_ANALYTICS_RUNTIME_GUARD_SCRIPT = `;(function () {
   document.head.appendChild(analyticsScript)
 })()`;
 
+// A Clerk publishable key is `pk_test_` or `pk_live_` followed by the base64 of
+// its Frontend API host. Anything else (such as an unresolved `${{vault.…}}`
+// secret-store reference passed through CI) builds cleanly but breaks sign-in
+// in the browser, so the build rejects it.
+const CLERK_PUBLISHABLE_KEY_PATTERN = /^pk_(test|live)_[A-Za-z0-9+/]+=*$/;
+
 function buildSimpleAnalyticsTags(mode: string): HtmlTagDescriptor[] {
   if (mode !== "production") {
     return [];
@@ -55,6 +61,21 @@ function buildSimpleAnalyticsTags(mode: string): HtmlTagDescriptor[] {
 export default defineConfig(({ mode }) => ({
   plugins: [
     svelte(),
+    {
+      name: "clerk-publishable-key-shape",
+      configResolved(resolvedConfig) {
+        const clerkPublishableKey: unknown = resolvedConfig.env.VITE_CLERK_PUBLISHABLE_KEY;
+        if (
+          typeof clerkPublishableKey === "string" &&
+          clerkPublishableKey !== "" &&
+          !CLERK_PUBLISHABLE_KEY_PATTERN.test(clerkPublishableKey)
+        ) {
+          throw new Error(
+            "VITE_CLERK_PUBLISHABLE_KEY is set but is not a Clerk publishable key (expected pk_test_… or pk_live_…).",
+          );
+        }
+      },
+    },
     {
       name: "simple-analytics",
       generateBundle() {
