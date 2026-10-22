@@ -5,13 +5,13 @@
 # ================================
 # Multi-stage build for Frontend and Backend
 # Switched to Debian/Ubuntu-based images to resolve Alpine network issues
-# Node is sourced from public.ecr.aws; Liberica Java images come from BellSoft's Docker Hub repositories
+# Base images pull through the fleet's dockerhub.haiku.host mirror; anonymous public.ecr.aws pulls hit 429 data limits in CI.
 # Note: Requires DOCKER_BUILDKIT=1 for cache mount support
 
 # ================================
 # FRONTEND BUILD STAGE
 # ================================
-FROM public.ecr.aws/docker/library/node:24.18.0-bookworm-slim AS frontend-builder
+FROM dockerhub.haiku.host/library/node:24.18.0-bookworm-slim AS frontend-builder
 WORKDIR /app/frontend
 
 # Copy dependency definitions first for cache layer
@@ -39,7 +39,7 @@ RUN npm run validate && npm run test && npm run build
 # ================================
 # BACKEND BUILD STAGE
 # ================================
-FROM bellsoft/liberica-openjdk-debian:25.0.3-11 AS builder
+FROM dockerhub.haiku.host/bellsoft/liberica-openjdk-debian:25.0.3-11 AS builder
 ARG SOURCE_COMMIT=unknown
 WORKDIR /app
 
@@ -124,7 +124,7 @@ ENTRYPOINT ["/app/scripts/process_all_to_qdrant.sh", "--app-jar=/app/build/app.j
 # ================================
 # RUNTIME STAGE
 # ================================
-FROM bellsoft/liberica-openjre-debian:25.0.3-11 AS runtime
+FROM dockerhub.haiku.host/bellsoft/liberica-openjre-debian:25.0.3-11 AS runtime
 LABEL io.iocloudhost.logs.owner=split
 
 # 1. System packages (never changes) - FIRST for maximum cache reuse
