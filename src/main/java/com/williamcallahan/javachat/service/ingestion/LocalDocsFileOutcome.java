@@ -8,7 +8,10 @@ import java.util.Optional;
  * Outcome of processing a single local docs file.
  */
 public sealed interface LocalDocsFileOutcome
-        permits LocalDocsFileOutcome.Processed, LocalDocsFileOutcome.Skipped, LocalDocsFileOutcome.Failed {
+        permits LocalDocsFileOutcome.Processed,
+                LocalDocsFileOutcome.Skipped,
+                LocalDocsFileOutcome.Excluded,
+                LocalDocsFileOutcome.Failed {
 
     /**
      * Returns true when the file contributed new chunks to the destination.
@@ -29,9 +32,24 @@ public sealed interface LocalDocsFileOutcome
 
     /**
      * Returns a skipped outcome for files that were unchanged or already indexed.
+     *
+     * <p>Skipped files retain their existing Qdrant points and are genuine duplicates of content
+     * already stored in the vector index. Intentionally excluded pages that hold zero Qdrant points
+     * use {@link #excludedFile()} instead.</p>
      */
     static LocalDocsFileOutcome skippedFile() {
         return Skipped.INSTANCE;
+    }
+
+    /**
+     * Returns an excluded outcome for a file that was intentionally not indexed.
+     *
+     * <p>Excluded pages (for example Javadoc class-use index pages or frameset/navigation shells) are
+     * not upserted into Qdrant and may have their existing points deleted, so the URL ends up with
+     * zero Qdrant points — the opposite of an already-indexed duplicate.</p>
+     */
+    static LocalDocsFileOutcome excludedFile() {
+        return Excluded.INSTANCE;
     }
 
     /**
@@ -58,6 +76,20 @@ public sealed interface LocalDocsFileOutcome
 
     record Skipped() implements LocalDocsFileOutcome {
         private static final Skipped INSTANCE = new Skipped();
+
+        @Override
+        public boolean processed() {
+            return false;
+        }
+
+        @Override
+        public Optional<IngestionLocalFailure> failure() {
+            return Optional.empty();
+        }
+    }
+
+    record Excluded() implements LocalDocsFileOutcome {
+        private static final Excluded INSTANCE = new Excluded();
 
         @Override
         public boolean processed() {
