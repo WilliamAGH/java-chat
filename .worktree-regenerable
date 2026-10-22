@@ -1,0 +1,4 @@
+# Vite build output (frontend/vite.config.ts outDir); `npm run build` regenerates it.
+src/main/resources/static/index.html
+src/main/resources/static/assets/
+src/main/resources/static/theme-boot.js
