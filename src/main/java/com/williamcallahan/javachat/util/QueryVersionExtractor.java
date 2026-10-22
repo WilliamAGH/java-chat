@@ -12,8 +12,9 @@ public final class QueryVersionExtractor {
     private static final int MINIMUM_PLAUSIBLE_JAVA_RELEASE = 8;
     private static final Pattern EXPLICIT_VERSION_PATTERN =
             Pattern.compile("\\b(?:java\\s*se|javase|java|jdk)[\\s-]*(\\d{1,3})\\b", Pattern.CASE_INSENSITIVE);
-    private static final Pattern EXPLICIT_QUANTITY_SUFFIX_PATTERN =
-            Pattern.compile("[\\s-]+(?:days?|hours?|minutes?|seconds?|times|lines?)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern EXPLICIT_QUANTITY_SUFFIX_PATTERN = Pattern.compile(
+            "[\\s-]+(?:days?|hours?|minutes?|seconds?|times|lines?|weeks?|months?|years?)\\b",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern SHORTHAND_VERSION_PATTERN = Pattern.compile(
             "^\\s*(?:,|and\\b|vs(?:\\.|\\b)|versus\\b|\\+|/|&)\\s*(\\d{1,3})\\b", Pattern.CASE_INSENSITIVE);
 
