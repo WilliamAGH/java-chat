@@ -13,6 +13,7 @@ import com.openai.models.responses.ResponseInputItem;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ModelConfiguration;
+import com.williamcallahan.javachat.domain.prompt.CompletionPrompt;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.CurrentQuerySegment;
@@ -132,8 +133,9 @@ class OpenAiRequestFactoryTest {
                 List.of(),
                 new CurrentQuerySegment("Explain records", 2));
 
-        ResponseCreateParams reasoningRequestParams =
-                requestFactory.prepareStreamingRequest(structuredPrompt, 0.4).responseParams();
+        ResponseCreateParams reasoningRequestParams = requestFactory
+                .prepareStreamingRequest(LlmGatewayTier.Purpose.CHAT_ANSWER, structuredPrompt, 0.4)
+                .responseParams();
 
         assertEquals(
                 ReasoningEffort.HIGH,
@@ -144,12 +146,17 @@ class OpenAiRequestFactoryTest {
     void jsonCompletionReservesItsOutputBudgetForVisibleJson() {
         OpenAiRequestFactory requestFactory = createRequestFactory("max");
 
-        ResponseCreateParams jsonCompletionParams =
-                requestFactory.buildJsonCompletionRequest("Rank these documents", 0.0, 128);
+        ResponseCreateParams jsonCompletionParams = requestFactory.buildJsonCompletionRequest(
+                new CompletionPrompt("Stable task instructions", "Rank these documents"), 0.0, 128);
 
         assertTrue(
                 jsonCompletionParams.text().orElseThrow().format().orElseThrow().isJsonObject());
         assertEquals(128L, jsonCompletionParams.maxOutputTokens().orElseThrow());
+        assertEquals(
+                "Stable task instructions", jsonCompletionParams.instructions().orElseThrow());
+        assertEquals(
+                "Rank these documents",
+                jsonCompletionParams.input().orElseThrow().asText());
         assertEquals(
                 ReasoningEffort.NONE,
                 jsonCompletionParams.reasoning().orElseThrow().effort().orElseThrow());
@@ -183,8 +190,9 @@ class OpenAiRequestFactoryTest {
                         new ConversationTurnSegment(ConversationTurnSegment.ROLE_ASSISTANT, priorAssistantMessage, 8)),
                 new CurrentQuerySegment("Explain records", 2));
 
-        ResponseCreateParams responseCreateParams =
-                requestFactory.prepareStreamingRequest(structuredPrompt, 0.4).responseParams();
+        ResponseCreateParams responseCreateParams = requestFactory
+                .prepareStreamingRequest(LlmGatewayTier.Purpose.CHAT_ANSWER, structuredPrompt, 0.4)
+                .responseParams();
 
         assertEquals(
                 "Follow the Java teaching policy",
@@ -193,18 +201,76 @@ class OpenAiRequestFactoryTest {
         assertTrue(responseInput.isResponse());
         List<ResponseInputItem> responseInputItems = responseInput.asResponse();
         assertEquals(4, responseInputItems.size());
+        assertInputMessage(responseInputItems.get(0), EasyInputMessage.Role.USER, "Earlier question");
+        assertInputMessage(responseInputItems.get(1), EasyInputMessage.Role.ASSISTANT, priorAssistantMessage);
         assertInputMessage(
-                responseInputItems.get(0),
+                responseInputItems.get(2),
                 EasyInputMessage.Role.USER,
                 "[CTX 1] https://docs.oracle.com/java\n" + retrievedReferenceText);
-        assertInputMessage(responseInputItems.get(1), EasyInputMessage.Role.USER, "Earlier question");
-        assertInputMessage(responseInputItems.get(2), EasyInputMessage.Role.ASSISTANT, priorAssistantMessage);
         assertInputMessage(responseInputItems.get(3), EasyInputMessage.Role.USER, "Explain records");
         assertFalse(responseInputItems.stream()
                 .map(ResponseInputItem::asEasyInputMessage)
                 .map(EasyInputMessage::content)
                 .map(EasyInputMessage.Content::asTextInput)
                 .anyMatch(messageText -> messageText.contains("Follow the Java teaching policy")));
+    }
+
+    @Test
+    void streamingCacheKeyAndHistoryPrefixSurviveChangingRetrievalAndGuidance() {
+        OpenAiRequestFactory requestFactory = createRequestFactory("");
+        StructuredPrompt firstPrompt = new StructuredPrompt(
+                        new SystemSegment("Stable Java teaching instructions", 8),
+                        List.of(new ContextDocumentSegment(
+                                1, "first", "https://docs.test/first", "First references", 5)),
+                        List.of(new ConversationTurnSegment(ConversationTurnSegment.ROLE_USER, "Earlier question", 3)),
+                        new CurrentQuerySegment("Explain records", 2))
+                .withTurnGuidance(new SystemSegment("Use Java 21 documentation", 5));
+        StructuredPrompt secondPrompt = new StructuredPrompt(
+                        firstPrompt.system(),
+                        List.of(new ContextDocumentSegment(
+                                1, "second", "https://docs.test/second", "Different references", 5)),
+                        firstPrompt.conversationHistory(),
+                        new CurrentQuerySegment("Explain sealed classes", 4))
+                .withTurnGuidance(new SystemSegment("Use Java 25 documentation", 5));
+
+        ResponseCreateParams firstRequest = requestFactory
+                .prepareStreamingRequest(LlmGatewayTier.Purpose.CHAT_ANSWER, firstPrompt, 0.4)
+                .responseParams();
+        ResponseCreateParams secondRequest = requestFactory
+                .prepareStreamingRequest(LlmGatewayTier.Purpose.CHAT_ANSWER, secondPrompt, 0.4)
+                .responseParams();
+
+        assertEquals(firstRequest.instructions(), secondRequest.instructions());
+        assertFalse(firstRequest.promptCacheKey().orElseThrow().isBlank());
+        assertEquals(firstRequest.promptCacheKey(), secondRequest.promptCacheKey());
+        List<ResponseInputItem> firstInput = firstRequest.input().orElseThrow().asResponse();
+        List<ResponseInputItem> secondInput =
+                secondRequest.input().orElseThrow().asResponse();
+        assertEquals(firstInput.getFirst(), secondInput.getFirst());
+        assertInputMessage(firstInput.get(1), EasyInputMessage.Role.DEVELOPER, "Use Java 21 documentation");
+        assertInputMessage(secondInput.get(1), EasyInputMessage.Role.DEVELOPER, "Use Java 25 documentation");
+        assertFalse(firstRequest
+                .promptCacheKey()
+                .equals(requestFactory
+                        .prepareStreamingRequest(LlmGatewayTier.Purpose.GUIDED_LEARNING, firstPrompt, 0.4)
+                        .responseParams()
+                        .promptCacheKey()));
+        OpenAiRequestFactory differentModel = new OpenAiRequestFactory(
+                new Chunker(), new PromptTruncator(), "another-gateway-route", appProperties(""));
+        assertFalse(firstRequest
+                .promptCacheKey()
+                .equals(differentModel
+                        .prepareStreamingRequest(LlmGatewayTier.Purpose.CHAT_ANSWER, firstPrompt, 0.4)
+                        .responseParams()
+                        .promptCacheKey()));
+        StructuredPrompt changedSystem = new StructuredPrompt(
+                new SystemSegment("Revised teaching policy", 5), List.of(), List.of(), firstPrompt.currentQuery());
+        assertFalse(firstRequest
+                .promptCacheKey()
+                .equals(requestFactory
+                        .prepareStreamingRequest(LlmGatewayTier.Purpose.CHAT_ANSWER, changedSystem, 0.4)
+                        .responseParams()
+                        .promptCacheKey()));
     }
 
     @Test
@@ -251,8 +317,8 @@ class OpenAiRequestFactoryTest {
         OpenAiRequestFactory requestFactory = new OpenAiRequestFactory(
                 new Chunker(), new PromptTruncator(), ModelConfiguration.DEFAULT_MODEL, appProperties(""));
 
-        ResponseCreateParams responseCreateParams =
-                requestFactory.buildJsonCompletionRequest("Rank these documents", 0.0, 128);
+        ResponseCreateParams responseCreateParams = requestFactory.buildJsonCompletionRequest(
+                new CompletionPrompt("Stable task instructions", "Rank these documents"), 0.0, 128);
 
         assertTrue(
                 responseCreateParams.text().orElseThrow().format().orElseThrow().isJsonObject());

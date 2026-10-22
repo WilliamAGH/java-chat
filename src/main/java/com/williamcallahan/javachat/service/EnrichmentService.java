@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.cfg.CoercionAction;
 import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
 import com.fasterxml.jackson.databind.type.LogicalType;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.domain.prompt.CompletionPrompt;
 import com.williamcallahan.javachat.model.Enrichment;
 import java.util.List;
 import org.slf4j.Logger;
@@ -48,25 +49,29 @@ public class EnrichmentService {
     @Cacheable("enrichment-cache")
     public Enrichment enrich(String userQuery, String jdkVersion, List<String> contextSnippets) {
         logger.debug("EnrichmentService.enrich called");
-        StringBuilder prompt = new StringBuilder();
-        // Add base system context for consistency
-        prompt.append("You are operating as part of the Java learning assistant system.\n");
-        prompt.append("Extract enrichment metadata to enhance learning from the provided context.\n\n");
-        prompt.append("User query: ").append(userQuery).append("\n\n");
-        prompt.append("Context snippets from Java documentation:\n");
-        for (int snippetIndex = 0; snippetIndex < contextSnippets.size(); snippetIndex++) {
-            prompt.append("- ").append(contextSnippets.get(snippetIndex)).append("\n");
+        String instructions = """
+                You are operating as part of the Java learning assistant system.
+                Extract enrichment metadata to enhance learning from the provided context.
+                Respond as JSON with these fields:
+                - hints[]: Practical tips and best practices (2-3 items max)
+                - reminders[]: Critical things to remember (2-3 items max)
+                - background[]: Conceptual explanations for deeper understanding (2-3 items max)
+                - packageName: The main Java package being discussed
+                - jdkVersion: The requested JDK version unless docs indicate otherwise
+                - resource: Primary documentation source
+                - resourceVersion: Version of the resource
+                Make each item concise but informative. Focus on learning value.
+                Use your knowledge of Java best practices and common pitfalls.
+                """;
+        StringBuilder promptInput = new StringBuilder("Requested JDK version: ")
+                .append(jdkVersion)
+                .append("\nUser query: ")
+                .append(userQuery)
+                .append("\n\nContext snippets from Java documentation:\n");
+        for (String contextSnippet : contextSnippets) {
+            promptInput.append("- ").append(contextSnippet).append("\n");
         }
-        prompt.append("\nRespond as JSON with these fields:\n");
-        prompt.append("- hints[]: Practical tips and best practices (2-3 items max)\n");
-        prompt.append("- reminders[]: Critical things to remember (2-3 items max)\n");
-        prompt.append("- background[]: Conceptual explanations for deeper understanding (2-3 items max)\n");
-        prompt.append("- packageName: The main Java package being discussed\n");
-        prompt.append("- jdkVersion: '").append(jdkVersion).append("' unless docs indicate otherwise\n");
-        prompt.append("- resource: Primary documentation source\n");
-        prompt.append("- resourceVersion: Version of the resource\n");
-        prompt.append("\nMake each item concise but informative. Focus on learning value.\n");
-        prompt.append("Use your knowledge of Java best practices and common pitfalls.\n");
+        CompletionPrompt prompt = new CompletionPrompt(instructions, promptInput.toString());
 
         if (openAIStreamingService == null || !openAIStreamingService.isAvailable()) {
             throw new IllegalStateException("OpenAIStreamingService unavailable for enrichment");
@@ -75,7 +80,7 @@ public class EnrichmentService {
         String enrichmentJson = openAIStreamingService
                 .completeJsonObject(
                         LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT,
-                        prompt.toString(),
+                        prompt,
                         enrichmentTemperature,
                         enrichmentOutputTokenBudget)
                 .block();

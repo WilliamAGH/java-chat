@@ -6,8 +6,11 @@ import com.openai.core.RequestOptions;
 import com.openai.core.Timeout;
 import com.openai.core.http.AsyncStreamResponse;
 import com.openai.models.responses.Response;
+import com.openai.models.responses.ResponseCompletedEvent;
 import com.openai.models.responses.ResponseCreateParams;
 import com.openai.models.responses.ResponseError;
+import com.openai.models.responses.ResponseFailedEvent;
+import com.openai.models.responses.ResponseIncompleteEvent;
 import com.openai.models.responses.ResponseOutputItem;
 import com.openai.models.responses.ResponseOutputMessage;
 import com.openai.models.responses.ResponseOutputText;
@@ -17,10 +20,12 @@ import com.openai.models.responses.ResponseTextDeltaEvent;
 import com.williamcallahan.javachat.application.completion.CompletionRequestConfiguration;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter;
+import com.williamcallahan.javachat.domain.prompt.CompletionPrompt;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.domain.text.UnicodeVisibleContent;
 import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
@@ -50,7 +55,7 @@ public class OpenAIStreamingService {
     private OpenAIClient openAiClient;
 
     private volatile boolean isAvailable;
-    private final RateLimitService rateLimitService;
+    private final MeterRegistry meterRegistry;
     private final OpenAiRequestFactory requestFactory;
     private final OpenAiProviderRoutingService providerRoutingService;
     private final StreamingFailureReporter streamingFailureReporter;
@@ -70,11 +75,11 @@ public class OpenAIStreamingService {
 
     /** Keeps provider admission, request construction, and failure reporting independently owned. */
     public OpenAIStreamingService(
-            RateLimitService rateLimitService,
+            MeterRegistry meterRegistry,
             OpenAiRequestFactory requestFactory,
             OpenAiProviderRoutingService providerRoutingService,
             StreamingFailureReporter streamingFailureReporter) {
-        this.rateLimitService = rateLimitService;
+        this.meterRegistry = meterRegistry;
         this.requestFactory = requestFactory;
         this.providerRoutingService = providerRoutingService;
         this.streamingFailureReporter = streamingFailureReporter;
@@ -126,7 +131,7 @@ public class OpenAIStreamingService {
 
                     RateLimitService.ApiProvider configuredProvider = providerRoutingService.configuredProvider();
                     OpenAiPreparedRequest preparedStreamingRequest =
-                            requestFactory.prepareStreamingRequest(structuredPrompt, temperature);
+                            requestFactory.prepareStreamingRequest(purpose, structuredPrompt, temperature);
                     Flux<String> responseTextChunks = executeStreamingWithConfiguredProvider(
                             preparedStreamingRequest, configuredProvider, purpose);
                     List<String> contextDocumentIds =
@@ -140,19 +145,23 @@ public class OpenAIStreamingService {
 
     /** Uses the configured output budget for a non-streaming text completion. */
     public Mono<String> complete(LlmGatewayTier.Purpose purpose, String prompt, double temperature) {
-        return executeCompletion(purpose, prompt, temperature, CompletionRequestConfiguration.defaultText());
+        return executeCompletion(
+                purpose, new CompletionPrompt("", prompt), temperature, CompletionRequestConfiguration.defaultText());
     }
 
     /** Preserves the caller's output budget for a non-streaming text completion. */
     public Mono<String> complete(
             LlmGatewayTier.Purpose purpose, String prompt, double temperature, int maximumOutputTokens) {
         return Mono.defer(() -> executeCompletion(
-                purpose, prompt, temperature, CompletionRequestConfiguration.boundedText(maximumOutputTokens)));
+                purpose,
+                new CompletionPrompt("", prompt),
+                temperature,
+                CompletionRequestConfiguration.boundedText(maximumOutputTokens)));
     }
 
     /** Requires a JSON object within the caller's output budget and the default request timeout. */
     public Mono<String> completeJsonObject(
-            LlmGatewayTier.Purpose purpose, String prompt, double temperature, int maximumOutputTokens) {
+            LlmGatewayTier.Purpose purpose, CompletionPrompt prompt, double temperature, int maximumOutputTokens) {
         return completeJsonObject(
                 purpose,
                 prompt,
@@ -164,7 +173,7 @@ public class OpenAIStreamingService {
     /** Requires a JSON object within both the caller's output budget and whole-request timeout. */
     public Mono<String> completeJsonObject(
             LlmGatewayTier.Purpose purpose,
-            String prompt,
+            CompletionPrompt prompt,
             double temperature,
             int maximumOutputTokens,
             Duration requestTimeout) {
@@ -177,7 +186,7 @@ public class OpenAIStreamingService {
 
     private Mono<String> executeCompletion(
             LlmGatewayTier.Purpose purpose,
-            String prompt,
+            CompletionPrompt prompt,
             double temperature,
             CompletionRequestConfiguration configuration) {
         java.util.Objects.requireNonNull(purpose, "purpose");
@@ -185,6 +194,7 @@ public class OpenAIStreamingService {
             RateLimitService.ApiProvider configuredProvider = providerRoutingService.configuredProvider();
             ResponseCreateParams requestParameters =
                     buildCompletionRequest(prompt, temperature, configuration).toBuilder()
+                            .promptCacheKey(requestFactory.promptCacheKey(purpose, prompt.instructions()))
                             .putAdditionalHeader(
                                     LlmGatewayTier.REQUEST_WORKLOAD_HEADER,
                                     workloadTier().workloadHeader(purpose))
@@ -202,7 +212,10 @@ public class OpenAIStreamingService {
                     .async()
                     .responses()
                     .create(requestParameters, requestOptions)
-                    .thenApply(this::extractTextFromCompletedResponse);
+                    .thenApply(providerResponse -> {
+                        recordUsage(providerResponse, purpose);
+                        return extractTextFromCompletedResponse(providerResponse);
+                    });
             CompletableFuture<String> accountedCompletionFuture =
                     completionFuture.whenComplete((completionText, completionFailure) -> {
                         if (completionFailure == null) {
@@ -222,16 +235,16 @@ public class OpenAIStreamingService {
     }
 
     private ResponseCreateParams buildCompletionRequest(
-            String prompt, double temperature, CompletionRequestConfiguration configuration) {
+            CompletionPrompt prompt, double temperature, CompletionRequestConfiguration configuration) {
         if (configuration.requireJsonObject()) {
             return requestFactory.buildJsonCompletionRequest(
                     prompt, temperature, configuration.maximumOutputTokens().orElseThrow());
         }
         if (configuration.maximumOutputTokens().isEmpty()) {
-            return requestFactory.buildCompletionRequest(prompt, temperature);
+            return requestFactory.buildCompletionRequest(prompt.input(), temperature);
         }
         return requestFactory.buildCompletionRequest(
-                prompt, temperature, configuration.maximumOutputTokens().orElseThrow());
+                prompt.input(), temperature, configuration.maximumOutputTokens().orElseThrow());
     }
 
     /** Classifies the upstream failure even when the reporting boundary has wrapped it. */
@@ -261,7 +274,8 @@ public class OpenAIStreamingService {
                                             LlmGatewayTier.REQUEST_WORKLOAD_HEADER,
                                             workloadTier().workloadHeader(purpose))
                                     .build(),
-                            configuredProvider)
+                            configuredProvider,
+                            purpose)
                     .doOnNext(textChunk -> {
                         if (UnicodeVisibleContent.hasVisibleContent(textChunk)) {
                             emittedVisibleText.set(true);
@@ -281,7 +295,10 @@ public class OpenAIStreamingService {
     }
 
     private Flux<String> executeStreamingRequest(
-            OpenAIClient client, ResponseCreateParams requestParameters, RateLimitService.ApiProvider activeProvider) {
+            OpenAIClient client,
+            ResponseCreateParams requestParameters,
+            RateLimitService.ApiProvider activeProvider,
+            LlmGatewayTier.Purpose purpose) {
         RequestOptions requestOptions = RequestOptions.builder()
                 .timeout(Timeout.builder().request(streamingRequestTimeout()).build())
                 .build();
@@ -289,11 +306,22 @@ public class OpenAIStreamingService {
         return Flux.defer(() -> {
             AtomicBoolean emittedVisibleText = new AtomicBoolean(false);
             AtomicBoolean observedCompletedEvent = new AtomicBoolean(false);
+            AtomicBoolean recordedTerminalUsage = new AtomicBoolean(false);
             Flux<String> responseTextChunks = asyncResponseEvents(client, requestParameters, requestOptions)
                     .concatMap(responseStreamEvent -> {
                         if (responseStreamEvent.completed().isPresent()) {
                             observedCompletedEvent.set(true);
                         }
+                        responseStreamEvent
+                                .completed()
+                                .map(ResponseCompletedEvent::response)
+                                .or(() -> responseStreamEvent.failed().map(ResponseFailedEvent::response))
+                                .or(() -> responseStreamEvent.incomplete().map(ResponseIncompleteEvent::response))
+                                .ifPresent(terminalResponse -> {
+                                    if (recordedTerminalUsage.compareAndSet(false, true)) {
+                                        recordUsage(terminalResponse, purpose);
+                                    }
+                                });
                         return extractTextOrTerminalFailure(responseStreamEvent);
                     });
             return enforceVisibleOutputDeadline(responseTextChunks)
@@ -467,6 +495,29 @@ public class OpenAIStreamingService {
                 .outputTextDelta()
                 .map(ResponseTextDeltaEvent::delta)
                 .or(() -> responseStreamEvent.refusalDelta().map(refusalDeltaEvent -> refusalDeltaEvent.delta())));
+    }
+
+    private void recordUsage(Response providerResponse, LlmGatewayTier.Purpose purpose) {
+        if (providerResponse == null) {
+            return;
+        }
+        // Gateways may omit usage detail fields; the SDK's required accessors would throw and fail
+        // a completed call, so only reported counts are recorded.
+        providerResponse.usage().ifPresent(usage -> {
+            String workload = purpose.name();
+            usage._inputTokens().asKnown().ifPresent(count -> countTokens(workload, "input", count));
+            usage._inputTokensDetails().asKnown().ifPresent(details -> {
+                details._cachedTokens().asKnown().ifPresent(count -> countTokens(workload, "cached_input", count));
+                details._cacheWriteTokens().asKnown().ifPresent(count -> countTokens(workload, "cache_write", count));
+            });
+            usage._outputTokens().asKnown().ifPresent(count -> countTokens(workload, "output", count));
+        });
+    }
+
+    private void countTokens(String workload, String tokenType, long count) {
+        meterRegistry
+                .counter("llm.tokens", "purpose", workload, "type", tokenType)
+                .increment(count);
     }
 
     private String extractTextFromCompletedResponse(Response providerResponse) {

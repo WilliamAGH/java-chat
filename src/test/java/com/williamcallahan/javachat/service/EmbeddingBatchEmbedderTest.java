@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -277,6 +278,41 @@ class EmbeddingBatchEmbedderTest {
 
         assertEquals(1, embeddingVectors.size());
         assertEquals(EmbeddingBatchEmbedder.MAX_EMBEDDING_ATTEMPTS, providerAttempts.get());
+    }
+
+    @Test
+    void localCooldownRejectionsDoNotExhaustProviderAttempts() {
+        AtomicInteger admissionCount = new AtomicInteger();
+        RecordingEmbeddingClient embeddingClient =
+                new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
+                    if (admissionCount.incrementAndGet() <= EmbeddingBatchEmbedder.MAX_EMBEDDING_ATTEMPTS) {
+                        throw new OpenAiCompatibleEmbeddingClient.EmbeddingProviderCooldownRejectionException(
+                                "A sibling request established the provider cooldown", Duration.ofMillis(10));
+                    }
+                    return repeatedEmbeddings(textBatch.size(), EMBEDDING_VECTOR);
+                });
+
+        List<float[]> embeddingVectors = EmbeddingBatchEmbedder.embedDocuments(
+                LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING, embeddingClient, sequentialDocuments(1));
+
+        assertArrayEquals(EMBEDDING_VECTOR, embeddingVectors.getFirst());
+        assertEquals(EmbeddingBatchEmbedder.MAX_EMBEDDING_ATTEMPTS + 1, admissionCount.get());
+    }
+
+    @Test
+    void providerCooldownBeyondOverallDeadlineFailsWithoutAnotherAttempt() {
+        RecordingEmbeddingClient embeddingClient =
+                new RecordingEmbeddingClient(EMBEDDING_DIMENSIONS, (requestIndex, textBatch) -> {
+                    throw new EmbeddingServiceTemporarilyUnavailableException(
+                            "Retry-After exceeds this batch's budget", null, Duration.ofHours(1));
+                });
+
+        assertThrows(
+                EmbeddingServiceUnavailableException.class,
+                () -> EmbeddingBatchEmbedder.embedDocuments(
+                        LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING, embeddingClient, sequentialDocuments(1)));
+
+        assertEquals(1, embeddingClient.requestedTextBatches.size());
     }
 
     @Test

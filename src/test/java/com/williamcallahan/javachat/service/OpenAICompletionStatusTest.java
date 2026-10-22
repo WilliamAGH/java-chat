@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -13,6 +15,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.openai.client.OpenAIClient;
 import com.openai.client.OpenAIClientAsync;
 import com.openai.core.RequestOptions;
@@ -30,7 +33,9 @@ import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailu
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ModelConfiguration;
+import com.williamcallahan.javachat.domain.prompt.CompletionPrompt;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -55,13 +60,22 @@ class OpenAICompletionStatusTest {
 
     @ParameterizedTest
     @CsvSource({
-        "production-z,MARKDOWN_ENRICHMENT,false",
-        "production-a,SEARCH_RERANK,false",
-        "batch,MARKDOWN_ENRICHMENT,false",
-        "production-z,CHAT_ANSWER,true",
-        "production-z,GUIDED_LEARNING,true"
+        "production-z,MARKDOWN_ENRICHMENT,false,true,true",
+        "production-a,SEARCH_RERANK,false,true,true",
+        "batch,MARKDOWN_ENRICHMENT,false,true,true",
+        "production-z,CHAT_ANSWER,true,true,true",
+        "production-z,GUIDED_LEARNING,true,true,true",
+        "production-z,CHAT_ANSWER,true,true,false",
+        "production-z,MARKDOWN_ENRICHMENT,false,true,false",
+        "production-z,CHAT_ANSWER,true,false,false",
+        "production-z,MARKDOWN_ENRICHMENT,false,false,false"
     })
-    void completionSendsMatchingWorkloadTier(String requestTier, LlmGatewayTier.Purpose purpose, boolean streaming)
+    void completionSendsMatchingWorkloadTier(
+            String requestTier,
+            LlmGatewayTier.Purpose purpose,
+            boolean streaming,
+            boolean includeUsage,
+            boolean includeTokenDetails)
             throws IOException {
         AtomicReference<CapturedCompletionRequest> capturedRequest = new AtomicReference<>();
         HttpServer gatewayServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -74,10 +88,23 @@ class OpenAICompletionStatusTest {
             byte[] responseBody = """
                     {"id":"resp_wire","object":"response","created_at":0,
                      "model":"wire-test-model","status":"completed",
+                     "usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":40,"cache_write_tokens":20},
+                      "output_tokens":7,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":107},
                      "output":[{"id":"msg_wire","type":"message","role":"assistant",
                       "status":"completed","content":[{"type":"output_text",
                       "text":"{\\"ok\\":true}","annotations":[]}]}]}
                     """.getBytes(StandardCharsets.UTF_8);
+            ObjectNode providerCompletion = new ObjectMapper().readValue(responseBody, ObjectNode.class);
+            if (!includeUsage) {
+                providerCompletion.remove("usage");
+            } else if (!includeTokenDetails) {
+                // A gateway may omit input_tokens_details; the call must still complete.
+                ObjectNode tokenUsage =
+                        new ObjectMapper().convertValue(providerCompletion.path("usage"), ObjectNode.class);
+                tokenUsage.remove("input_tokens_details");
+                providerCompletion.set("usage", tokenUsage);
+            }
+            responseBody = new ObjectMapper().writeValueAsBytes(providerCompletion);
             if (streaming) {
                 String completedResponse =
                         new ObjectMapper().readTree(responseBody).toString();
@@ -97,7 +124,8 @@ class OpenAICompletionStatusTest {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
-        OpenAIStreamingService streamingService = configuredStreamingService(rateLimitService);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        OpenAIStreamingService streamingService = configuredStreamingService(rateLimitService, meterRegistry);
         ReflectionTestUtils.setField(streamingService, "openaiApiKey", "wire-test-api-key");
         ReflectionTestUtils.setField(streamingService, "openaiBaseUrl", "https://api.llm-gateway.iocloudhost.net/v1");
         ReflectionTestUtils.setField(streamingService, "llmGatewayTier", requestTier);
@@ -125,7 +153,12 @@ class OpenAICompletionStatusTest {
                 assertEquals(
                         "{\"ok\":true}",
                         streamingService
-                                .completeJsonObject(purpose, "Return a JSON object with ok true", 0.0, 512)
+                                .completeJsonObject(
+                                        purpose,
+                                        new CompletionPrompt(
+                                                "Stable task instructions", "Return a JSON object with ok true"),
+                                        0.0,
+                                        512)
                                 .block(Duration.ofSeconds(10)));
             }
         } finally {
@@ -138,6 +171,51 @@ class OpenAICompletionStatusTest {
         assertEquals(
                 (requestTier.equals("batch") ? LlmGatewayTier.BATCH : LlmGatewayTier.LIVE).workloadHeader(purpose),
                 gatewayRequest.workloadHeader());
+        assertFalse(
+                gatewayRequest.requestBody().path("prompt_cache_key").asText().isBlank());
+        if (includeUsage) {
+            assertEquals(
+                    100,
+                    meterRegistry
+                            .get("llm.tokens")
+                            .tags("purpose", purpose.name(), "type", "input")
+                            .counter()
+                            .count());
+            if (includeTokenDetails) {
+                assertEquals(
+                        40,
+                        meterRegistry
+                                .get("llm.tokens")
+                                .tags("purpose", purpose.name(), "type", "cached_input")
+                                .counter()
+                                .count());
+                assertEquals(
+                        20,
+                        meterRegistry
+                                .get("llm.tokens")
+                                .tags("purpose", purpose.name(), "type", "cache_write")
+                                .counter()
+                                .count());
+            } else {
+                assertNull(meterRegistry
+                        .find("llm.tokens")
+                        .tags("purpose", purpose.name(), "type", "cached_input")
+                        .counter());
+                assertNull(meterRegistry
+                        .find("llm.tokens")
+                        .tags("purpose", purpose.name(), "type", "cache_write")
+                        .counter());
+            }
+            assertEquals(
+                    7,
+                    meterRegistry
+                            .get("llm.tokens")
+                            .tags("purpose", purpose.name(), "type", "output")
+                            .counter()
+                            .count());
+        } else {
+            assertTrue(meterRegistry.getMeters().isEmpty());
+        }
         if (!streaming) {
             assertEquals(
                     512, gatewayRequest.requestBody().path("max_output_tokens").asInt());
@@ -382,8 +460,13 @@ class OpenAICompletionStatusTest {
     }
 
     private static OpenAIStreamingService configuredStreamingService(RateLimitService rateLimitService) {
+        return configuredStreamingService(rateLimitService, new SimpleMeterRegistry());
+    }
+
+    private static OpenAIStreamingService configuredStreamingService(
+            RateLimitService rateLimitService, SimpleMeterRegistry meterRegistry) {
         return new OpenAIStreamingService(
-                rateLimitService,
+                meterRegistry,
                 testRequestFactory(),
                 new OpenAiProviderRoutingService(rateLimitService, configuredLlmProperties()),
                 new OpenAiStreamingFailureReporter());

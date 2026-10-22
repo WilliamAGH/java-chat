@@ -4,22 +4,26 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.domain.prompt.CompletionPrompt;
 import com.williamcallahan.javachat.model.Enrichment;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
@@ -52,7 +56,10 @@ class EnrichmentServiceTest {
     @Test
     void enrichUsesJsonObjectCompletionBoundary() {
         when(openAIStreamingService.completeJsonObject(
-                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble(), anyInt()))
+                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT),
+                        any(CompletionPrompt.class),
+                        anyDouble(),
+                        anyInt()))
                 .thenReturn(Mono.just("{\"hints\":[\"Use List.copyOf for an unmodifiable snapshot.\"]}"));
 
         Enrichment enrichment =
@@ -61,15 +68,46 @@ class EnrichmentServiceTest {
         assertEquals(ENRICHMENT_JDK_VERSION, enrichment.getJdkVersion());
         assertEquals(List.of("Use List.copyOf for an unmodifiable snapshot."), enrichment.getHints());
         verify(openAIStreamingService)
-                .completeJsonObject(eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble(), anyInt());
+                .completeJsonObject(
+                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT),
+                        any(CompletionPrompt.class),
+                        anyDouble(),
+                        anyInt());
         verify(openAIStreamingService, never())
                 .complete(eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble());
     }
 
     @Test
+    void enrichmentKeepsReusableInstructionsIndependentOfCurrentQueryVersionAndSnippets() {
+        when(openAIStreamingService.completeJsonObject(
+                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT),
+                        any(CompletionPrompt.class),
+                        anyDouble(),
+                        anyInt()))
+                .thenReturn(Mono.just("{}"));
+
+        enrichmentService.enrich("Explain records", "21", List.of("Record reference"));
+        enrichmentService.enrich("Explain sealed classes", "25", List.of("Sealed class reference"));
+
+        ArgumentCaptor<CompletionPrompt> prompts = ArgumentCaptor.forClass(CompletionPrompt.class);
+        verify(openAIStreamingService, times(2))
+                .completeJsonObject(
+                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), prompts.capture(), anyDouble(), anyInt());
+        assertEquals(
+                prompts.getAllValues().get(0).instructions(),
+                prompts.getAllValues().get(1).instructions());
+        assertTrue(prompts.getAllValues().get(0).input().contains("Requested JDK version: 21"));
+        assertTrue(prompts.getAllValues().get(1).input().contains("Requested JDK version: 25"));
+        assertTrue(prompts.getAllValues().get(1).input().contains("Sealed class reference"));
+    }
+
+    @Test
     void enrichRejectsUnexpectedPreambleWithBraces() {
         when(openAIStreamingService.completeJsonObject(
-                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble(), anyInt()))
+                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT),
+                        any(CompletionPrompt.class),
+                        anyDouble(),
+                        anyInt()))
                 .thenReturn(Mono.just("Here is the JSON (see {docs} for details):\n{\"hints\":[\"tip\"]}"));
 
         IllegalStateException jsonContractFailure = assertThrows(
@@ -84,7 +122,10 @@ class EnrichmentServiceTest {
     @Test
     void enrichRejectsMalformedJsonObject() {
         when(openAIStreamingService.completeJsonObject(
-                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble(), anyInt()))
+                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT),
+                        any(CompletionPrompt.class),
+                        anyDouble(),
+                        anyInt()))
                 .thenReturn(Mono.just("{\"hints\":["));
 
         IllegalStateException jsonContractFailure = assertThrows(
@@ -99,7 +140,10 @@ class EnrichmentServiceTest {
     @Test
     void enrichRejectsUnknownResponseFields() {
         when(openAIStreamingService.completeJsonObject(
-                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble(), anyInt()))
+                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT),
+                        any(CompletionPrompt.class),
+                        anyDouble(),
+                        anyInt()))
                 .thenReturn(Mono.just("{\"hint\":[\"Use the documented API.\"]}"));
 
         IllegalStateException jsonContractFailure = assertThrows(
@@ -114,7 +158,10 @@ class EnrichmentServiceTest {
     @Test
     void enrichRejectsDuplicateResponseFields() {
         when(openAIStreamingService.completeJsonObject(
-                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble(), anyInt()))
+                        eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT),
+                        any(CompletionPrompt.class),
+                        anyDouble(),
+                        anyInt()))
                 .thenReturn(Mono.just("{\"hints\":[\"first\"],\"hints\":[\"second\"]}"));
 
         IllegalStateException jsonContractFailure = assertThrows(
@@ -136,7 +183,10 @@ class EnrichmentServiceTest {
 
         for (String invalidEnrichmentJson : invalidEnrichmentJsonValues) {
             when(openAIStreamingService.completeJsonObject(
-                            eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT), anyString(), anyDouble(), anyInt()))
+                            eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT),
+                            any(CompletionPrompt.class),
+                            anyDouble(),
+                            anyInt()))
                     .thenReturn(Mono.just(invalidEnrichmentJson));
 
             IllegalStateException jsonContractFailure = assertThrows(

@@ -23,6 +23,7 @@ final class EmbeddingBatchEmbedder {
     static final int MAX_CONCURRENT_EMBEDDING_REQUESTS = 8;
     static final int MAX_EMBEDDING_ATTEMPTS = 3;
     private static final Duration EMBEDDING_RETRY_BASE_DELAY = Duration.ofSeconds(5);
+    private static final Duration EMBEDDING_BATCH_RETRY_TIMEOUT = Duration.ofMinutes(10);
 
     private EmbeddingBatchEmbedder() {}
 
@@ -158,23 +159,42 @@ final class EmbeddingBatchEmbedder {
 
     private static List<float[]> embedWithRetry(
             LlmGatewayTier.Purpose purpose, EmbeddingClient embeddingClient, List<String> textBatch) {
-        for (int embeddingAttempt = 1; embeddingAttempt <= MAX_EMBEDDING_ATTEMPTS; embeddingAttempt++) {
+        long retryDeadlineNanos = System.nanoTime() + EMBEDDING_BATCH_RETRY_TIMEOUT.toNanos();
+        int providerAttemptCount = 0;
+        while (providerAttemptCount < MAX_EMBEDDING_ATTEMPTS) {
+            Duration remainingBudget = Duration.ofNanos(Math.max(0, retryDeadlineNanos - System.nanoTime()));
+            if (remainingBudget.isZero()) {
+                throw new EmbeddingServiceTemporarilyUnavailableException("Embedding batch retry deadline elapsed");
+            }
             try {
-                return embeddingClient.embed(purpose, textBatch, LlmGatewayTier.BATCH);
+                return embeddingClient.embed(purpose, textBatch, LlmGatewayTier.BATCH, remainingBudget);
             } catch (EmbeddingServiceTemporarilyUnavailableException temporaryFailure) {
-                if (embeddingAttempt == MAX_EMBEDDING_ATTEMPTS) {
+                if (temporaryFailure.providerContacted()) {
+                    providerAttemptCount++;
+                }
+                if (providerAttemptCount == MAX_EMBEDDING_ATTEMPTS) {
                     throw temporaryFailure;
                 }
-                awaitRetryDelay(embeddingAttempt, temporaryFailure);
+                Duration retryDelay = temporaryFailure.retryDelay();
+                Duration backoff = temporaryFailure.providerContacted()
+                        ? EMBEDDING_RETRY_BASE_DELAY.multipliedBy(providerAttemptCount)
+                        : Duration.ZERO;
+                if (backoff.compareTo(retryDelay) > 0) {
+                    retryDelay = backoff;
+                }
+                if (retryDelay.toNanos() >= retryDeadlineNanos - System.nanoTime()) {
+                    throw temporaryFailure;
+                }
+                awaitRetryDelay(retryDelay, temporaryFailure);
             }
         }
         throw new IllegalStateException("Embedding retry loop exhausted without a terminal outcome");
     }
 
     private static void awaitRetryDelay(
-            int completedAttemptCount, EmbeddingServiceTemporarilyUnavailableException temporaryFailure) {
+            Duration retryDelay, EmbeddingServiceTemporarilyUnavailableException temporaryFailure) {
         try {
-            Thread.sleep(EMBEDDING_RETRY_BASE_DELAY.multipliedBy(completedAttemptCount));
+            Thread.sleep(retryDelay);
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
             EmbeddingServiceTemporarilyUnavailableException interruptionFailure =

@@ -12,14 +12,17 @@ import com.openai.models.responses.ResponseTextConfig;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ModelConfiguration;
+import com.williamcallahan.javachat.domain.prompt.CompletionPrompt;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -80,11 +83,13 @@ public final class OpenAiRequestFactory {
     /**
      * Builds a streaming request payload and returns the resolved model identifier.
      *
+     * @param purpose application operation whose stable prefix owns cache affinity
      * @param structuredPrompt typed prompt segments to stream
      * @param temperature response temperature
      * @return request parameters with resolved model id
      */
-    public OpenAiPreparedRequest prepareStreamingRequest(StructuredPrompt structuredPrompt, double temperature) {
+    public OpenAiPreparedRequest prepareStreamingRequest(
+            LlmGatewayTier.Purpose purpose, StructuredPrompt structuredPrompt, double temperature) {
         String modelId = configuredModelId();
 
         PromptTruncator.TruncatedPrompt truncatedPrompt =
@@ -100,6 +105,8 @@ public final class OpenAiRequestFactory {
         List<ResponseInputItem> responseInputItems = buildResponseInputItems(truncatedPrompt);
         ResponseCreateParams responseParams = buildResponseParams(responseInputItems, temperature, modelId).toBuilder()
                 .instructions(truncatedPrompt.prompt().system().content())
+                .promptCacheKey(promptCacheKey(
+                        purpose, truncatedPrompt.prompt().system().content()))
                 .build();
         return new OpenAiPreparedRequest(responseParams, modelId, truncatedPrompt.prompt());
     }
@@ -114,16 +121,20 @@ public final class OpenAiRequestFactory {
     private static List<ResponseInputItem> buildResponseInputItems(PromptTruncator.TruncatedPrompt truncatedPrompt) {
         StructuredPrompt prompt = truncatedPrompt.prompt();
         List<ResponseInputItem> responseInputItems = new ArrayList<>();
+        for (ConversationTurnSegment conversationTurn : prompt.conversationHistory()) {
+            EasyInputMessage.Role role =
+                    conversationTurn.isAssistantTurn() ? EasyInputMessage.Role.ASSISTANT : EasyInputMessage.Role.USER;
+            responseInputItems.add(textInputItem(role, conversationTurn.messageText()));
+        }
+        if (!prompt.turnGuidance().content().isBlank()) {
+            responseInputItems.add(textInputItem(
+                    EasyInputMessage.Role.DEVELOPER, prompt.turnGuidance().content()));
+        }
         if (truncatedPrompt.wasTruncated()) {
             responseInputItems.add(textInputItem(EasyInputMessage.Role.DEVELOPER, TRUNCATION_NOTICE_GENERIC.strip()));
         }
         for (ContextDocumentSegment contextDocument : prompt.contextDocuments()) {
             responseInputItems.add(textInputItem(EasyInputMessage.Role.USER, contextDocument.content()));
-        }
-        for (ConversationTurnSegment conversationTurn : prompt.conversationHistory()) {
-            EasyInputMessage.Role role =
-                    conversationTurn.isAssistantTurn() ? EasyInputMessage.Role.ASSISTANT : EasyInputMessage.Role.USER;
-            responseInputItems.add(textInputItem(role, conversationTurn.messageText()));
         }
         responseInputItems.add(
                 textInputItem(EasyInputMessage.Role.USER, prompt.currentQuery().queryText()));
@@ -170,26 +181,32 @@ public final class OpenAiRequestFactory {
      * @param maximumOutputTokens maximum output tokens needed by this caller
      * @return request payload with a declared JSON-object output contract
      */
-    public ResponseCreateParams buildJsonCompletionRequest(String prompt, double temperature, int maximumOutputTokens) {
+    public ResponseCreateParams buildJsonCompletionRequest(
+            CompletionPrompt prompt, double temperature, int maximumOutputTokens) {
         if (maximumOutputTokens <= 0) {
             throw new IllegalArgumentException("maximumOutputTokens must be positive");
         }
-        return buildCompletionRequest(prompt, temperature, Integer.valueOf(maximumOutputTokens), true);
+        int availableInputTokens = Math.max(0, promptContentTokenBudget - chunker.countTokens(prompt.instructions()));
+        String truncatedInput = truncatePromptForCompletion(prompt.input(), availableInputTokens);
+        return buildResponseParams(truncatedInput, temperature, configuredModelId(), maximumOutputTokens, true)
+                .toBuilder()
+                .instructions(prompt.instructions())
+                .build();
     }
 
     private ResponseCreateParams buildCompletionRequest(
             String prompt, double temperature, Integer maximumOutputTokens, boolean requireJsonObject) {
         String modelId = configuredModelId();
-        String truncatedPrompt = truncatePromptForCompletion(prompt);
+        String truncatedPrompt = truncatePromptForCompletion(prompt, promptContentTokenBudget);
         return buildResponseParams(truncatedPrompt, temperature, modelId, maximumOutputTokens, requireJsonObject);
     }
 
-    private String truncatePromptForCompletion(String prompt) {
+    private String truncatePromptForCompletion(String prompt, int inputTokenBudget) {
         if (prompt == null || prompt.isEmpty()) {
             return prompt;
         }
 
-        String truncatedPrompt = chunker.keepLastTokens(prompt, promptContentTokenBudget);
+        String truncatedPrompt = chunker.keepLastTokens(prompt, inputTokenBudget);
 
         if (truncatedPrompt.length() < prompt.length()) {
             return TRUNCATION_NOTICE_GENERIC + truncatedPrompt;
@@ -246,6 +263,12 @@ public final class OpenAiRequestFactory {
         }
 
         return builder.build();
+    }
+
+    /** Derives routing affinity from the operation and reusable prefix, excluding current input. */
+    String promptCacheKey(LlmGatewayTier.Purpose purpose, String stableInstructions) {
+        String prefixIdentity = purpose.name() + "\n" + openaiModel + "\n" + stableInstructions;
+        return "java-chat:" + UUID.nameUUIDFromBytes(prefixIdentity.getBytes(StandardCharsets.UTF_8));
     }
 
     String configuredModelId() {

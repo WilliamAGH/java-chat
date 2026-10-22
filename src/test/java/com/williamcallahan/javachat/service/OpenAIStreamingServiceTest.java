@@ -38,10 +38,12 @@ import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailu
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.domain.prompt.CompletionPrompt;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.CurrentQuerySegment;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.domain.prompt.SystemSegment;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -81,7 +83,10 @@ class OpenAIStreamingServiceTest {
         OpenAiRequestFactory requestFactory = testRequestFactory();
         OpenAiProviderRoutingService providerRoutingService = configuredProviderRoutingService(rateLimitService);
         return new OpenAIStreamingService(
-                rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
+                new SimpleMeterRegistry(),
+                requestFactory,
+                providerRoutingService,
+                new OpenAiStreamingFailureReporter());
     }
 
     @Test
@@ -131,7 +136,10 @@ class OpenAIStreamingServiceTest {
         OpenAiRequestFactory requestFactory = testRequestFactory();
         OpenAiProviderRoutingService providerRoutingService = configuredProviderRoutingService(rateLimitService);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
+                new SimpleMeterRegistry(),
+                requestFactory,
+                providerRoutingService,
+                new OpenAiStreamingFailureReporter());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         ResponseServiceAsync responseService = mockAsyncResponseService(openAiClient);
         StreamResponse<ResponseStreamEvent> providerStream = mock();
@@ -485,7 +493,10 @@ class OpenAIStreamingServiceTest {
         OpenAiRequestFactory requestFactory = testRequestFactory();
         OpenAiProviderRoutingService providerRoutingService = configuredProviderRoutingService(rateLimitService);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
+                new SimpleMeterRegistry(),
+                requestFactory,
+                providerRoutingService,
+                new OpenAiStreamingFailureReporter());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
@@ -517,7 +528,10 @@ class OpenAIStreamingServiceTest {
         OpenAiRequestFactory requestFactory = testRequestFactory();
         OpenAiProviderRoutingService providerRoutingService = configuredProviderRoutingService(rateLimitService);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
+                new SimpleMeterRegistry(),
+                requestFactory,
+                providerRoutingService,
+                new OpenAiStreamingFailureReporter());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
 
@@ -542,7 +556,10 @@ class OpenAIStreamingServiceTest {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         OpenAiProviderRoutingService providerRoutingService = configuredProviderRoutingService(rateLimitService);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                rateLimitService, testRequestFactory(), providerRoutingService, new OpenAiStreamingFailureReporter());
+                new SimpleMeterRegistry(),
+                testRequestFactory(),
+                providerRoutingService,
+                new OpenAiStreamingFailureReporter());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
         StructuredPrompt oversizedPrompt = new StructuredPrompt(
@@ -579,7 +596,10 @@ class OpenAIStreamingServiceTest {
         OpenAiRequestFactory requestFactory = testRequestFactory();
         OpenAiProviderRoutingService providerRoutingService = configuredProviderRoutingService(rateLimitService);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
+                new SimpleMeterRegistry(),
+                requestFactory,
+                providerRoutingService,
+                new OpenAiStreamingFailureReporter());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         ResponseServiceAsync responseService = mockAsyncResponseService(openAiClient);
         InternalServerException upstreamFailure = InternalServerException.builder()
@@ -614,7 +634,10 @@ class OpenAIStreamingServiceTest {
         OpenAiRequestFactory requestFactory = testRequestFactory();
         OpenAiProviderRoutingService providerRoutingService = configuredProviderRoutingService(rateLimitService);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
+                new SimpleMeterRegistry(),
+                requestFactory,
+                providerRoutingService,
+                new OpenAiStreamingFailureReporter());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         ResponseServiceAsync responseService = mockAsyncResponseService(openAiClient);
         StreamResponse<ResponseStreamEvent> providerStream = mock();
@@ -656,7 +679,10 @@ class OpenAIStreamingServiceTest {
                 .thenReturn(true);
         OpenAiProviderRoutingService providerRoutingService = configuredProviderRoutingService(rateLimitService);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                rateLimitService, testRequestFactory(), providerRoutingService, new OpenAiStreamingFailureReporter());
+                new SimpleMeterRegistry(),
+                testRequestFactory(),
+                providerRoutingService,
+                new OpenAiStreamingFailureReporter());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         ResponseServiceAsync responseService = mockAsyncResponseService(openAiClient);
         CompletableFuture<Response> providerCompletionFuture = new CompletableFuture<>();
@@ -688,15 +714,27 @@ class OpenAIStreamingServiceTest {
                 "maximumOutputTokens must be positive");
         assertCompletionFailure(
                 streamingService.completeJsonObject(
-                        LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT, "prompt", 0.7, 128, null),
+                        LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT,
+                        new CompletionPrompt("Stable task instructions", "prompt"),
+                        0.7,
+                        128,
+                        null),
                 "requestTimeout must be positive");
         assertCompletionFailure(
                 streamingService.completeJsonObject(
-                        LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT, "prompt", 0.7, 128, Duration.ZERO),
+                        LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT,
+                        new CompletionPrompt("Stable task instructions", "prompt"),
+                        0.7,
+                        128,
+                        Duration.ZERO),
                 "requestTimeout must be positive");
         assertCompletionFailure(
                 streamingService.completeJsonObject(
-                        LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT, "prompt", 0.7, 128, Duration.ofSeconds(-1)),
+                        LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT,
+                        new CompletionPrompt("Stable task instructions", "prompt"),
+                        0.7,
+                        128,
+                        Duration.ofSeconds(-1)),
                 "requestTimeout must be positive");
     }
 
@@ -721,7 +759,10 @@ class OpenAIStreamingServiceTest {
                 .thenReturn(true);
         OpenAiProviderRoutingService providerRoutingService = configuredProviderRoutingService(rateLimitService);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                rateLimitService, testRequestFactory(), providerRoutingService, new OpenAiStreamingFailureReporter());
+                new SimpleMeterRegistry(),
+                testRequestFactory(),
+                providerRoutingService,
+                new OpenAiStreamingFailureReporter());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         ResponseServiceAsync responseService = mockAsyncResponseService(openAiClient);
         when(responseService.createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class)))

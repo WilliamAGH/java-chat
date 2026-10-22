@@ -20,6 +20,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.errors.OpenAIIoException;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.domain.prompt.CompletionPrompt;
 import java.io.InterruptedIOException;
 import java.time.Duration;
 import java.util.Collection;
@@ -62,7 +63,7 @@ class RerankerServiceTest {
                 new ConfiguredProviderTemporarilyUnavailableException(RateLimitService.ApiProvider.OPENAI);
         when(streamingService.completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         eq(TEST_RERANKER_TIMEOUT)))
@@ -84,7 +85,7 @@ class RerankerServiceTest {
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         when(streamingService.completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         eq(TEST_RERANKER_TIMEOUT)))
@@ -96,7 +97,7 @@ class RerankerServiceTest {
         List<Document> rankedDocuments = rerankerService.rerank(
                 "query", sourceDocuments, 2, stageDeadlineNanos(REMAINING_STAGE_BUDGET_TEST_TIMEOUT));
 
-        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<CompletionPrompt> promptCaptor = ArgumentCaptor.forClass(CompletionPrompt.class);
         ArgumentCaptor<Integer> outputBudgetCaptor = ArgumentCaptor.forClass(Integer.class);
         verify(streamingService)
                 .completeJsonObject(
@@ -107,9 +108,10 @@ class RerankerServiceTest {
                         eq(TEST_RERANKER_TIMEOUT));
         verify(streamingService, never())
                 .complete(eq(LlmGatewayTier.Purpose.SEARCH_RERANK), anyString(), eq(TEST_RERANKER_TEMPERATURE));
-        assertTrue(promptCaptor.getValue().contains("Valid indices are 0 through 1."));
-        assertTrue(promptCaptor.getValue().contains("Include each relevant index at most once"));
-        assertTrue(promptCaptor.getValue().contains("Return {\"order\":[]} when no document is relevant"));
+        assertTrue(promptCaptor.getValue().input().contains("Valid indices are 0 through 1."));
+        assertTrue(promptCaptor.getValue().instructions().contains("Include each relevant index at most once"));
+        assertTrue(
+                promptCaptor.getValue().instructions().contains("Return {\"order\":[]} when no document is relevant"));
         assertEquals(TEST_RERANKER_OUTPUT_TOKEN_BUDGET, outputBudgetCaptor.getValue());
         assertEquals(List.of(sourceDocuments.get(1), sourceDocuments.get(0)), rankedDocuments);
     }
@@ -119,7 +121,7 @@ class RerankerServiceTest {
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         when(streamingService.completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         eq(TEST_RERANKER_TIMEOUT)))
@@ -139,7 +141,7 @@ class RerankerServiceTest {
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         when(streamingService.completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         eq(TEST_RERANKER_TIMEOUT)))
@@ -159,7 +161,7 @@ class RerankerServiceTest {
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         when(streamingService.completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         eq(TEST_RERANKER_TIMEOUT)))
@@ -175,7 +177,7 @@ class RerankerServiceTest {
         verify(streamingService)
                 .completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         eq(TEST_RERANKER_TIMEOUT));
@@ -202,7 +204,7 @@ class RerankerServiceTest {
         for (String invalidOrderingJson : invalidOrderingJsonValues) {
             when(streamingService.completeJsonObject(
                             eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                            anyString(),
+                            any(CompletionPrompt.class),
                             eq(TEST_RERANKER_TEMPERATURE),
                             eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                             eq(TEST_RERANKER_TIMEOUT)))
@@ -220,7 +222,7 @@ class RerankerServiceTest {
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         when(streamingService.completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         eq(TEST_RERANKER_TIMEOUT)))
@@ -243,7 +245,7 @@ class RerankerServiceTest {
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         when(streamingService.completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         any(Duration.class)))
@@ -259,7 +261,7 @@ class RerankerServiceTest {
         verify(streamingService)
                 .completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         remainingBudgetCaptor.capture());
@@ -287,7 +289,7 @@ class RerankerServiceTest {
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         when(streamingService.completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         eq(TEST_RERANKER_TIMEOUT)))
@@ -304,7 +306,7 @@ class RerankerServiceTest {
         verify(streamingService, times(1))
                 .completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         eq(TEST_RERANKER_TIMEOUT));
@@ -319,7 +321,7 @@ class RerankerServiceTest {
         CountDownLatch releaseFirstDispatch = new CountDownLatch(1);
         when(streamingService.completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         any(Duration.class)))
@@ -360,7 +362,7 @@ class RerankerServiceTest {
             verify(streamingService, times(1))
                     .completeJsonObject(
                             eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                            anyString(),
+                            any(CompletionPrompt.class),
                             eq(TEST_RERANKER_TEMPERATURE),
                             eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                             any(Duration.class));
@@ -377,7 +379,7 @@ class RerankerServiceTest {
         AtomicInteger dispatchCount = new AtomicInteger();
         when(streamingService.completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         any(Duration.class)))
@@ -445,7 +447,7 @@ class RerankerServiceTest {
         AtomicInteger dispatchCount = new AtomicInteger();
         when(streamingService.completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         any(Duration.class)))
@@ -508,7 +510,7 @@ class RerankerServiceTest {
         AtomicInteger dispatchCount = new AtomicInteger();
         when(streamingService.completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         any(Duration.class)))
@@ -562,7 +564,7 @@ class RerankerServiceTest {
         OpenAIIoException providerTimeout = new OpenAIIoException("Request failed", okHttpCallTimeout);
         when(streamingService.completeJsonObject(
                         eq(LlmGatewayTier.Purpose.SEARCH_RERANK),
-                        anyString(),
+                        any(CompletionPrompt.class),
                         eq(TEST_RERANKER_TEMPERATURE),
                         eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
                         eq(TEST_RERANKER_TIMEOUT)))

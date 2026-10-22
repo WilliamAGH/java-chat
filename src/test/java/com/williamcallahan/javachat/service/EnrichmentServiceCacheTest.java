@@ -1,8 +1,8 @@
 package com.williamcallahan.javachat.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verify;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.CacheConfig;
+import com.williamcallahan.javachat.domain.prompt.CompletionPrompt;
 import com.williamcallahan.javachat.model.Enrichment;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -48,7 +49,7 @@ class EnrichmentServiceCacheTest {
             given(streamingService.isAvailable()).willReturn(true);
             given(streamingService.completeJsonObject(
                             eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT),
-                            anyString(),
+                            any(CompletionPrompt.class),
                             eq(ENRICHMENT_TEMPERATURE),
                             anyInt()))
                     .willReturn(Mono.just(ENRICHMENT_INITIAL_JSON))
@@ -67,7 +68,7 @@ class EnrichmentServiceCacheTest {
             verify(streamingService, times(ENRICHMENT_CACHE_MISS_COMPLETION_COUNT))
                     .completeJsonObject(
                             eq(LlmGatewayTier.Purpose.MARKDOWN_ENRICHMENT),
-                            anyString(),
+                            any(CompletionPrompt.class),
                             eq(ENRICHMENT_TEMPERATURE),
                             anyInt());
         }

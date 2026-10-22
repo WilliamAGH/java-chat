@@ -88,7 +88,8 @@ class HybridVectorServiceTest {
         when(embeddingClient.embed(
                         org.mockito.ArgumentMatchers.any(LlmGatewayTier.Purpose.class),
                         eq(List.of(DOCUMENT_TEXT)),
-                        eq(LlmGatewayTier.BATCH)))
+                        eq(LlmGatewayTier.BATCH),
+                        org.mockito.ArgumentMatchers.any(java.time.Duration.class)))
                 .thenReturn(List.of(new float[] {0.1f, 0.2f}));
         when(sparseVectorEncoder.encode(DOCUMENT_TEXT))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
@@ -370,7 +371,8 @@ class HybridVectorServiceTest {
         when(embeddingClient.embed(
                         org.mockito.ArgumentMatchers.any(LlmGatewayTier.Purpose.class),
                         eq(List.of(DOCUMENT_TEXT)),
-                        eq(LlmGatewayTier.BATCH)))
+                        eq(LlmGatewayTier.BATCH),
+                        org.mockito.ArgumentMatchers.any(java.time.Duration.class)))
                 .thenReturn(List.of(new float[] {0.1f, 0.2f}));
         when(sparseVectorEncoder.encode(DOCUMENT_TEXT))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
