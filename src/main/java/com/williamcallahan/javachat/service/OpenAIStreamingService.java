@@ -17,7 +17,6 @@ import com.openai.models.responses.ResponseOutputText;
 import com.openai.models.responses.ResponseStatus;
 import com.openai.models.responses.ResponseStreamEvent;
 import com.openai.models.responses.ResponseTextDeltaEvent;
-import com.openai.models.responses.ResponseUsage;
 import com.williamcallahan.javachat.application.completion.CompletionRequestConfiguration;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter;
@@ -506,21 +505,19 @@ public class OpenAIStreamingService {
         // a completed call, so only reported counts are recorded.
         providerResponse.usage().ifPresent(usage -> {
             String workload = purpose.name();
-            Optional<ResponseUsage.InputTokensDetails> inputDetails =
-                    usage._inputTokensDetails().asKnown();
-            recordTokens(workload, "input", usage._inputTokens().asKnown());
-            recordTokens(workload, "cached_input", inputDetails.flatMap(details -> details._cachedTokens()
-                    .asKnown()));
-            recordTokens(workload, "cache_write", inputDetails.flatMap(details -> details._cacheWriteTokens()
-                    .asKnown()));
-            recordTokens(workload, "output", usage._outputTokens().asKnown());
+            usage._inputTokens().asKnown().ifPresent(count -> countTokens(workload, "input", count));
+            usage._inputTokensDetails().asKnown().ifPresent(details -> {
+                details._cachedTokens().asKnown().ifPresent(count -> countTokens(workload, "cached_input", count));
+                details._cacheWriteTokens().asKnown().ifPresent(count -> countTokens(workload, "cache_write", count));
+            });
+            usage._outputTokens().asKnown().ifPresent(count -> countTokens(workload, "output", count));
         });
     }
 
-    private void recordTokens(String workload, String tokenType, Optional<Long> reportedCount) {
-        reportedCount.ifPresent(count -> meterRegistry
+    private void countTokens(String workload, String tokenType, long count) {
+        meterRegistry
                 .counter("llm.tokens", "purpose", workload, "type", tokenType)
-                .increment(count));
+                .increment(count);
     }
 
     private String extractTextFromCompletedResponse(Response providerResponse) {
