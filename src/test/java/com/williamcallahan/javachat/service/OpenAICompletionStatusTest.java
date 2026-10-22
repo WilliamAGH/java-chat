@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -74,7 +75,7 @@ class OpenAICompletionStatusTest {
             LlmGatewayTier.Purpose purpose,
             boolean streaming,
             boolean includeUsage,
-            boolean includeCacheWrite)
+            boolean includeTokenDetails)
             throws IOException {
         AtomicReference<CapturedCompletionRequest> capturedRequest = new AtomicReference<>();
         HttpServer gatewayServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -96,13 +97,11 @@ class OpenAICompletionStatusTest {
             ObjectNode providerCompletion = new ObjectMapper().readValue(responseBody, ObjectNode.class);
             if (!includeUsage) {
                 providerCompletion.remove("usage");
-            } else if (!includeCacheWrite) {
-                ObjectNode tokenDetails = new ObjectMapper()
-                        .convertValue(providerCompletion.path("usage").path("input_tokens_details"), ObjectNode.class);
-                tokenDetails.remove("cache_write_tokens");
+            } else if (!includeTokenDetails) {
+                // A gateway may omit input_tokens_details; the call must still complete.
                 ObjectNode tokenUsage =
                         new ObjectMapper().convertValue(providerCompletion.path("usage"), ObjectNode.class);
-                tokenUsage.set("input_tokens_details", tokenDetails);
+                tokenUsage.remove("input_tokens_details");
                 providerCompletion.set("usage", tokenUsage);
             }
             responseBody = new ObjectMapper().writeValueAsBytes(providerCompletion);
@@ -182,20 +181,31 @@ class OpenAICompletionStatusTest {
                             .tags("purpose", purpose.name(), "type", "input")
                             .counter()
                             .count());
-            assertEquals(
-                    40,
-                    meterRegistry
-                            .get("llm.tokens")
-                            .tags("purpose", purpose.name(), "type", "cached_input")
-                            .counter()
-                            .count());
-            assertEquals(
-                    includeCacheWrite ? 20 : 0,
-                    meterRegistry
-                            .get("llm.tokens")
-                            .tags("purpose", purpose.name(), "type", "cache_write")
-                            .counter()
-                            .count());
+            if (includeTokenDetails) {
+                assertEquals(
+                        40,
+                        meterRegistry
+                                .get("llm.tokens")
+                                .tags("purpose", purpose.name(), "type", "cached_input")
+                                .counter()
+                                .count());
+                assertEquals(
+                        20,
+                        meterRegistry
+                                .get("llm.tokens")
+                                .tags("purpose", purpose.name(), "type", "cache_write")
+                                .counter()
+                                .count());
+            } else {
+                assertNull(meterRegistry
+                        .find("llm.tokens")
+                        .tags("purpose", purpose.name(), "type", "cached_input")
+                        .counter());
+                assertNull(meterRegistry
+                        .find("llm.tokens")
+                        .tags("purpose", purpose.name(), "type", "cache_write")
+                        .counter());
+            }
             assertEquals(
                     7,
                     meterRegistry
@@ -209,7 +219,13 @@ class OpenAICompletionStatusTest {
         if (!streaming) {
             assertEquals(
                     512, gatewayRequest.requestBody().path("max_output_tokens").asInt());
-            assertFalse(gatewayRequest.requestBody().has("reasoning"));
+            assertEquals(
+                    "none",
+                    gatewayRequest
+                            .requestBody()
+                            .path("reasoning")
+                            .path("effort")
+                            .asText());
         }
     }
 

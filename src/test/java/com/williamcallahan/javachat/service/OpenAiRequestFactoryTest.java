@@ -143,7 +143,7 @@ class OpenAiRequestFactoryTest {
     }
 
     @Test
-    void jsonCompletionInheritsGatewayReasoningDefaults() {
+    void jsonCompletionReservesItsOutputBudgetForVisibleJson() {
         OpenAiRequestFactory requestFactory = createRequestFactory("max");
 
         ResponseCreateParams jsonCompletionParams = requestFactory.buildJsonCompletionRequest(
@@ -157,7 +157,9 @@ class OpenAiRequestFactoryTest {
         assertEquals(
                 "Rank these documents",
                 jsonCompletionParams.input().orElseThrow().asText());
-        assertTrue(jsonCompletionParams.reasoning().isEmpty());
+        assertEquals(
+                ReasoningEffort.NONE,
+                jsonCompletionParams.reasoning().orElseThrow().effort().orElseThrow());
     }
 
     @Test

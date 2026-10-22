@@ -17,6 +17,7 @@ import com.openai.models.responses.ResponseOutputText;
 import com.openai.models.responses.ResponseStatus;
 import com.openai.models.responses.ResponseStreamEvent;
 import com.openai.models.responses.ResponseTextDeltaEvent;
+import com.openai.models.responses.ResponseUsage;
 import com.williamcallahan.javachat.application.completion.CompletionRequestConfiguration;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter;
@@ -501,24 +502,25 @@ public class OpenAIStreamingService {
         if (providerResponse == null) {
             return;
         }
+        // Gateways may omit usage detail fields; the SDK's required accessors would throw and fail
+        // a completed call, so only reported counts are recorded.
         providerResponse.usage().ifPresent(usage -> {
             String workload = purpose.name();
-            meterRegistry
-                    .counter("llm.tokens", "purpose", workload, "type", "input")
-                    .increment(usage.inputTokens());
-            meterRegistry
-                    .counter("llm.tokens", "purpose", workload, "type", "cached_input")
-                    .increment(usage.inputTokensDetails().cachedTokens());
-            meterRegistry
-                    .counter("llm.tokens", "purpose", workload, "type", "cache_write")
-                    .increment(usage.inputTokensDetails()
-                            ._cacheWriteTokens()
-                            .asKnown()
-                            .orElse(0L));
-            meterRegistry
-                    .counter("llm.tokens", "purpose", workload, "type", "output")
-                    .increment(usage.outputTokens());
+            Optional<ResponseUsage.InputTokensDetails> inputDetails =
+                    usage._inputTokensDetails().asKnown();
+            recordTokens(workload, "input", usage._inputTokens().asKnown());
+            recordTokens(workload, "cached_input", inputDetails.flatMap(details -> details._cachedTokens()
+                    .asKnown()));
+            recordTokens(workload, "cache_write", inputDetails.flatMap(details -> details._cacheWriteTokens()
+                    .asKnown()));
+            recordTokens(workload, "output", usage._outputTokens().asKnown());
         });
+    }
+
+    private void recordTokens(String workload, String tokenType, Optional<Long> reportedCount) {
+        reportedCount.ifPresent(count -> meterRegistry
+                .counter("llm.tokens", "purpose", workload, "type", tokenType)
+                .increment(count));
     }
 
     private String extractTextFromCompletedResponse(Response providerResponse) {

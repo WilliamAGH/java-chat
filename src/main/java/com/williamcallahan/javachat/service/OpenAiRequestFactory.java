@@ -254,7 +254,10 @@ public final class OpenAiRequestFactory {
         if (Double.isFinite(temperature)) {
             builder.temperature(temperature);
         }
-        if (!requireJsonObject) {
+        // Reranker/enrichment caps reserve their entire budget for visible JSON.
+        if (requireJsonObject) {
+            builder.reasoning(Reasoning.builder().effort(ReasoningEffort.NONE).build());
+        } else {
             reasoningEffort.ifPresent(effort ->
                     builder.reasoning(Reasoning.builder().effort(effort).build()));
         }
