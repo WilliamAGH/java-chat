@@ -45,8 +45,9 @@ public class PromptTruncator {
      * @throws AuthoritativeContextDoesNotFitException when no HIGH-priority context segment fits
      */
     public TruncatedPrompt truncate(StructuredPrompt prompt, int maxTokens) {
-        int reservedTokens =
-                prompt.system().estimatedTokens() + prompt.currentQuery().estimatedTokens();
+        int reservedTokens = prompt.system().estimatedTokens()
+                + prompt.currentQuery().estimatedTokens()
+                + prompt.turnGuidance().estimatedTokens();
         List<ContextDocumentSegment> authoritativeContextDocuments = prompt.contextDocuments().stream()
                 .filter(contextDocument -> contextDocument.priority() == PromptSegmentPriority.HIGH)
                 .toList();
@@ -58,8 +59,8 @@ public class PromptTruncator {
                     prompt.currentQuery().estimatedTokens(),
                     maxTokens);
             // Return prompt with only system and query - no room for context or history
-            StructuredPrompt minimalPrompt =
-                    new StructuredPrompt(prompt.system(), List.of(), List.of(), prompt.currentQuery());
+            StructuredPrompt minimalPrompt = new StructuredPrompt(
+                    prompt.system(), List.of(), List.of(), prompt.currentQuery(), prompt.turnGuidance());
             return new TruncatedPrompt(minimalPrompt, true);
         }
 
@@ -96,8 +97,8 @@ public class PromptTruncator {
             log.debug("Truncated context documents from {} to {}", originalDocCount, fittingDocs.size());
         }
 
-        StructuredPrompt truncated =
-                new StructuredPrompt(prompt.system(), reindexedDocuments, fittingTurns, prompt.currentQuery());
+        StructuredPrompt truncated = new StructuredPrompt(
+                prompt.system(), reindexedDocuments, fittingTurns, prompt.currentQuery(), prompt.turnGuidance());
 
         if (wasTruncated) {
             log.info(

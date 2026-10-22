@@ -14,15 +14,31 @@ import java.util.StringJoiner;
  * @param contextDocuments authoritative HIGH or ordinary LOW context documents
  * @param conversationHistory past conversation turns (MEDIUM priority)
  * @param currentQuery the user's current question (HIGH priority)
+ * @param turnGuidance application-owned guidance specific to the current turn
  */
 public record StructuredPrompt(
         SystemSegment system,
         List<ContextDocumentSegment> contextDocuments,
         List<ConversationTurnSegment> conversationHistory,
-        CurrentQuerySegment currentQuery) {
+        CurrentQuerySegment currentQuery,
+        SystemSegment turnGuidance) {
 
     /** Separator between prompt segments. */
     public static final String SEGMENT_SEPARATOR = "\n\n";
+
+    /** Creates a prompt without turn-specific guidance. */
+    public StructuredPrompt(
+            SystemSegment system,
+            List<ContextDocumentSegment> contextDocuments,
+            List<ConversationTurnSegment> conversationHistory,
+            CurrentQuerySegment currentQuery) {
+        this(system, contextDocuments, conversationHistory, currentQuery, new SystemSegment("", 0));
+    }
+
+    /** Keeps turn-specific instructions outside the reusable system prefix. */
+    public StructuredPrompt withTurnGuidance(SystemSegment guidance) {
+        return new StructuredPrompt(system, contextDocuments, conversationHistory, currentQuery, guidance);
+    }
 
     /**
      * Creates a structured prompt with defensive copies of lists.
@@ -36,6 +52,7 @@ public record StructuredPrompt(
         if (currentQuery == null) {
             throw new IllegalArgumentException("Current query segment cannot be null");
         }
+        java.util.Objects.requireNonNull(turnGuidance, "turnGuidance");
         contextDocuments = contextDocuments == null ? List.of() : List.copyOf(contextDocuments);
         conversationHistory = conversationHistory == null ? List.of() : List.copyOf(conversationHistory);
     }
@@ -46,7 +63,7 @@ public record StructuredPrompt(
      * @return sum of all segment token estimates
      */
     public int totalEstimatedTokens() {
-        int total = system.estimatedTokens() + currentQuery.estimatedTokens();
+        int total = system.estimatedTokens() + currentQuery.estimatedTokens() + turnGuidance.estimatedTokens();
         for (ContextDocumentSegment contextDocument : contextDocuments) {
             total += contextDocument.estimatedTokens();
         }
@@ -60,7 +77,7 @@ public record StructuredPrompt(
      * Renders the complete prompt to a string for consumers that require one text value.
      *
      * <p>Segments are joined with paragraph separators in order: system instructions,
-     * context documents, conversation history, and the current query.</p>
+     * conversation history, turn guidance, context documents, and the current query.</p>
      *
      * @return the fully assembled prompt string
      */
@@ -79,12 +96,14 @@ public record StructuredPrompt(
     public String renderInput() {
         StringJoiner promptInput = new StringJoiner(SEGMENT_SEPARATOR);
 
-        for (ContextDocumentSegment contextDocument : contextDocuments) {
-            promptInput.add(contextDocument.content());
-        }
-
         for (ConversationTurnSegment conversationTurn : conversationHistory) {
             promptInput.add(conversationTurn.content());
+        }
+        if (!turnGuidance.content().isBlank()) {
+            promptInput.add(turnGuidance.content());
+        }
+        for (ContextDocumentSegment contextDocument : contextDocuments) {
+            promptInput.add(contextDocument.content());
         }
 
         promptInput.add(currentQuery.content());
@@ -99,7 +118,7 @@ public record StructuredPrompt(
      * @return new prompt with updated documents
      */
     public StructuredPrompt withContextDocuments(List<ContextDocumentSegment> newContextDocuments) {
-        return new StructuredPrompt(system, newContextDocuments, conversationHistory, currentQuery);
+        return new StructuredPrompt(system, newContextDocuments, conversationHistory, currentQuery, turnGuidance);
     }
 
     /**
@@ -109,7 +128,7 @@ public record StructuredPrompt(
      * @return new prompt with updated history
      */
     public StructuredPrompt withConversationHistory(List<ConversationTurnSegment> newConversationHistory) {
-        return new StructuredPrompt(system, contextDocuments, newConversationHistory, currentQuery);
+        return new StructuredPrompt(system, contextDocuments, newConversationHistory, currentQuery, turnGuidance);
     }
 
     /**

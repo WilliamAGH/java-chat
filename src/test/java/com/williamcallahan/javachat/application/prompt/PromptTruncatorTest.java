@@ -50,6 +50,27 @@ class PromptTruncatorTest {
     }
 
     @Test
+    void reservesAndRetainsCurrentTurnGuidanceWhenTruncatingContext() {
+        StructuredPrompt prompt = new StructuredPrompt(
+                        new SystemSegment("Stable teaching policy", 10),
+                        List.of(new ContextDocumentSegment(1, "reference", "https://docs.test", "Retrieved text", 50)),
+                        List.of(new ConversationTurnSegment("user", "Earlier question", 20)),
+                        new CurrentQuerySegment("Current question", 10))
+                .withTurnGuidance(new SystemSegment("Use the requested version", 30));
+
+        PromptTruncator.TruncatedPrompt truncatedPrompt = truncator.truncate(prompt, 70);
+
+        assertTrue(truncatedPrompt.wasTruncated());
+        assertEquals(0, truncatedPrompt.contextDocumentCount());
+        assertEquals(1, truncatedPrompt.conversationTurnCount());
+        assertEquals(
+                "Use the requested version",
+                truncatedPrompt.prompt().turnGuidance().content());
+        assertEquals(70, truncatedPrompt.prompt().totalEstimatedTokens());
+        assertTrue(truncatedPrompt.renderInput().contains("Use the requested version"));
+    }
+
+    @Test
     void truncatesContextDocumentsFirst() {
         StructuredPrompt prompt = new StructuredPrompt(
                 new SystemSegment("System", 100),

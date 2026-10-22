@@ -17,6 +17,7 @@ import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailu
 import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureReporter;
 import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
@@ -32,7 +33,7 @@ class OpenAIStreamingTimeoutContractTest {
         OpenAIClient gatewayClient = mock(OpenAIClient.class);
         StructuredPrompt structuredPrompt = StructuredPrompt.fromRawPrompt("Confirm the timeout budget", 6);
         OpenAiRequestFactory requestFactory = mock(OpenAiRequestFactory.class);
-        when(requestFactory.prepareStreamingRequest(structuredPrompt, 0.4))
+        when(requestFactory.prepareStreamingRequest(LlmGatewayTier.Purpose.CHAT_ANSWER, structuredPrompt, 0.4))
                 .thenReturn(new OpenAiPreparedRequest(
                         ResponseCreateParams.builder()
                                 .model(ModelConfiguration.DEFAULT_MODEL)
@@ -47,7 +48,7 @@ class OpenAIStreamingTimeoutContractTest {
                 .thenReturn(
                         Optional.of(new OpenAiProviderCandidate(gatewayClient, RateLimitService.ApiProvider.OPENAI)));
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                mock(RateLimitService.class),
+                new SimpleMeterRegistry(),
                 requestFactory,
                 providerRoutingService,
                 new OpenAiStreamingFailureReporter());

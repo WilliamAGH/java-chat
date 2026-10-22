@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.cfg.CoercionAction;
 import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
 import com.fasterxml.jackson.databind.type.LogicalType;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.domain.prompt.CompletionPrompt;
 import java.io.InterruptedIOException;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
@@ -182,7 +183,7 @@ public class RerankerService {
         requireRemainingStageBudget(stageDeadlineNanos);
         log.debug("Reranking {} documents", documents.size());
 
-        String prompt = buildRerankPrompt(query, documents);
+        CompletionPrompt prompt = buildRerankPrompt(query, documents);
         Duration rerankRequestTimeout = tighterRerankTimeout(requireRemainingStageBudget(stageDeadlineNanos));
         Optional<String> llmOutputOptional = callLlmForReranking(prompt, rerankRequestTimeout);
         if (llmOutputOptional.isEmpty() || llmOutputOptional.get().isBlank()) {
@@ -285,7 +286,7 @@ public class RerankerService {
      *
      * @return reranking response when the configured provider completes within its timeout
      */
-    private Optional<String> callLlmForReranking(String prompt, Duration rerankRequestTimeout) {
+    private Optional<String> callLlmForReranking(CompletionPrompt prompt, Duration rerankRequestTimeout) {
         try {
             return openAIStreamingService
                     .completeJsonObject(
@@ -336,7 +337,7 @@ public class RerankerService {
     /**
      * Build the prompt for the reranking LLM call.
      */
-    private String buildRerankPrompt(String query, List<Document> documents) {
+    private CompletionPrompt buildRerankPrompt(String query, List<Document> documents) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("You are a document re-ranker for the Java learning assistant system.\n");
         prompt.append("Select the documents that are relevant to the query and order them by relevance.\n");
@@ -345,15 +346,17 @@ public class RerankerService {
         prompt.append("Prefer stable release documentation over early-access or preview content.\n");
         prompt.append("Exclude every document that is not actually about the query's subject; ");
         prompt.append("a document that merely shares an isolated word with the query is not relevant.\n");
+        prompt.append("Include each relevant index at most once and do not return any other values.\n");
+        prompt.append("Return only JSON: {\"order\":[indices...]} with 0-based indices, most relevant first.\n");
+        prompt.append("Return {\"order\":[]} when no document is relevant to the query.\n");
+        prompt.append("Do not include markdown, prose, or explanations.\n\n");
+        String instructions = prompt.toString();
+        prompt.setLength(0);
         prompt.append("There are exactly ")
                 .append(documents.size())
                 .append(" documents. Valid indices are 0 through ")
                 .append(documents.size() - 1)
                 .append(".\n");
-        prompt.append("Include each relevant index at most once and do not return any other values.\n");
-        prompt.append("Return only JSON: {\"order\":[indices...]} with 0-based indices, most relevant first.\n");
-        prompt.append("Return {\"order\":[]} when no document is relevant to the query.\n");
-        prompt.append("Do not include markdown, prose, or explanations.\n\n");
         prompt.append("Query: ").append(query).append("\n\n");
 
         for (int docIndex = 0; docIndex < documents.size(); docIndex++) {
@@ -373,7 +376,7 @@ public class RerankerService {
                     .append("\n\n");
         }
 
-        return prompt.toString();
+        return new CompletionPrompt(instructions, prompt.toString());
     }
 
     /**

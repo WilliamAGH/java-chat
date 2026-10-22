@@ -187,7 +187,8 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
             if (remainingCooldownNanos > 0) {
                 long retryAfterSeconds = Math.max(1L, TimeUnit.NANOSECONDS.toSeconds(remainingCooldownNanos));
                 throw new EmbeddingProviderCooldownRejectionException(
-                        "Remote embedding provider is rate limited; retry after " + retryAfterSeconds + " seconds");
+                        "Remote embedding provider is rate limited; retry after " + retryAfterSeconds + " seconds",
+                        Duration.ofNanos(remainingCooldownNanos));
             }
         }
 
@@ -424,7 +425,12 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         int statusCode = exception.statusCode();
         if (statusCode == HttpStatus.TOO_MANY_REQUESTS.value()) {
             try {
-                rateLimitDecisionResolver.resolveFromOpenAiRetryAfterHeaders(exception.headers());
+                RateLimitDecision retryDecision =
+                        rateLimitDecisionResolver.resolveFromOpenAiRetryAfterHeaders(exception.headers());
+                return new EmbeddingServiceTemporarilyUnavailableException(
+                        "Remote embedding provider returned HTTP 429",
+                        exception,
+                        Duration.ofSeconds(retryDecision.retryAfterSeconds()));
             } catch (RateLimitDecisionException rateLimitDecisionFailure) {
                 rateLimitDecisionFailure.addSuppressed(exception);
                 return new EmbeddingServiceTemporarilyUnavailableException(
@@ -810,8 +816,13 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
             extends EmbeddingServiceTemporarilyUnavailableException {
         private static final long serialVersionUID = 1L;
 
-        EmbeddingProviderCooldownRejectionException(String message) {
-            super(message);
+        EmbeddingProviderCooldownRejectionException(String message, Duration retryDelay) {
+            super(message, null, retryDelay);
+        }
+
+        @Override
+        public boolean providerContacted() {
+            return false;
         }
     }
 }

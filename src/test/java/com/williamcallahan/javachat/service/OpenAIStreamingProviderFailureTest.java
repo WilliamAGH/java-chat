@@ -32,6 +32,7 @@ import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -79,7 +80,10 @@ class OpenAIStreamingProviderFailureTest {
                 .thenReturn(true);
         OpenAiProviderRoutingService providerRoutingService = configuredProviderRoutingService(rateLimitService);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                rateLimitService, testRequestFactory(), providerRoutingService, new OpenAiStreamingFailureReporter());
+                new SimpleMeterRegistry(),
+                testRequestFactory(),
+                providerRoutingService,
+                new OpenAiStreamingFailureReporter());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         ResponseServiceAsync responseService = mockAsyncResponseService(openAiClient);
         InternalServerException upstreamFailure = InternalServerException.builder()
@@ -226,7 +230,7 @@ class OpenAIStreamingProviderFailureTest {
 
     private static OpenAIStreamingService configuredStreamingService(RateLimitService rateLimitService) {
         return new OpenAIStreamingService(
-                rateLimitService,
+                new SimpleMeterRegistry(),
                 testRequestFactory(),
                 configuredProviderRoutingService(rateLimitService),
                 new OpenAiStreamingFailureReporter());

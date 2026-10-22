@@ -118,13 +118,9 @@ public class ChatService {
     public StructuredPrompt buildStructuredPromptWithContextAndGuidance(
             List<Message> history, String latestUserMessage, List<Document> contextDocs, String guidance) {
 
-        // Build system prompt with guidance
         String basePrompt = systemPromptConfig.getCoreSystemPrompt();
-        String completePrompt = guidance != null && !guidance.isBlank()
-                ? systemPromptConfig.buildFullPrompt(basePrompt, guidance)
-                : basePrompt;
-
-        SystemSegment systemSegment = new SystemSegment(completePrompt, estimateTokens(completePrompt));
+        SystemSegment systemSegment = new SystemSegment(basePrompt, estimateTokens(basePrompt));
+        String turnGuidance = guidance == null ? "" : guidance;
 
         List<ContextDocumentSegment> contextSegments =
                 buildContextSegments(contextDocs != null ? contextDocs : List.of(), latestUserMessage);
@@ -134,7 +130,8 @@ public class ChatService {
         CurrentQuerySegment querySegment =
                 new CurrentQuerySegment(latestUserMessage, estimateTokens(latestUserMessage));
 
-        return new StructuredPrompt(systemSegment, contextSegments, conversationSegments, querySegment);
+        return new StructuredPrompt(systemSegment, contextSegments, conversationSegments, querySegment)
+                .withTurnGuidance(new SystemSegment(turnGuidance, estimateTokens(turnGuidance)));
     }
 
     /**
@@ -195,18 +192,16 @@ public class ChatService {
 
         String searchQualityNote = determineSearchQuality(contextDocs);
 
-        // Build system prompt with search quality context
-        StringBuilder systemPromptBuilder = new StringBuilder(systemPromptConfig.getCoreSystemPrompt());
+        String coreSystemPrompt = systemPromptConfig.getCoreSystemPrompt();
+        StringBuilder searchGuidance = new StringBuilder();
         if (!searchQualityNote.isEmpty()) {
-            systemPromptBuilder.append("\n\nSEARCH CONTEXT: ").append(searchQualityNote);
+            searchGuidance.append("SEARCH CONTEXT: ").append(searchQualityNote);
             if (searchQualityNote.contains("less relevant") || searchQualityNote.contains("keyword search")) {
-                systemPromptBuilder.append("\n").append(systemPromptConfig.getLowQualitySearchPrompt());
+                searchGuidance.append("\n").append(systemPromptConfig.getLowQualitySearchPrompt());
             }
         }
-        String systemPromptText = systemPromptBuilder.toString();
-
-        // Build structured segments
-        SystemSegment systemSegment = new SystemSegment(systemPromptText, estimateTokens(systemPromptText));
+        SystemSegment systemSegment = new SystemSegment(coreSystemPrompt, estimateTokens(coreSystemPrompt));
+        String turnGuidance = searchGuidance.toString();
 
         List<ContextDocumentSegment> contextSegments = buildContextSegments(contextDocs, latestUserMessage);
         List<ConversationTurnSegment> conversationSegments = buildConversationSegments(history);
@@ -214,8 +209,9 @@ public class ChatService {
         CurrentQuerySegment querySegment =
                 new CurrentQuerySegment(latestUserMessage, estimateTokens(latestUserMessage));
 
-        StructuredPrompt structuredPrompt =
-                new StructuredPrompt(systemSegment, contextSegments, conversationSegments, querySegment);
+        StructuredPrompt structuredPrompt = new StructuredPrompt(
+                        systemSegment, contextSegments, conversationSegments, querySegment)
+                .withTurnGuidance(new SystemSegment(turnGuidance, estimateTokens(turnGuidance)));
 
         return new StructuredPromptOutcome(structuredPrompt, contextDocs);
     }

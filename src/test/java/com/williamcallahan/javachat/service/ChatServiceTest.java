@@ -193,6 +193,27 @@ class ChatServiceTest {
         assertFalse(sourceRecord.contains("evidenceRelation"));
     }
 
+    @Test
+    void guidedTurnGuidanceDoesNotChangeCoreSystemInstructions() {
+        SystemPromptConfig systemPromptConfig = mock(SystemPromptConfig.class);
+        when(systemPromptConfig.getCoreSystemPrompt()).thenReturn("Stable Java tutor policy");
+        ChatService chatService = new ChatService(
+                mock(OpenAIStreamingService.class),
+                mock(RetrievalService.class),
+                systemPromptConfig,
+                new AppProperties());
+
+        var firstPrompt = chatService.buildStructuredPromptWithContextAndGuidance(
+                List.of(), "Explain records", List.of(), "Use Java 21");
+        var nextPrompt = chatService.buildStructuredPromptWithContextAndGuidance(
+                List.of(), "Explain records", List.of(), "Use Java 25");
+
+        assertEquals("Stable Java tutor policy", firstPrompt.system().content());
+        assertEquals(firstPrompt.system(), nextPrompt.system());
+        assertEquals("Use Java 21", firstPrompt.turnGuidance().content());
+        assertEquals("Use Java 25", nextPrompt.turnGuidance().content());
+    }
+
     private static String sourceRecordFor(String query, Document documentation) {
         RetrievalService retrievalService = mock(RetrievalService.class);
         SystemPromptConfig systemPromptConfig = mock(SystemPromptConfig.class);

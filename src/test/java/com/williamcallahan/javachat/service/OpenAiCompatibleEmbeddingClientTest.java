@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -804,6 +805,66 @@ class OpenAiCompatibleEmbeddingClientTest {
                 new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
             assertThrows(EmbeddingServiceUnavailableException.class, clientAdapter::warmUp);
             verify(batchEmbeddingService, times(1)).create(any(), any(RequestOptions.class));
+        }
+    }
+
+    @Test
+    void batchRetriesAfterAuthoritativeCooldownInsteadOfExhaustingLocalAttempts() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        EmbeddingServiceAsync batchEmbeddingService = mockAsyncEmbeddingService(batchClient);
+        Duration providerCooldown = Duration.ofSeconds(16);
+        when(batchEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.failedFuture(RateLimitException.builder()
+                        .headers(Headers.builder().put("Retry-After", "16").build())
+                        .build()))
+                .thenReturn(CompletableFuture.completedFuture(successfulResponse()));
+
+        try (OpenAiCompatibleEmbeddingClient embeddingClient =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
+            long batchStartedNanos = System.nanoTime();
+            List<float[]> embeddingVectors = EmbeddingBatchEmbedder.embedDocuments(
+                    LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING,
+                    embeddingClient,
+                    List.of(new org.springframework.ai.document.Document("batch document")));
+
+            assertEquals(1, embeddingVectors.size());
+            assertArrayEquals(new float[] {0.4f, 0.6f}, embeddingVectors.getFirst());
+            assertTrue(Duration.ofNanos(System.nanoTime() - batchStartedNanos).compareTo(providerCooldown) >= 0);
+        }
+    }
+
+    @Test
+    void preservesAuthoritativeRetryTimingForProviderAndLocalCooldownFailures() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        EmbeddingServiceAsync batchEmbeddingService = mockAsyncEmbeddingService(batchClient);
+        when(batchEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.failedFuture(RateLimitException.builder()
+                        .headers(Headers.builder().put("Retry-After", "60").build())
+                        .build()));
+
+        try (OpenAiCompatibleEmbeddingClient embeddingClient =
+                new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
+            EmbeddingServiceTemporarilyUnavailableException providerFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
+                    () -> embeddingClient.embed(
+                            LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING,
+                            List.of("batch document"),
+                            LlmGatewayTier.BATCH));
+            assertTrue(providerFailure.providerContacted());
+            assertTrue(providerFailure.retryDelay().compareTo(Duration.ofSeconds(50)) > 0);
+            assertTrue(providerFailure.retryDelay().compareTo(Duration.ofSeconds(60)) <= 0);
+
+            EmbeddingServiceTemporarilyUnavailableException admissionFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
+                    () -> embeddingClient.embed(
+                            LlmGatewayTier.Purpose.CONTENT_INDEX_EMBEDDING,
+                            List.of("next document"),
+                            LlmGatewayTier.BATCH));
+            assertFalse(admissionFailure.providerContacted());
+            assertTrue(admissionFailure.retryDelay().compareTo(Duration.ofSeconds(50)) > 0);
+            assertTrue(admissionFailure.retryDelay().compareTo(Duration.ofSeconds(60)) <= 0);
         }
     }
 
