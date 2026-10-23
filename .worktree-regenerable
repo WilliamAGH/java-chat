@@ -2,3 +2,7 @@
 src/main/resources/static/index.html
 src/main/resources/static/assets/
 src/main/resources/static/theme-boot.js
+# Provider cooldown state RateLimitState writes at runtime (DEFAULT_STATE_FILE); the next run rebuilds it.
+data/rate-limit-state.json
+# Pipeline log the logback-spring.xml file appender writes while the app runs.
+logs/pipeline.log
