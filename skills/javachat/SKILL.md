@@ -29,7 +29,7 @@ javachat update
 The command updates the global npm installation or the declaring project's local dependency. It
 refuses direct source and temporary `npx` invocations.
 
-JavaChat requires Node.js 24.18.0 or newer. If the command is missing and the local checkout exists,
+JavaChat requires Node.js 24.22.1 or newer. If the command is missing and the local checkout exists,
 install independent package bytes without publishing:
 
 ```bash

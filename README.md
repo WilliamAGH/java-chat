@@ -48,7 +48,7 @@ the documentation collections.
 
 ## Install the CLI
 
-The CLI supports macOS and Linux and requires Node.js 24.18 or newer.
+The CLI supports macOS and Linux and requires Node.js 24.22.1 or newer.
 
 ```bash
 npm install --global @wcallahan/javachat-cli
@@ -82,7 +82,7 @@ reciprocal-rank fusion, and streaming details.
 ### Prerequisites
 
 - BellSoft Liberica JDK 25
-- Node.js 24.18
+- Node.js 24.22.1
 - Docker, when running the local Qdrant service
 - `mise` or another Java version manager for the pinned development toolchain
 
@@ -95,8 +95,8 @@ mise install
 Install and select the frontend's pinned Node.js version with `nvm`:
 
 ```bash
-nvm install 24.18.0
-nvm use 24.18.0
+nvm install 24.22.1
+nvm use 24.22.1
 ```
 
 Then configure and start the full application:

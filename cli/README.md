@@ -8,7 +8,7 @@ without leaving your terminal.
 
 ## Requirements
 
-- Node.js 24.18 or newer
+- Node.js 24.22.1 or newer
 - macOS or Linux
 - A JavaChat account for interactive use, or an existing API key for automation
 
