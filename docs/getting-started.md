@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Java 25 (project toolchain)
-- Node.js 24.18.0 (frontend build/dev)
+- Node.js 24.22.1 (frontend build/dev)
 - Docker (optional, for local Qdrant)
 - Wget2 and MuPDF's `mutool` (optional, for `make fetch-all`; see
   [scrape prerequisites](pipeline-commands.md#scrape-fetch-html-mirrors))

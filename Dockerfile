@@ -11,7 +11,7 @@
 # ================================
 # FRONTEND BUILD STAGE
 # ================================
-FROM dockerhub.haiku.host/library/node:24.18.0-bookworm-slim AS frontend-builder
+FROM dockerhub.haiku.host/library/node:24.22.1-bookworm-slim AS frontend-builder
 WORKDIR /app/frontend
 
 # Copy dependency definitions first for cache layer
