@@ -49,6 +49,12 @@ val mockitoAgent by configurations.creating {
     isCanBeResolved = true
 }
 
+// Security patches above Spring Boot 3.5.16's managed versions, same release lines.
+extra["jackson-bom.version"] = "2.21.8"
+extra["netty.version"] = "4.1.139.Final"
+extra["tomcat.version"] = "10.1.61"
+extra["logback.version"] = "1.5.38"
+
 dependencyManagement {
     imports {
         mavenBom("org.springframework.ai:spring-ai-bom:${libs.versions.spring.ai.get()}")
