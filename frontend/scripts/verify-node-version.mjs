@@ -24,7 +24,7 @@ const gettingStartedGuide = await readFile(
 
 const expectedNodeVersionFile = `v${canonicalNodeVersion}`;
 const projectedLockfileVersion = frontendLockfile.packages?.[""]?.engines?.node;
-const expectedDockerImage = `dockerhub.haiku.host/library/node:${canonicalNodeVersion}-bookworm-slim`;
+const expectedDockerImage = `FROM \${BASE_REGISTRY}/library/node:${canonicalNodeVersion}-bookworm-slim`;
 const expectedDocumentationVersion = `Node.js ${canonicalNodeVersion}`;
 
 if (nodeVersionFile !== expectedNodeVersionFile) {

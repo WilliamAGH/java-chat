@@ -145,6 +145,8 @@ Enables:
 
 The `Dockerfile` uses BellSoft's Debian-based Liberica JDK and JRE images, pinned to release `25.0.3-11`.
 
+Every base image pulls through the mirror host passed as the `BASE_REGISTRY` build argument, which has no default. Infisical project `nexus-registry-hosts` holds it, with the push registry host `IMAGE_REGISTRY`, in `dev` and `prod`, and holds nothing else; CI reads both over GitHub OIDC. A local build runs `infisical run --projectId 985fb83c-8b60-4e93-b27b-8b6781edc473 --env dev -- docker build --build-arg BASE_REGISTRY .`.
+
 **Future optimization**: Pin images by SHA256 digest for byte-for-byte reproducibility. Trade-off: maintenance burden vs. max determinism.
 
 ---
