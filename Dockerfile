@@ -5,13 +5,16 @@
 # ================================
 # Multi-stage build for Frontend and Backend
 # Switched to Debian/Ubuntu-based images to resolve Alpine network issues
-# Base images pull through the fleet's dockerhub.haiku.host mirror; anonymous public.ecr.aws pulls hit 429 data limits in CI.
+# Base images pull through the registry mirror named by BASE_REGISTRY; anonymous public.ecr.aws pulls hit 429 data limits in CI.
 # Note: Requires DOCKER_BUILDKIT=1 for cache mount support
+
+# The mirror host has no default, so a build without --build-arg BASE_REGISTRY=<host> fails at the first FROM.
+ARG BASE_REGISTRY
 
 # ================================
 # FRONTEND BUILD STAGE
 # ================================
-FROM dockerhub.haiku.host/library/node:24.22.1-bookworm-slim AS frontend-builder
+FROM ${BASE_REGISTRY}/library/node:24.22.1-bookworm-slim AS frontend-builder
 WORKDIR /app/frontend
 
 # Copy dependency definitions first for cache layer
@@ -39,7 +42,7 @@ RUN npm run validate && npm run test && npm run build
 # ================================
 # BACKEND BUILD STAGE
 # ================================
-FROM dockerhub.haiku.host/bellsoft/liberica-openjdk-debian:25.0.3-11 AS builder
+FROM ${BASE_REGISTRY}/bellsoft/liberica-openjdk-debian:25.0.3-11 AS builder
 ARG SOURCE_COMMIT=unknown
 WORKDIR /app
 
@@ -124,7 +127,7 @@ ENTRYPOINT ["/app/scripts/process_all_to_qdrant.sh", "--app-jar=/app/build/app.j
 # ================================
 # RUNTIME STAGE
 # ================================
-FROM dockerhub.haiku.host/bellsoft/liberica-openjre-debian:25.0.3-11 AS runtime
+FROM ${BASE_REGISTRY}/bellsoft/liberica-openjre-debian:25.0.3-11 AS runtime
 LABEL io.iocloudhost.logs.owner=split
 
 # 1. System packages (never changes) - FIRST for maximum cache reuse

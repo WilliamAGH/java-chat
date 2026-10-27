@@ -15,9 +15,9 @@ on:
 permissions:
   contents: read
 
+# The registry host comes from Infisical at run time; only the repository path is fixed here.
 env:
-  IMAGE_REGISTRY: registry.haiku.host
-  IMAGE_REPOSITORY: registry.haiku.host/java-chat/java-chat
+  IMAGE_NAME: java-chat/java-chat
 
 jobs:
   writer-lease-portability:
@@ -153,6 +153,10 @@ jobs:
     needs:
       - frontend
       - build
+    environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -162,13 +166,27 @@ jobs:
         with:
           persist-credentials: false
 
+      # Registry hosts live in Infisical project java-chat at /ci; this repository's
+      # development and production environments read them over GitHub OIDC.
+      - name: Load registry hosts from Infisical
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: oidc
+          identity-id: 303d8463-c07e-4e2a-bf0e-729517236b84
+          domain: https://infisical.haiku.host
+          project-slug: java-chat
+          env-slug: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+          secret-path: /ci
+
       - name: Build image from pinned Liberica stages
         run: |
           docker buildx build --load \
+            --build-arg BASE_REGISTRY \
             --tag java-chat:ci \
             .
 
           docker buildx build --load \
+            --build-arg BASE_REGISTRY \
             --target ingestion \
             --tag java-chat-ingestion:ci \
             .
@@ -325,6 +343,9 @@ jobs:
     needs:
       - docker-smoke
     environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: true
       matrix:
@@ -341,6 +362,18 @@ jobs:
         uses: actions/checkout@v6
         with:
           persist-credentials: false
+
+      # Registry hosts live in Infisical project java-chat at /ci; this repository's
+      # development and production environments read them over GitHub OIDC.
+      - name: Load registry hosts from Infisical
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: oidc
+          identity-id: 303d8463-c07e-4e2a-bf0e-729517236b84
+          domain: https://infisical.haiku.host
+          project-slug: java-chat
+          env-slug: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+          secret-path: /ci
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -359,9 +392,10 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           build-args: |
+            BASE_REGISTRY=${{ env.BASE_REGISTRY }}
             SOURCE_COMMIT=${{ github.sha }}
             VITE_CLERK_PUBLISHABLE_KEY=${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
-          outputs: type=image,name=${{ env.IMAGE_REPOSITORY }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ github.ref_name }}-${{ matrix.runner }}
           cache-to: type=gha,mode=max,scope=${{ github.ref_name }}-${{ matrix.runner }}
 
@@ -388,6 +422,9 @@ jobs:
     environment:
       name: ${{ github.ref_name == 'main' && 'production' || 'development' }}
       url: ${{ github.ref_name == 'main' && 'https://javachat.ai' || 'https://dev.javachat.ai' }}
+    permissions:
+      contents: read
+      id-token: write
     concurrency:
       group: dokploy-${{ github.ref_name }}
       cancel-in-progress: false
@@ -397,6 +434,18 @@ jobs:
         uses: actions/checkout@v6
         with:
           persist-credentials: false
+
+      # Registry hosts live in Infisical project java-chat at /ci; this repository's
+      # development and production environments read them over GitHub OIDC.
+      - name: Load registry hosts from Infisical
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: oidc
+          identity-id: 303d8463-c07e-4e2a-bf0e-729517236b84
+          domain: https://infisical.haiku.host
+          project-slug: java-chat
+          env-slug: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+          secret-path: /ci
 
       - name: Download platform digests
         uses: actions/download-artifact@v8
@@ -419,7 +468,8 @@ jobs:
         id: index
         working-directory: ${{ runner.temp }}/digests
         env:
-          IMAGE_TAG: ${{ env.IMAGE_REPOSITORY }}:${{ github.ref_name }}-${{ github.sha }}
+          IMAGE_REPOSITORY: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}-${{ github.sha }}
         run: |
           set -euo pipefail
           platform_images=()

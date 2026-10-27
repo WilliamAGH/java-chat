@@ -145,6 +145,8 @@ Enables:
 
 The `Dockerfile` uses BellSoft's Debian-based Liberica JDK and JRE images, pinned to release `25.0.3-11`.
 
+Every base image pulls through the mirror host passed as the `BASE_REGISTRY` build argument, which has no default. Infisical project `java-chat` holds it, with the push registry host `IMAGE_REGISTRY`, at path `/ci` in `dev` and `prod`; CI reads both over GitHub OIDC. A local build runs `infisical run --projectId f15c5155-687d-48b5-b736-c3142beb4b79 --env dev --path /ci -- docker build --build-arg BASE_REGISTRY .`.
+
 **Future optimization**: Pin images by SHA256 digest for byte-for-byte reproducibility. Trade-off: maintenance burden vs. max determinism.
 
 ---
