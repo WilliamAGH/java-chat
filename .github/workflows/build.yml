@@ -150,6 +150,9 @@ jobs:
           retention-days: 7
 
   docker-smoke:
+    # Fork pull requests get no OIDC token, so they cannot read the base-image
+    # mirror host from Infisical; their image smoke runs after merge instead.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     needs:
       - frontend
       - build
