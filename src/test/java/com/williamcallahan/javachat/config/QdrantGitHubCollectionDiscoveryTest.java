@@ -191,6 +191,86 @@ class QdrantGitHubCollectionDiscoveryTest {
         assertEquals("pending", discovery.discoveryHealth().getDetails().get("githubCollectionDiscovery"));
     }
 
+    @Test
+    void interruptionDuringValidationStaysPending() throws InterruptedException, ExecutionException, TimeoutException {
+        QdrantClient qdrantClient = mock(QdrantClient.class);
+        EmbeddingClient embeddingClient = mock(EmbeddingClient.class);
+        String activeCollection = GENERATION_PREFIX + "openai-java-chat";
+        when(qdrantClient.listCollectionsAsync(any(java.time.Duration.class)))
+                .thenReturn(Futures.immediateFuture(java.util.List.of(activeCollection)));
+        ListenableFuture<CollectionInfo> collectionInfoRequest = mock();
+        when(qdrantClient.getCollectionInfoAsync(activeCollection)).thenReturn(collectionInfoRequest);
+        when(embeddingClient.dimensions()).thenReturn(EMBEDDING_DIMENSIONS);
+        when(collectionInfoRequest.get(anyLong(), eq(TimeUnit.SECONDS)))
+                .thenThrow(new InterruptedException("validation interrupted"));
+        when(collectionInfoRequest.isDone()).thenReturn(false);
+
+        QdrantGitHubCollectionDiscovery discovery =
+                new QdrantGitHubCollectionDiscovery(qdrantClient, embeddingClient, new AppProperties());
+        discovery.discoverGitHubCollections();
+
+        verify(collectionInfoRequest).cancel(true);
+        assertEquals(java.util.List.of(), discovery.getDiscoveredCollections());
+        assertEquals(Status.DOWN, discovery.discoveryHealth().getStatus());
+        assertEquals("pending", discovery.discoveryHealth().getDetails().get("githubCollectionDiscovery"));
+    }
+
+    @Test
+    void interruptionDuringValidationRecoversOnRetry()
+            throws InterruptedException, ExecutionException, TimeoutException {
+        QdrantClient qdrantClient = mock(QdrantClient.class);
+        EmbeddingClient embeddingClient = mock(EmbeddingClient.class);
+        String activeCollection = GENERATION_PREFIX + "openai-java-chat";
+        ListenableFuture<CollectionInfo> interruptedCollectionInfoRequest = mock();
+        when(qdrantClient.listCollectionsAsync(any(java.time.Duration.class)))
+                .thenReturn(Futures.immediateFuture(java.util.List.of(activeCollection)));
+        when(qdrantClient.getCollectionInfoAsync(activeCollection))
+                .thenReturn(interruptedCollectionInfoRequest)
+                .thenReturn(Futures.immediateFuture(validCollectionInfo(EMBEDDING_DIMENSIONS)));
+        when(embeddingClient.dimensions()).thenReturn(EMBEDDING_DIMENSIONS);
+        when(interruptedCollectionInfoRequest.get(anyLong(), eq(TimeUnit.SECONDS)))
+                .thenThrow(new InterruptedException("validation interrupted"));
+        when(interruptedCollectionInfoRequest.isDone()).thenReturn(false);
+
+        QdrantGitHubCollectionDiscovery discovery =
+                new QdrantGitHubCollectionDiscovery(qdrantClient, embeddingClient, new AppProperties());
+        discovery.discoverGitHubCollections();
+        assertEquals(Status.DOWN, discovery.discoveryHealth().getStatus());
+        assertEquals("pending", discovery.discoveryHealth().getDetails().get("githubCollectionDiscovery"));
+        Thread.interrupted();
+
+        discovery.retryPendingDiscovery();
+        assertEquals(java.util.List.of(activeCollection), discovery.getDiscoveredCollections());
+        assertEquals(Status.UP, discovery.discoveryHealth().getStatus());
+        assertEquals("ready", discovery.discoveryHealth().getDetails().get("githubCollectionDiscovery"));
+    }
+
+    @Test
+    void interruptionDuringValidationRestoresInterruptStatus()
+            throws InterruptedException, ExecutionException, TimeoutException {
+        QdrantClient qdrantClient = mock(QdrantClient.class);
+        EmbeddingClient embeddingClient = mock(EmbeddingClient.class);
+        String activeCollection = GENERATION_PREFIX + "openai-java-chat";
+        when(qdrantClient.listCollectionsAsync(any(java.time.Duration.class)))
+                .thenReturn(Futures.immediateFuture(java.util.List.of(activeCollection)));
+        ListenableFuture<CollectionInfo> collectionInfoRequest = mock();
+        when(qdrantClient.getCollectionInfoAsync(activeCollection)).thenReturn(collectionInfoRequest);
+        when(embeddingClient.dimensions()).thenReturn(EMBEDDING_DIMENSIONS);
+        when(collectionInfoRequest.get(anyLong(), eq(TimeUnit.SECONDS)))
+                .thenThrow(new InterruptedException("validation interrupted"));
+        when(collectionInfoRequest.isDone()).thenReturn(false);
+
+        QdrantGitHubCollectionDiscovery discovery =
+                new QdrantGitHubCollectionDiscovery(qdrantClient, embeddingClient, new AppProperties());
+        try {
+            discovery.discoverGitHubCollections();
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+        assertEquals("pending", discovery.discoveryHealth().getDetails().get("githubCollectionDiscovery"));
+    }
+
     private static CollectionInfo validCollectionInfo(int denseDimensions) {
         VectorParamsMap vectorParams = VectorParamsMap.newBuilder()
                 .putMap(
