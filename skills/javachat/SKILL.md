@@ -1,6 +1,6 @@
 ---
 name: javachat
-description: "Use the JavaChat CLI to answer software and platform documentation questions with retrieved citations. Use it when an answer depends on a package version, indexed repository, command syntax, or deployment behavior."
+description: "Use the JavaChat CLI for cited software and platform documentation answers, especially package versions, indexed repositories, command syntax, and deployment behavior."
 ---
 
 # JavaChat documentation
