@@ -39,5 +39,11 @@ if (!dockerfile.includes(expectedDockerImage)) {
 if (!gettingStartedGuide.includes(expectedDocumentationVersion)) {
   throw new Error(`docs/getting-started.md must name ${expectedDocumentationVersion}`);
 }
+// Types from a newer Node major type-check APIs this runtime lacks.
+const nodeTypesMajor = frontendPackage.devDependencies?.["@types/node"]?.replace(/^[\^~]/, "").split(".")[0];
+const runtimeMajor = canonicalNodeVersion.split(".")[0];
+if (nodeTypesMajor !== undefined && nodeTypesMajor !== runtimeMajor) {
+  throw new Error(`frontend/package.json @types/node must stay on the Node ${runtimeMajor} major`);
+}
 
 console.log(`Node ${canonicalNodeVersion} projections are synchronized.`);
