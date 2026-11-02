@@ -191,15 +191,25 @@ class OpenAiStreamingFailureExceptionTest {
 
     @Test
     void terminalAttemptRejectsInvalidProviderModelAndAttemptBounds() {
-        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 0, 1, false));
-        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 2, 1, false));
-        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(" ", MODEL_ID, 1, 1, false));
-        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(PROVIDER_NAME, "", 1, 1, false));
-        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 1, 0, false));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 0, 1, false, java.util.Optional.empty()));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 2, 1, false, java.util.Optional.empty()));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerminalAttempt(" ", MODEL_ID, 1, 1, false, java.util.Optional.empty()));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerminalAttempt(PROVIDER_NAME, "", 1, 1, false, java.util.Optional.empty()));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 1, 0, false, java.util.Optional.empty()));
     }
 
     private static TerminalAttempt terminalAttempt(boolean emittedTextChunk) {
-        return new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 2, 2, emittedTextChunk);
+        return new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 2, 2, emittedTextChunk, java.util.Optional.empty());
     }
 
     private ILoggingEvent onlyTerminalAlert() {

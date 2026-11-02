@@ -46,6 +46,7 @@ public final class OpenAiStreamingFailureException extends RuntimeException impl
         UPSTREAM_TYPE("upstreamType"),
         GATEWAY_REQUEST_ID("gatewayRequestId"),
         RETRY_AFTER("retryAfter"),
+        TERMINAL_REASON("terminalReason"),
         QUEUE_TIER("queueTier"),
         QUEUE_LANE("queueLane"),
         QUEUE_TIMEOUT_PHASE("queueTimeoutPhase"),
@@ -117,6 +118,7 @@ public final class OpenAiStreamingFailureException extends RuntimeException impl
     private final String upstreamType;
     private final String gatewayRequestId;
     private final String retryAfter;
+    private final String terminalReason;
     private final Map<QueueHeader, String> queueHeaderValues;
 
     private OpenAiStreamingFailureException(Throwable upstreamFailure, TerminalAttempt terminalAttempt) {
@@ -129,6 +131,8 @@ public final class OpenAiStreamingFailureException extends RuntimeException impl
         this.currentAttempt = validatedAttempt.currentAttempt();
         this.maxAttempts = validatedAttempt.maxAttempts();
         this.emittedTextChunk = validatedAttempt.emittedTextChunk();
+        this.terminalReason =
+                boundedOptionalValue(validatedAttempt.terminalReason()).orElse(null);
         if (upstreamFailure instanceof OpenAIServiceException serviceException) {
             this.upstreamHttpStatus = serviceException.statusCode();
             this.upstreamCode = boundedOptionalValue(serviceException.code()).orElse(null);
@@ -170,6 +174,12 @@ public final class OpenAiStreamingFailureException extends RuntimeException impl
     @Override
     public Throwable upstreamFailure() {
         return Objects.requireNonNull(getCause(), "upstreamFailure");
+    }
+
+    /** Exposes the finite in-band reason to the request-correlated terminal log. */
+    @Override
+    public Optional<String> terminalReason() {
+        return Optional.ofNullable(terminalReason);
     }
 
     /** Returns the bounded provider name used by the terminal attempt. */
@@ -269,6 +279,9 @@ public final class OpenAiStreamingFailureException extends RuntimeException impl
         }
         if (retryAfter != null) {
             terminalAlert = terminalAlert.addKeyValue(AlertField.RETRY_AFTER.fieldName(), retryAfter);
+        }
+        if (terminalReason != null) {
+            terminalAlert = terminalAlert.addKeyValue(AlertField.TERMINAL_REASON.fieldName(), terminalReason);
         }
         for (QueueHeader queueHeader : QueueHeader.values()) {
             if (queueHeaderValues.containsKey(queueHeader)) {

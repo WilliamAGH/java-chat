@@ -122,7 +122,7 @@ class OpenAIStreamingServiceTest {
         OpenAiStreamingFailureException terminalFailure = OpenAiStreamingFailureException.terminalAndLog(
                 internalServerException,
                 new StreamingFailureReporter.TerminalAttempt(
-                        RateLimitService.ApiProvider.OPENAI.getName(), "gpt-5.4", 1, 1, false));
+                        RateLimitService.ApiProvider.OPENAI.getName(), "gpt-5.4", 1, 1, false, Optional.empty()));
 
         assertTrue(streamingService.isRecoverableStreamingFailure(
                 new IllegalStateException("reactor boundary", terminalFailure)));
@@ -432,6 +432,10 @@ class OpenAIStreamingServiceTest {
                             OpenAiResponseException.TerminalReason.RATE_LIMIT_EXCEEDED,
                             upstreamFailure.terminalReason());
                     assertFalse(streamingService.isRecoverableStreamingFailure(failure));
+                    assertEquals(
+                            Optional.of("RATE_LIMIT_EXCEEDED"),
+                            assertInstanceOf(OpenAiStreamingFailureException.class, failure)
+                                    .terminalReason());
                 })
                 .verify();
 

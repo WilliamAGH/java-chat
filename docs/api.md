@@ -55,6 +55,8 @@ Application logs distinguish HTTP completion (`api_request_completed`) from a te
 error (`search_stream_failed`); HTTP 200 alone does not establish that the answer succeeded.
 Embedding rate-limit records retain the upstream status, workload, model, gateway request ID,
 and `Retry-After` when supplied. Missing retry timing does not replace the original provider cause.
+An in-band Responses failure retains its finite `terminalReason` on the request-correlated log;
+that protocol outcome is not reported as a transport HTTP 429.
 
 ### Browser failure diagnostics
 

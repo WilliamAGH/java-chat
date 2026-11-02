@@ -17,6 +17,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.core.http.Headers;
 import com.openai.errors.RateLimitException;
+import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureException;
+import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter.TerminalAttempt;
 import com.williamcallahan.javachat.service.EmbeddingServiceTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
@@ -24,6 +26,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -108,6 +111,43 @@ class SseSupportTest {
                         .anyMatch(logField -> "upstreamHttpStatus".equals(logField.key)
                                 && Integer.valueOf(429).equals(logField.value)));
             }
+        }
+    }
+
+    @Test
+    void inBandRateLimitRetainsItsReasonAndRequestWithoutInventingAnHttpStatus() {
+        SseSupport sseSupport = createSseSupport();
+        MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+        servletResponse.setHeader("X-Request-ID", "in-band-request");
+        try (ExpectedLogEvents providerLogs = ExpectedLogEvents.capture(
+                        (Logger) LoggerFactory.getLogger(OpenAiStreamingFailureException.class));
+                ExpectedLogEvents requestLogs =
+                        ExpectedLogEvents.capture((Logger) LoggerFactory.getLogger(SseSupport.class))) {
+            OpenAiStreamingFailureException reportedFailure = OpenAiStreamingFailureException.terminalAndLog(
+                    new IllegalStateException("Controlled in-band failure"),
+                    new TerminalAttempt("openai", "test-model", 1, 1, false, Optional.of("RATE_LIMIT_EXCEEDED")));
+            var failedEvents = sseSupport.withFailureDiagnostics(
+                    sseSupport.streamErrorEvent("Failure", "In-band refusal", false), reportedFailure);
+            var emittedEvents = sseSupport
+                    .withRequestDiagnostics(failedEvents, servletResponse, "/api/chat/stream")
+                    .collectList()
+                    .block();
+            assertEquals(
+                    EVENT_ERROR,
+                    Objects.requireNonNull(emittedEvents).getFirst().event());
+            var correlatedFailure = requestLogs.events().getFirst();
+            assertTrue(correlatedFailure.getKeyValuePairs().stream()
+                    .anyMatch(logField ->
+                            "terminalReason".equals(logField.key) && "RATE_LIMIT_EXCEEDED".equals(logField.value)));
+            assertTrue(correlatedFailure.getKeyValuePairs().stream()
+                    .anyMatch(
+                            logField -> "requestId".equals(logField.key) && "in-band-request".equals(logField.value)));
+            assertFalse(correlatedFailure.getKeyValuePairs().stream()
+                    .anyMatch(logField -> "upstreamHttpStatus".equals(logField.key)));
+            assertEquals(1, providerLogs.events().size());
+            assertTrue(providerLogs.events().getFirst().getKeyValuePairs().stream()
+                    .anyMatch(logField ->
+                            "terminalReason".equals(logField.key) && "RATE_LIMIT_EXCEEDED".equals(logField.value)));
         }
     }
 

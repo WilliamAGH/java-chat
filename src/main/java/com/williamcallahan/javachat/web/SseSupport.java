@@ -7,6 +7,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import com.openai.errors.OpenAIServiceException;
+import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import com.williamcallahan.javachat.support.StructuredLogValue;
 import io.micrometer.core.instrument.Counter;
@@ -143,16 +144,20 @@ public class SseSupport {
     /** Joins the request's terminal event to its own provider refusal, independent of callback threads. */
     public Flux<ServerSentEvent<String>> withFailureDiagnostics(
             Flux<ServerSentEvent<String>> errorEvents, Throwable searchFailure) {
+        Flux<ServerSentEvent<String>> correlatedErrors = ReportedStreamingFailure.findInCauseChain(searchFailure)
+                .map(reportedFailure -> errorEvents.contextWrite(
+                        streamContext -> streamContext.put(ReportedStreamingFailure.class, reportedFailure)))
+                .orElse(errorEvents);
         Set<Throwable> inspectedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
         Throwable failureCause = searchFailure;
         while (failureCause != null && inspectedFailures.add(failureCause)) {
             if (failureCause instanceof OpenAIServiceException providerFailure) {
-                return errorEvents.contextWrite(
+                return correlatedErrors.contextWrite(
                         streamContext -> streamContext.put(OpenAIServiceException.class, providerFailure));
             }
             failureCause = failureCause.getCause();
         }
-        return errorEvents;
+        return correlatedErrors;
     }
 
     /**
@@ -276,6 +281,12 @@ public class SseSupport {
                                 .addKeyValue("code", payload.code())
                                 .addKeyValue("stage", payload.stage())
                                 .addKeyValue("retryable", payload.retryable())
+                                .addKeyValue(
+                                        "terminalReason",
+                                        streamContext
+                                                .<ReportedStreamingFailure>getOrEmpty(ReportedStreamingFailure.class)
+                                                .flatMap(ReportedStreamingFailure::terminalReason)
+                                                .orElse(null))
                                 .addKeyValue(
                                         "durationMs",
                                         java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
