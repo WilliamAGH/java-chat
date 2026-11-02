@@ -106,6 +106,7 @@ public final class ApiRequestLoggingFilter extends OncePerRequestFilter {
         apiRequest.removeAttribute(ERROR_PENDING_ATTRIBUTE);
     }
 
+    /** Distinguishes container-rendered errors from responses that finish within the current dispatch. */
     private static final class ErrorDispatchResponse extends HttpServletResponseWrapper {
         private final HttpServletRequest apiRequest;
 
