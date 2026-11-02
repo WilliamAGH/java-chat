@@ -27,7 +27,7 @@ for (const failureKind of ["HTTP", "SSE"] as const) {
     await page.getByLabel("Message input").fill("Explain Java records");
     await page.getByLabel("Message input").press("Enter");
     await expect(
-      page.getByText("Search is temporarily rate limited", { exact: true }),
+      page.getByRole("status").getByText("Search is temporarily rate limited", { exact: true }),
     ).toBeVisible();
     const diagnosticRequest = await diagnosticSubmission;
     const parsedDiagnostic: unknown = diagnosticRequest.postDataJSON();
