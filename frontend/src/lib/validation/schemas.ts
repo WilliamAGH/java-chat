@@ -68,7 +68,7 @@ export const StreamErrorSchema = z.object(sseEventFieldShape);
 export const BrowserSearchFailureSchema = z.object({
   path: z.string().startsWith("/api/").max(160),
   kind: z.enum(["HTTP", "SSE", "NETWORK", "PROTOCOL"]),
-  httpStatus: z.number().int().min(100).max(599).optional(),
+  httpStatus: z.int().min(100).max(599).optional(),
   requestId: z.string().max(128).optional(),
   code: z.string().max(128).optional(),
   stage: z.string().max(64).optional(),
