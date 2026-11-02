@@ -264,7 +264,9 @@ export function nestNumericListFences(
         );
         targetIndentation = awaitedContinuationIndentation;
         maximumSourceIndentation =
-          awaitedContinuationIndentation + COMMONMARK_MAX_FENCE_INDENTATION;
+          awaitedContinuationIndentation +
+          COMMONMARK_MAX_FENCE_INDENTATION -
+          bodyIndentation.length;
         fenceState.open(fenceCandidate.marker);
         awaitedContinuationIndentation = null;
         nestedLines.push(
