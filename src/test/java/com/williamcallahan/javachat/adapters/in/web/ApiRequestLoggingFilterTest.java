@@ -15,6 +15,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -97,6 +98,7 @@ class ApiRequestLoggingFilterTest {
             assertEquals(502, apiResponse.getStatus());
             assertEquals(1, completedRequests(capturedLogs).size());
             ILoggingEvent completion = completedRequests(capturedLogs).getFirst();
+            String requestId = Objects.requireNonNull(apiResponse.getHeader("X-Request-ID"));
             assertEquals(Level.WARN, completion.getLevel());
             assertTrue(completion.getKeyValuePairs().stream()
                     .anyMatch(logField -> "status".equals(logField.key)
@@ -104,8 +106,7 @@ class ApiRequestLoggingFilterTest {
             assertTrue(completion.getKeyValuePairs().stream()
                     .anyMatch(logField -> "path".equals(logField.key) && "/api/chat/citations".equals(logField.value)));
             assertTrue(completion.getKeyValuePairs().stream()
-                    .anyMatch(logField -> "requestId".equals(logField.key)
-                            && apiResponse.getHeader("X-Request-ID").equals(logField.value)));
+                    .anyMatch(logField -> "requestId".equals(logField.key) && requestId.equals(logField.value)));
             assertTrue(completion.getKeyValuePairs().stream()
                     .anyMatch(logField -> "retryAfter".equals(logField.key) && "12".equals(logField.value)));
             assertTrue(completion.getKeyValuePairs().stream()
