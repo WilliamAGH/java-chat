@@ -16,9 +16,11 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import com.williamcallahan.javachat.application.auth.ApiKeyOperationUnavailableException;
 import com.williamcallahan.javachat.application.auth.VerifiedApiKey;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -104,6 +106,30 @@ class ClerkApiKeyVerifierTest {
 
         assertThrows(ApiKeyOperationUnavailableException.class, () -> verifier.verify(PRESENTED_API_KEY));
         clerkServer.verify();
+    }
+
+    @ParameterizedTest
+    @MethodSource("incompleteIdentityVerificationResponses")
+    void rejectsIncompleteIdentity(String verificationResponse) {
+        RestClient.Builder restClientBuilder = RestClient.builder();
+        MockRestServiceServer clerkServer =
+                MockRestServiceServer.bindTo(restClientBuilder).build();
+        ClerkApiKeyVerifier verifier = new ClerkApiKeyVerifier(restClientBuilder.build(), CLERK_SECRET_KEY);
+        clerkServer
+                .expect(requestTo(CLERK_VERIFY_ENDPOINT))
+                .andRespond(withSuccess(verificationResponse, MediaType.APPLICATION_JSON));
+
+        assertThrows(ApiKeyOperationUnavailableException.class, () -> verifier.verify(PRESENTED_API_KEY));
+        clerkServer.verify();
+    }
+
+    private static Stream<String> incompleteIdentityVerificationResponses() {
+        return Stream.of(
+                "{\"id\":\"ak_0123456789abcdef0123456789abcdef\",\"revoked\":false,\"expired\":false}",
+                "{\"subject\":\"user_0123456789abcdefghijklmnopq\",\"revoked\":false,\"expired\":false}",
+                "{\"revoked\":false,\"expired\":false}",
+                "{\"id\":\"ak_0123456789abcdef0123456789abcdef\",\"subject\":\"\",\"revoked\":false,\"expired\":false}",
+                "{\"id\":\"\",\"subject\":\"user_0123456789abcdefghijklmnopq\",\"revoked\":false,\"expired\":false}");
     }
 
     @Test
