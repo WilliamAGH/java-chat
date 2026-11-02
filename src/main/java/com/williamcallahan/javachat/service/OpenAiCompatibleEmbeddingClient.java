@@ -9,6 +9,7 @@ import com.openai.errors.OpenAIRetryableException;
 import com.openai.errors.OpenAIServiceException;
 import com.openai.models.embeddings.CreateEmbeddingResponse;
 import com.openai.models.embeddings.EmbeddingCreateParams;
+import com.williamcallahan.javachat.support.StructuredLogValue;
 import java.io.InterruptedIOException;
 import java.net.SocketTimeoutException;
 import java.time.Duration;
@@ -357,7 +358,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
                                             .build()));
             CompletableFuture<CreateEmbeddingResponse> accountedEmbeddingResponseFuture =
                     embeddingResponseFuture.whenComplete((completedEmbeddingResponse, embeddingFailure) -> {
-                        recordProviderCooldownFromFutureFailure(embeddingFailure, requestTier);
+                        recordProviderCooldownFromFutureFailure(embeddingFailure, requestTier, purpose);
                         requestPermits.release();
                     });
             requestPermitAcquired = false;
@@ -367,7 +368,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
             throw new EmbeddingServiceTemporarilyUnavailableException(
                     "Interrupted during gateway embedding request admission or completion", interruptedException);
         } catch (OpenAIServiceException exception) {
-            recordProviderCooldown(exception, requestTier);
+            recordProviderCooldown(exception, requestTier, purpose);
             throw wrapServiceError(exception);
         } catch (OpenAIRetryableException exception) {
             throw wrapRetryableError(exception);
@@ -432,10 +433,9 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
                         exception,
                         Duration.ofSeconds(retryDecision.retryAfterSeconds()));
             } catch (RateLimitDecisionException rateLimitDecisionFailure) {
-                rateLimitDecisionFailure.addSuppressed(exception);
+                exception.addSuppressed(rateLimitDecisionFailure);
                 return new EmbeddingServiceTemporarilyUnavailableException(
-                        "Remote embedding provider returned HTTP 429 without authoritative retry timing",
-                        rateLimitDecisionFailure);
+                        "Remote embedding provider returned HTTP 429 without authoritative retry timing", exception);
             }
         }
         String details = sanitizeMessage(exception.getMessage());
@@ -451,20 +451,54 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         return new EmbeddingServiceUnavailableException(failureMessage, exception);
     }
 
-    private void recordProviderCooldownFromFutureFailure(Throwable embeddingFailure, LlmGatewayTier requestTier) {
+    private void recordProviderCooldownFromFutureFailure(
+            Throwable embeddingFailure, LlmGatewayTier requestTier, LlmGatewayTier.Purpose purpose) {
         Throwable providerFailure = embeddingFailure;
         while (providerFailure instanceof CompletionException && providerFailure.getCause() != null) {
             providerFailure = providerFailure.getCause();
         }
         if (providerFailure instanceof OpenAIServiceException serviceException) {
-            recordProviderCooldown(serviceException, requestTier);
+            recordProviderCooldown(serviceException, requestTier, purpose);
         }
     }
 
-    private void recordProviderCooldown(OpenAIServiceException serviceException, LlmGatewayTier requestTier) {
+    private void recordProviderCooldown(
+            OpenAIServiceException serviceException, LlmGatewayTier requestTier, LlmGatewayTier.Purpose purpose) {
         if (serviceException.statusCode() != HttpStatus.TOO_MANY_REQUESTS.value()) {
             return;
         }
+        log.atWarn()
+                .setMessage("Embedding provider rejected request")
+                .addKeyValue("event", "embedding_rate_limited")
+                .addKeyValue("upstreamHttpStatus", serviceException.statusCode())
+                .addKeyValue("tier", requestTier.requestHeader())
+                .addKeyValue("model", modelName)
+                .addKeyValue("workload", requestTier.workloadHeader(purpose))
+                .addKeyValue(
+                        "upstreamCode",
+                        StructuredLogValue.bounded(serviceException.code().orElse("unknown"), MAX_ERROR_SNIPPET)
+                                .text())
+                .addKeyValue(
+                        "upstreamType",
+                        StructuredLogValue.bounded(serviceException.type().orElse("unknown"), MAX_ERROR_SNIPPET)
+                                .text())
+                .addKeyValue(
+                        "retryAfter",
+                        StructuredLogValue.bounded(
+                                        serviceException.headers().values("retry-after").stream()
+                                                .findFirst()
+                                                .orElse("unknown"),
+                                        MAX_ERROR_SNIPPET)
+                                .text())
+                .addKeyValue(
+                        "gatewayRequestId",
+                        StructuredLogValue.bounded(
+                                        serviceException.headers().values("x-lgw-request-id").stream()
+                                                .findFirst()
+                                                .orElse("unknown"),
+                                        MAX_ERROR_SNIPPET)
+                                .text())
+                .log();
         try {
             RateLimitDecision rateLimitDecision =
                     rateLimitDecisionResolver.resolveFromOpenAiRetryAfterHeaders(serviceException.headers());

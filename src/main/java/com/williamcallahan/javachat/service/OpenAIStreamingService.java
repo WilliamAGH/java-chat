@@ -289,7 +289,12 @@ public class OpenAIStreamingService {
                                         preparedStreamingRequest.modelId(),
                                         1,
                                         1,
-                                        emittedVisibleText.get())));
+                                        emittedVisibleText.get(),
+                                        streamingFailure instanceof OpenAiResponseException responseFailure
+                                                ? Optional.of(responseFailure
+                                                        .terminalReason()
+                                                        .name())
+                                                : Optional.empty())));
                     });
         });
     }

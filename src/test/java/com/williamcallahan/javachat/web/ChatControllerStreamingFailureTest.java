@@ -32,6 +32,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.openai.core.http.Headers;
 import com.openai.errors.InternalServerException;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
@@ -118,6 +119,7 @@ class ChatControllerStreamingFailureTest {
     @Test
     void terminalGatewayTimeoutDoesNotEmitDuplicateControllerError() {
         InternalServerException upstreamFailure = mock(InternalServerException.class);
+        when(upstreamFailure.headers()).thenReturn(Headers.builder().build());
         when(upstreamFailure.statusCode()).thenReturn(504);
         when(upstreamFailure.getMessage()).thenReturn(UPSTREAM_SECRET_MESSAGE);
         ReportedTerminalStreamingFailure terminalFailure = new ReportedTerminalStreamingFailure(upstreamFailure);
@@ -245,6 +247,7 @@ class ChatControllerStreamingFailureTest {
 
     private static ReportedTerminalStreamingFailure unprocessableEntityFailure(String gatewayErrorCode) {
         InternalServerException gatewayFailure = mock(InternalServerException.class);
+        when(gatewayFailure.headers()).thenReturn(Headers.builder().build());
         when(gatewayFailure.statusCode()).thenReturn(UNPROCESSABLE_ENTITY_STATUS);
         when(gatewayFailure.code()).thenReturn(Optional.of(gatewayErrorCode));
         return new ReportedTerminalStreamingFailure(gatewayFailure);

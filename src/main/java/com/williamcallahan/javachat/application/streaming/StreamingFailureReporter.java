@@ -1,5 +1,8 @@
 package com.williamcallahan.javachat.application.streaming;
 
+import java.util.Objects;
+import java.util.Optional;
+
 /**
  * Reports a terminal provider failure without exposing provider-specific exception types to orchestration code.
  */
@@ -16,7 +19,12 @@ public interface StreamingFailureReporter {
 
     /** Captures the provider attempt that became terminal. */
     record TerminalAttempt(
-            String providerName, String modelId, int currentAttempt, int maxAttempts, boolean emittedTextChunk) {
+            String providerName,
+            String modelId,
+            int currentAttempt,
+            int maxAttempts,
+            boolean emittedTextChunk,
+            Optional<String> terminalReason) {
 
         /**
          * Validates immutable context before a provider reporter can emit it.
@@ -26,8 +34,10 @@ public interface StreamingFailureReporter {
          * @param currentAttempt one-based terminal attempt number
          * @param maxAttempts maximum number of allowed attempts
          * @param emittedTextChunk whether visible text was emitted before the failure
+         * @param terminalReason finite protocol reason for an in-band failure; empty for transport failures
          */
         public TerminalAttempt {
+            terminalReason = Objects.requireNonNull(terminalReason, "terminalReason");
             if (providerName == null || providerName.isBlank()) {
                 throw new IllegalArgumentException("providerName must not be blank");
             }

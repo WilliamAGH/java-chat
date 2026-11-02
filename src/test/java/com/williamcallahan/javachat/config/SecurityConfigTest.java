@@ -6,21 +6,29 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import ch.qos.logback.classic.Logger;
+import com.williamcallahan.javachat.adapters.in.web.ApiRequestLoggingFilter;
 import com.williamcallahan.javachat.adapters.out.clerk.ClerkApiKeyVerifier;
 import com.williamcallahan.javachat.application.auth.ApiKeyOperationUnavailableException;
 import com.williamcallahan.javachat.application.auth.VerifiedApiKey;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import com.williamcallahan.javachat.web.CsrfController;
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.Cookie;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -31,8 +39,10 @@ import org.springframework.security.core.Authentication;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
 
 /**
  * Verifies that the browser-readable CSRF cookie remains valid across stateless requests.
@@ -71,6 +81,9 @@ class SecurityConfigTest {
 
     @Autowired
     MockMvc mockMvc;
+
+    @Autowired
+    ApiRequestLoggingFilter requestLogging;
 
     @MockitoBean
     ClerkApiKeyVerifier clerkApiKeyVerifier;
@@ -135,11 +148,88 @@ class SecurityConfigTest {
     }
 
     @Test
+    void identifiesRateLimitedRequestsBeforeControllerDispatch() throws Exception {
+        when(clerkApiKeyVerifier.verify(API_KEY_SECRET)).thenReturn(Optional.empty());
+        for (int requestNumber = 0; requestNumber < 20; requestNumber++) {
+            mockMvc.perform(post(CSRF_PROTECTED_ENDPOINT)
+                            .header(HttpHeaders.AUTHORIZATION, API_KEY_BEARER)
+                            .with(httpRequest -> {
+                                httpRequest.setRemoteAddr("192.0.2.20");
+                                return httpRequest;
+                            }))
+                    .andExpect(status().isUnauthorized());
+        }
+        mockMvc.perform(post(CSRF_PROTECTED_ENDPOINT)
+                        .header(HttpHeaders.AUTHORIZATION, API_KEY_BEARER)
+                        .with(httpRequest -> {
+                            httpRequest.setRemoteAddr("192.0.2.20");
+                            return httpRequest;
+                        }))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists("X-Request-ID"));
+    }
+
+    @Test
+    void recordsStreamingCompletionAfterTheAsynchronousResponseFinishes() throws Exception {
+        try (ExpectedLogEvents capturedLogs =
+                ExpectedLogEvents.capture((Logger) LoggerFactory.getLogger(ApiRequestLoggingFilter.class))) {
+            MvcResult streamingExchange = mockMvc.perform(get("/api/test/stream"))
+                    .andExpect(request().asyncStarted())
+                    .andExpect(header().exists("X-Request-ID"))
+                    .andReturn();
+            assertTrue(capturedLogs.events().stream()
+                    .noneMatch(logEvent -> "API request completed".equals(logEvent.getFormattedMessage())));
+            mockMvc.perform(asyncDispatch(streamingExchange)).andExpect(status().isOk());
+            assertEquals(
+                    1,
+                    capturedLogs.events().stream()
+                            .filter(logEvent -> "API request completed".equals(logEvent.getFormattedMessage()))
+                            .count());
+        }
+    }
+
+    @Test
     void returnsJsonWhenCsrfTokenIsMissing() throws Exception {
-        mockMvc.perform(post(CSRF_PROTECTED_ENDPOINT))
-                .andExpect(status().isForbidden())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.message").value(CSRF_INVALID_MESSAGE));
+        try (ExpectedLogEvents capturedLogs =
+                ExpectedLogEvents.capture((Logger) LoggerFactory.getLogger(ApiRequestLoggingFilter.class))) {
+            mockMvc.perform(post(CSRF_PROTECTED_ENDPOINT))
+                    .andExpect(status().isForbidden())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                    .andExpect(header().exists("X-Request-ID"))
+                    .andExpect(jsonPath("$.message").value(CSRF_INVALID_MESSAGE));
+            var completedRequests = capturedLogs.events().stream()
+                    .filter(logEvent -> "API request completed".equals(logEvent.getFormattedMessage()))
+                    .toList();
+            assertEquals(1, completedRequests.size());
+            assertTrue(completedRequests.getFirst().getKeyValuePairs().stream()
+                    .anyMatch(logField -> "status".equals(logField.key)
+                            && Integer.valueOf(403).equals(logField.value)));
+        }
+    }
+
+    @Test
+    void waitsForSecurityEntryPointErrorRendering() throws Exception {
+        try (ExpectedLogEvents capturedLogs =
+                ExpectedLogEvents.capture((Logger) LoggerFactory.getLogger(ApiRequestLoggingFilter.class))) {
+            MvcResult deniedExchange = mockMvc.perform(get(API_KEY_SUBJECT_ENDPOINT))
+                    .andExpect(status().isForbidden())
+                    .andExpect(header().exists("X-Request-ID"))
+                    .andReturn();
+            assertTrue(capturedLogs.events().stream()
+                    .noneMatch(logEvent -> "API request completed".equals(logEvent.getFormattedMessage())));
+            deniedExchange.getRequest().setDispatcherType(DispatcherType.ERROR);
+            deniedExchange.getRequest().setAttribute(RequestDispatcher.ERROR_REQUEST_URI, API_KEY_SUBJECT_ENDPOINT);
+            deniedExchange.getRequest().setRequestURI("/error");
+            requestLogging.doFilter(
+                    deniedExchange.getRequest(), deniedExchange.getResponse(), (errorRequest, errorResponse) -> {});
+            var completedRequests = capturedLogs.events().stream()
+                    .filter(logEvent -> "API request completed".equals(logEvent.getFormattedMessage()))
+                    .toList();
+            assertEquals(1, completedRequests.size());
+            assertTrue(completedRequests.getFirst().getKeyValuePairs().stream()
+                    .anyMatch(logField -> "status".equals(logField.key)
+                            && Integer.valueOf(403).equals(logField.value)));
+        }
     }
 
     @Test
@@ -251,6 +341,12 @@ class SecurityConfigTest {
      */
     @RestController
     public static final class ProtectedPostController {
+
+        /** Exercises the real asynchronous servlet completion rather than a mocked filter chain. */
+        @GetMapping(value = "/api/test/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+        public Flux<String> streamForRequestLogging() {
+            return Flux.just("complete");
+        }
 
         /**
          * Confirms that Spring Security admitted a state-changing request.

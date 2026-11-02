@@ -228,55 +228,63 @@ public class ChatController extends BaseController {
         Flux<ServerSentEvent<String>> operationEventsWithProgress = Flux.merge(
                 retrievalProgressEvents.asFlux(),
                 deadlineBoundOperationEvents.doFinally(terminationSignal -> retrievalProgressEvents.tryEmitComplete()));
-        return Flux.concat(
-                        sseSupport.responsePreparationStatus(), sseSupport.withHeartbeats(operationEventsWithProgress))
-                .onErrorResume(error -> {
-                    Optional<ReportedStreamingFailure> terminalFailureContext =
-                            ReportedStreamingFailure.findInCauseChain(error);
-                    Throwable upstreamError = terminalFailureContext
-                            .map(ReportedStreamingFailure::upstreamFailure)
-                            .orElse(error);
-                    if (upstreamError instanceof ConfiguredProviderTemporarilyUnavailableException) {
-                        return sseSupport.configuredProviderUnavailableError();
-                    }
-                    if (terminalFailureContext.isEmpty() && sseSupport.isResponsePreparationTimeout(upstreamError)) {
-                        PIPELINE_LOG
-                                .atWarn()
-                                .setMessage("Response preparation timeout")
-                                .addKeyValue("requestToken", requestToken)
-                                .addKeyValue(
-                                        "sessionId",
-                                        StructuredLogValue.bounded(sessionId, MAX_STREAM_LOG_SESSION_ID_LENGTH)
-                                                .text())
-                                .addKeyValue("code", STATUS_CODE_RETRIEVAL_TIMEOUT)
-                                .addKeyValue("stage", STATUS_STAGE_RETRIEVAL)
-                                .addKeyValue(
-                                        "exceptionType",
-                                        upstreamError.getClass().getSimpleName())
-                                .log();
-                        return sseSupport.responsePreparationTimeoutError();
-                    }
-                    String errorDetail = buildUserFacingErrorMessage(upstreamError);
-                    String diagnostics = isRetrievalFailure(upstreamError)
-                            ? RETRIEVAL_UNAVAILABLE_DETAILS
-                            : upstreamError instanceof Exception exception
-                                    ? describeException(exception)
-                                    : upstreamError.getClass().getName();
-                    if (terminalFailureContext.isEmpty()) {
-                        PIPELINE_LOG
-                                .atError()
-                                .setMessage("[{}] STREAMING ERROR")
-                                .addArgument(requestToken)
-                                .addKeyValue(
-                                        "sessionId",
-                                        StructuredLogValue.bounded(sessionId, MAX_STREAM_LOG_SESSION_ID_LENGTH)
-                                                .text())
-                                .addKeyValue("exceptionType", error.getClass().getSimpleName())
-                                .log();
-                    }
-                    boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
-                    return sseSupport.streamErrorEvent(errorDetail, diagnostics, retryable);
-                });
+        return sseSupport.withRequestDiagnostics(
+                Flux.concat(
+                                sseSupport.responsePreparationStatus(),
+                                sseSupport.withHeartbeats(operationEventsWithProgress))
+                        .onErrorResume(error -> {
+                            Optional<ReportedStreamingFailure> terminalFailureContext =
+                                    ReportedStreamingFailure.findInCauseChain(error);
+                            Throwable upstreamError = terminalFailureContext
+                                    .map(ReportedStreamingFailure::upstreamFailure)
+                                    .orElse(error);
+                            if (upstreamError instanceof ConfiguredProviderTemporarilyUnavailableException) {
+                                return sseSupport.configuredProviderUnavailableError();
+                            }
+                            if (terminalFailureContext.isEmpty()
+                                    && sseSupport.isResponsePreparationTimeout(upstreamError)) {
+                                PIPELINE_LOG
+                                        .atWarn()
+                                        .setMessage("Response preparation timeout")
+                                        .addKeyValue("requestToken", requestToken)
+                                        .addKeyValue(
+                                                "sessionId",
+                                                StructuredLogValue.bounded(sessionId, MAX_STREAM_LOG_SESSION_ID_LENGTH)
+                                                        .text())
+                                        .addKeyValue("code", STATUS_CODE_RETRIEVAL_TIMEOUT)
+                                        .addKeyValue("stage", STATUS_STAGE_RETRIEVAL)
+                                        .addKeyValue(
+                                                "exceptionType",
+                                                upstreamError.getClass().getSimpleName())
+                                        .log();
+                                return sseSupport.responsePreparationTimeoutError();
+                            }
+                            String errorDetail = buildUserFacingErrorMessage(upstreamError);
+                            String diagnostics = isRetrievalFailure(upstreamError)
+                                    ? RETRIEVAL_UNAVAILABLE_DETAILS
+                                    : upstreamError instanceof Exception exception
+                                            ? describeException(exception)
+                                            : upstreamError.getClass().getName();
+                            if (terminalFailureContext.isEmpty()) {
+                                PIPELINE_LOG
+                                        .atError()
+                                        .setMessage("[{}] STREAMING ERROR")
+                                        .addArgument(requestToken)
+                                        .addKeyValue(
+                                                "sessionId",
+                                                StructuredLogValue.bounded(sessionId, MAX_STREAM_LOG_SESSION_ID_LENGTH)
+                                                        .text())
+                                        .addKeyValue(
+                                                "exceptionType",
+                                                error.getClass().getSimpleName())
+                                        .log();
+                            }
+                            boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
+                            return sseSupport.withFailureDiagnostics(
+                                    sseSupport.streamErrorEvent(errorDetail, diagnostics, retryable), error);
+                        }),
+                response,
+                "/api/chat/stream");
     }
 
     /**

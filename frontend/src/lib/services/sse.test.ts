@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { streamSse, streamSseGet } from "./sse";
 
+vi.mock("./searchDiagnostics", () => ({
+  reportSearchFailure: vi.fn().mockResolvedValue(undefined),
+}));
+
 const SSE_STREAM_RESPONSE_STATUS = 200;
 const HTTP_BAD_REQUEST_STATUS = 400;
 const HTTP_TOO_MANY_REQUESTS_STATUS = 429;
@@ -177,6 +181,39 @@ describe("streamSse transport handling", () => {
     expect(onError).toHaveBeenCalledWith({
       message: rateLimitedMessage,
       retryable: true,
+    });
+  });
+
+  it("preserves HTTP refusal diagnostics and authoritative retry timing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            status: "error",
+            message: "Search is temporarily rate limited",
+            details: "The upstream request budget resets shortly",
+          }),
+          {
+            status: HTTP_TOO_MANY_REQUESTS_STATUS,
+            headers: {
+              "Content-Type": "application/json",
+              "X-Request-ID": "search-rejection-test",
+              "Retry-After": "12",
+            },
+          },
+        ),
+      ),
+    );
+
+    await expect(
+      streamSseGet("/api/chat/stream", { onText: vi.fn() }, "sse.test.ts"),
+    ).rejects.toMatchObject({
+      message: "Search is temporarily rate limited",
+      details: "The upstream request budget resets shortly",
+      httpStatus: HTTP_TOO_MANY_REQUESTS_STATUS,
+      requestId: "search-rejection-test",
+      retryAfterSeconds: 12,
     });
   });
 

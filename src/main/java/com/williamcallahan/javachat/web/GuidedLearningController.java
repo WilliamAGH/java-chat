@@ -152,27 +152,33 @@ public class GuidedLearningController extends BaseController {
             @RequestParam(name = "slug", required = false) String slug, HttpServletResponse response) {
         Flux<String> lessonContentStream = curatedLessonContentStream(slug);
         sseSupport.configureStreamingHeaders(response);
-        return Flux.defer(() -> {
-                    Flux<String> dataStream = sseSupport.prepareDataStream(lessonContentStream, ignoredChunk -> {});
-                    return sseSupport.withHeartbeats(dataStream.map(sseSupport::textEvent));
-                })
-                .onErrorResume(error -> {
-                    if (ReportedStreamingFailure.findInCauseChain(error).isEmpty()) {
-                        log.atError()
-                                .setMessage("Guided lesson content stream error")
-                                .addKeyValue(
-                                        "lessonSlug",
-                                        StructuredLogValue.bounded(slug, MAX_GUIDED_LOG_FIELD_LENGTH)
-                                                .text())
-                                .addKeyValue("exceptionType", error.getClass().getSimpleName())
-                                .log();
-                    }
-                    boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
-                    return sseSupport.streamErrorEvent(
-                            "Lesson content stream failed",
-                            "The lesson content stream encountered an error. Please try again.",
-                            retryable);
-                });
+        return sseSupport.withRequestDiagnostics(
+                Flux.defer(() -> {
+                            Flux<String> dataStream =
+                                    sseSupport.prepareDataStream(lessonContentStream, ignoredChunk -> {});
+                            return sseSupport.withHeartbeats(dataStream.map(sseSupport::textEvent));
+                        })
+                        .onErrorResume(error -> {
+                            if (ReportedStreamingFailure.findInCauseChain(error).isEmpty()) {
+                                log.atError()
+                                        .setMessage("Guided lesson content stream error")
+                                        .addKeyValue(
+                                                "lessonSlug",
+                                                StructuredLogValue.bounded(slug, MAX_GUIDED_LOG_FIELD_LENGTH)
+                                                        .text())
+                                        .addKeyValue(
+                                                "exceptionType",
+                                                error.getClass().getSimpleName())
+                                        .log();
+                            }
+                            boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
+                            return sseSupport.streamErrorEvent(
+                                    "Lesson content stream failed",
+                                    "The lesson content stream encountered an error. Please try again.",
+                                    retryable);
+                        }),
+                response,
+                "/api/guided/content/stream");
     }
 
     /**
@@ -297,9 +303,13 @@ public class GuidedLearningController extends BaseController {
         Flux<ServerSentEvent<String>> operationEventsWithProgress = Flux.merge(
                 retrievalProgressEvents.asFlux(),
                 deadlineBoundOperationEvents.doFinally(terminationSignal -> retrievalProgressEvents.tryEmitComplete()));
-        return Flux.concat(
-                        sseSupport.responsePreparationStatus(), sseSupport.withHeartbeats(operationEventsWithProgress))
-                .onErrorResume(error -> guidedStreamError(error, requestToken, sessionId, canonicalLessonSlug));
+        return sseSupport.withRequestDiagnostics(
+                Flux.concat(
+                                sseSupport.responsePreparationStatus(),
+                                sseSupport.withHeartbeats(operationEventsWithProgress))
+                        .onErrorResume(error -> guidedStreamError(error, requestToken, sessionId, canonicalLessonSlug)),
+                response,
+                "/api/guided/stream");
     }
 
     /**
@@ -417,8 +427,10 @@ public class GuidedLearningController extends BaseController {
                     .log();
         }
         boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
-        return sseSupport.streamErrorEvent(
-                GUIDED_CHAT_STREAM_ERROR_MESSAGE, GUIDED_CHAT_STREAM_ERROR_DETAILS, retryable);
+        return sseSupport.withFailureDiagnostics(
+                sseSupport.streamErrorEvent(
+                        GUIDED_CHAT_STREAM_ERROR_MESSAGE, GUIDED_CHAT_STREAM_ERROR_DETAILS, retryable),
+                error);
     }
 
     /**

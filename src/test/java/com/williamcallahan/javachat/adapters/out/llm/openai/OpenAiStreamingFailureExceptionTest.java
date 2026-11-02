@@ -55,6 +55,8 @@ class OpenAiStreamingFailureExceptionTest {
                 .put(QueueHeader.TIMEOUT_PHASE.headerName(), "first_output")
                 .put(QueueHeader.TIMEOUT_SECONDS.headerName(), "75")
                 .put(QueueHeader.ERROR_SOURCE.headerName(), "queue")
+                .put("x-lgw-request-id", "gateway-correlation-test")
+                .put("Retry-After", "12")
                 .build();
         ErrorObject gatewayError = ErrorObject.builder()
                 .message(UPSTREAM_SECRET_MESSAGE)
@@ -110,6 +112,8 @@ class OpenAiStreamingFailureExceptionTest {
         assertLogField(terminalAlert, AlertField.UPSTREAM_HTTP_STATUS, UPSTREAM_GATEWAY_TIMEOUT_STATUS);
         assertLogField(terminalAlert, AlertField.UPSTREAM_CODE, StreamingFailureKind.QUEUE_UPSTREAM_TIMEOUT.wireName());
         assertLogField(terminalAlert, AlertField.UPSTREAM_TYPE, "upstream_timeout");
+        assertLogField(terminalAlert, AlertField.GATEWAY_REQUEST_ID, "gateway-correlation-test");
+        assertLogField(terminalAlert, AlertField.RETRY_AFTER, "12");
         assertLogField(terminalAlert, QueueHeader.TIER.alertField(), "production-z? event=?forged?next");
         assertLogField(terminalAlert, QueueHeader.LANE.alertField(), "local");
         assertLogField(terminalAlert, QueueHeader.TIMEOUT_PHASE.alertField(), "first_output");
@@ -187,15 +191,25 @@ class OpenAiStreamingFailureExceptionTest {
 
     @Test
     void terminalAttemptRejectsInvalidProviderModelAndAttemptBounds() {
-        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 0, 1, false));
-        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 2, 1, false));
-        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(" ", MODEL_ID, 1, 1, false));
-        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(PROVIDER_NAME, "", 1, 1, false));
-        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 1, 0, false));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 0, 1, false, java.util.Optional.empty()));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 2, 1, false, java.util.Optional.empty()));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerminalAttempt(" ", MODEL_ID, 1, 1, false, java.util.Optional.empty()));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerminalAttempt(PROVIDER_NAME, "", 1, 1, false, java.util.Optional.empty()));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 1, 0, false, java.util.Optional.empty()));
     }
 
     private static TerminalAttempt terminalAttempt(boolean emittedTextChunk) {
-        return new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 2, 2, emittedTextChunk);
+        return new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 2, 2, emittedTextChunk, java.util.Optional.empty());
     }
 
     private ILoggingEvent onlyTerminalAlert() {

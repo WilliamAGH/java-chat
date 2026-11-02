@@ -16,9 +16,11 @@ import {
   type StreamError,
   type ProviderEvent,
   type Citation,
+  type BrowserSearchFailure,
 } from "../validation/schemas";
 import { validateWithSchema } from "../validation/validate";
-import { csrfHeader, extractApiErrorMessage, fetchWithCsrfRetry } from "./csrf";
+import { csrfHeader, readApiError, fetchWithCsrfRetry } from "./csrf";
+import { reportSearchFailure } from "./searchDiagnostics";
 
 /** SSE event types emitted by streaming endpoints. */
 const SSE_EVENT_STATUS = "status";
@@ -27,6 +29,7 @@ const SSE_EVENT_CITATION = "citation";
 const SSE_EVENT_PROVIDER = "provider";
 const SSE_EVENT_TEXT = "text";
 const INVALID_SSE_EVENT_MESSAGE = "Received an invalid SSE event from the server";
+const DIAGNOSTIC_PAGE_PATH_MAX_LENGTH = 160;
 
 /** Optional request options for streaming fetch calls. */
 export interface StreamSseRequestOptions {
@@ -43,6 +46,9 @@ export class StreamFailureError extends Error {
   readonly code?: string;
   readonly retryable?: boolean;
   readonly stage?: string;
+  httpStatus?: number;
+  requestId?: string;
+  retryAfterSeconds?: number;
 
   constructor(streamError: StreamError, options?: ErrorOptions) {
     super(streamError.message, options);
@@ -255,6 +261,7 @@ export async function streamSse(
   requestOptions: StreamSseRequestOptions = {},
 ): Promise<void> {
   const abortSignal = requestOptions.signal;
+  const startedAt = performance.now();
   let httpResponse: Response;
 
   try {
@@ -275,10 +282,16 @@ export async function streamSse(
     if (abortSignal?.aborted || isAbortError(fetchError)) {
       return;
     }
+    reportStreamFailure(url, startedAt, fetchError);
     throwNetworkStreamFailure(callbacks, source, fetchError);
   }
 
-  await consumeSseStream(httpResponse, callbacks, source, abortSignal);
+  try {
+    await consumeSseStream(httpResponse, callbacks, source, abortSignal);
+  } catch (streamFailure) {
+    reportStreamFailure(url, startedAt, streamFailure, httpResponse);
+    throw streamFailure;
+  }
 }
 
 /**
@@ -291,6 +304,7 @@ export async function streamSseGet(
   requestOptions: StreamSseRequestOptions = {},
 ): Promise<void> {
   const abortSignal = requestOptions.signal;
+  const startedAt = performance.now();
   let httpResponse: Response;
 
   try {
@@ -299,10 +313,49 @@ export async function streamSseGet(
     if (abortSignal?.aborted || isAbortError(fetchError)) {
       return;
     }
+    reportStreamFailure(url, startedAt, fetchError);
     throwNetworkStreamFailure(callbacks, source, fetchError);
   }
 
-  await consumeSseStream(httpResponse, callbacks, source, abortSignal);
+  try {
+    await consumeSseStream(httpResponse, callbacks, source, abortSignal);
+  } catch (streamFailure) {
+    reportStreamFailure(url, startedAt, streamFailure, httpResponse);
+    throw streamFailure;
+  }
+}
+
+function reportStreamFailure(
+  url: string,
+  startedAt: number,
+  failure: unknown,
+  httpResponse?: Response,
+): void {
+  const streamFailure = failure instanceof StreamFailureError ? failure : undefined;
+  const frontendScript = document.querySelector<HTMLScriptElement>('script[type="module"][src]');
+  let failureKind: BrowserSearchFailure["kind"] = "PROTOCOL";
+  if (!httpResponse) {
+    failureKind = "NETWORK";
+  } else if (!httpResponse.ok) {
+    failureKind = "HTTP";
+  } else if (streamFailure?.cause) {
+    failureKind = "NETWORK";
+  } else if (streamFailure && httpResponse.body !== null) {
+    failureKind = "SSE";
+  }
+  void reportSearchFailure({
+    path: new URL(url, window.location.origin).pathname,
+    kind: failureKind,
+    httpStatus: httpResponse?.status,
+    requestId: httpResponse?.headers.get("X-Request-ID") ?? undefined,
+    code: streamFailure?.code,
+    stage: streamFailure?.stage,
+    retryable: streamFailure?.retryable,
+    retryAfterSeconds: streamFailure?.retryAfterSeconds,
+    pagePath: window.location.pathname.slice(0, DIAGNOSTIC_PAGE_PATH_MAX_LENGTH),
+    frontendAsset: frontendScript ? new URL(frontendScript.src).pathname : undefined,
+    elapsedMs: Math.round(performance.now() - startedAt),
+  });
 }
 
 async function consumeSseStream(
@@ -312,17 +365,31 @@ async function consumeSseStream(
   abortSignal?: AbortSignal,
 ): Promise<void> {
   if (!httpResponse.ok) {
-    const apiMessage = await extractApiErrorMessage(httpResponse, `streamSse:${source}`);
+    const apiError = await readApiError(httpResponse, `streamSse:${source}`);
+    const apiMessage = apiError?.message.trim();
     const statusSummary = `HTTP ${httpResponse.status}: ${httpResponse.statusText || "Request failed"}`;
     const httpFailure: StreamError = {
-      message: apiMessage ?? statusSummary,
+      message: apiMessage || statusSummary,
       retryable: isRetryableHttpStatus(httpResponse.status),
     };
     if (apiMessage) {
-      httpFailure.details = statusSummary;
+      httpFailure.details = apiError?.details || statusSummary;
     }
     callbacks.onError?.(httpFailure);
-    throw new StreamFailureError(httpFailure);
+    const refusal = new StreamFailureError(httpFailure);
+    refusal.httpStatus = httpResponse.status;
+    refusal.requestId = httpResponse.headers.get("X-Request-ID") ?? undefined;
+    const retryAfter = httpResponse.headers.get("Retry-After");
+    if (retryAfter) {
+      const retrySeconds = Number(retryAfter);
+      const retryDate = Date.parse(retryAfter);
+      if (Number.isFinite(retrySeconds) && retrySeconds >= 0) {
+        refusal.retryAfterSeconds = retrySeconds;
+      } else if (Number.isFinite(retryDate)) {
+        refusal.retryAfterSeconds = Math.max(0, Math.ceil((retryDate - Date.now()) / 1000));
+      }
+    }
+    throw refusal;
   }
 
   const sseReader = httpResponse.body?.getReader();

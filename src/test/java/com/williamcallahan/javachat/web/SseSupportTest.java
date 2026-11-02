@@ -12,23 +12,34 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Logger;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.openai.core.http.Headers;
+import com.openai.errors.RateLimitException;
+import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureException;
+import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter.TerminalAttempt;
+import com.williamcallahan.javachat.service.EmbeddingServiceTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.json.JsonTest;
 import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.mock.web.MockHttpServletResponse;
 import reactor.core.Disposable;
 import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.TestSubscriber;
 
@@ -47,6 +58,115 @@ class SseSupportTest {
 
     @Autowired
     ObjectMapper objectMapper;
+
+    @Test
+    void retainsHttpRequestCorrelationWhenAnAsynchronousStreamEmitsAnError() {
+        SseSupport sseSupport = createSseSupport();
+        MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+        servletResponse.setHeader("X-Request-ID", "stream-correlation-test");
+        Flux<ServerSentEvent<String>> failedStream = Flux.defer(() -> sseSupport.configuredProviderUnavailableError())
+                .subscribeOn(Schedulers.boundedElastic());
+        try (ExpectedLogEvents capturedLogs =
+                ExpectedLogEvents.capture((Logger) LoggerFactory.getLogger(SseSupport.class))) {
+            List<ServerSentEvent<String>> emittedEvents = sseSupport
+                    .withRequestDiagnostics(failedStream, servletResponse, "/api/chat/stream")
+                    .collectList()
+                    .block();
+            assertEquals(
+                    EVENT_ERROR,
+                    Objects.requireNonNull(emittedEvents).getFirst().event());
+            assertEquals(1, capturedLogs.events().size());
+            assertTrue(capturedLogs.events().getFirst().getKeyValuePairs().stream()
+                    .anyMatch(logField ->
+                            "requestId".equals(logField.key) && "stream-correlation-test".equals(logField.value)));
+            assertTrue(capturedLogs.events().getFirst().getKeyValuePairs().stream()
+                    .anyMatch(
+                            logField -> "event".equals(logField.key) && "search_stream_failed".equals(logField.value)));
+        }
+    }
+
+    @Test
+    void concurrentSearchFailuresRetainTheirOwnGatewayRequestAssociation() {
+        SseSupport sseSupport = createSseSupport();
+        Flux<ServerSentEvent<String>> firstFailure =
+                observedProviderRefusal(sseSupport, "browser-first", "gateway-first");
+        Flux<ServerSentEvent<String>> secondFailure =
+                observedProviderRefusal(sseSupport, "browser-second", "gateway-second");
+        try (ExpectedLogEvents capturedLogs =
+                ExpectedLogEvents.capture((Logger) LoggerFactory.getLogger(SseSupport.class))) {
+            List<ServerSentEvent<String>> emittedEvents =
+                    Flux.merge(firstFailure, secondFailure).collectList().block();
+            assertEquals(2, Objects.requireNonNull(emittedEvents).size());
+            for (String requestSuffix : List.of("first", "second")) {
+                var associatedFailure = capturedLogs.events().stream()
+                        .filter(logEvent -> logEvent.getKeyValuePairs().stream()
+                                .anyMatch(logField -> "requestId".equals(logField.key)
+                                        && ("browser-" + requestSuffix).equals(logField.value)))
+                        .findFirst()
+                        .orElseThrow();
+                assertTrue(associatedFailure.getKeyValuePairs().stream()
+                        .anyMatch(logField -> "gatewayRequestId".equals(logField.key)
+                                && ("gateway-" + requestSuffix).equals(logField.value)));
+                assertTrue(associatedFailure.getKeyValuePairs().stream()
+                        .anyMatch(logField -> "upstreamHttpStatus".equals(logField.key)
+                                && Integer.valueOf(429).equals(logField.value)));
+            }
+        }
+    }
+
+    @Test
+    void inBandRateLimitRetainsItsReasonAndRequestWithoutInventingAnHttpStatus() {
+        SseSupport sseSupport = createSseSupport();
+        MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+        servletResponse.setHeader("X-Request-ID", "in-band-request");
+        try (ExpectedLogEvents providerLogs = ExpectedLogEvents.capture(
+                        (Logger) LoggerFactory.getLogger(OpenAiStreamingFailureException.class));
+                ExpectedLogEvents requestLogs =
+                        ExpectedLogEvents.capture((Logger) LoggerFactory.getLogger(SseSupport.class))) {
+            OpenAiStreamingFailureException reportedFailure = OpenAiStreamingFailureException.terminalAndLog(
+                    new IllegalStateException("Controlled in-band failure"),
+                    new TerminalAttempt("openai", "test-model", 1, 1, false, Optional.of("RATE_LIMIT_EXCEEDED")));
+            var failedEvents = sseSupport.withFailureDiagnostics(
+                    sseSupport.streamErrorEvent("Failure", "In-band refusal", false), reportedFailure);
+            var emittedEvents = sseSupport
+                    .withRequestDiagnostics(failedEvents, servletResponse, "/api/chat/stream")
+                    .collectList()
+                    .block();
+            assertEquals(
+                    EVENT_ERROR,
+                    Objects.requireNonNull(emittedEvents).getFirst().event());
+            var correlatedFailure = requestLogs.events().getFirst();
+            assertTrue(correlatedFailure.getKeyValuePairs().stream()
+                    .anyMatch(logField ->
+                            "terminalReason".equals(logField.key) && "RATE_LIMIT_EXCEEDED".equals(logField.value)));
+            assertTrue(correlatedFailure.getKeyValuePairs().stream()
+                    .anyMatch(
+                            logField -> "requestId".equals(logField.key) && "in-band-request".equals(logField.value)));
+            assertFalse(correlatedFailure.getKeyValuePairs().stream()
+                    .anyMatch(logField -> "upstreamHttpStatus".equals(logField.key)));
+            assertEquals(1, providerLogs.events().size());
+            assertTrue(providerLogs.events().getFirst().getKeyValuePairs().stream()
+                    .anyMatch(logField ->
+                            "terminalReason".equals(logField.key) && "RATE_LIMIT_EXCEEDED".equals(logField.value)));
+        }
+    }
+
+    private static Flux<ServerSentEvent<String>> observedProviderRefusal(
+            SseSupport sseSupport, String browserRequestId, String gatewayRequestId) {
+        MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+        servletResponse.setHeader("X-Request-ID", browserRequestId);
+        RateLimitException providerRefusal = RateLimitException.builder()
+                .headers(Headers.builder()
+                        .put("x-lgw-request-id", gatewayRequestId)
+                        .put("Retry-After", "12")
+                        .build())
+                .build();
+        Flux<ServerSentEvent<String>> failedStream = Flux.defer(() -> sseSupport.withFailureDiagnostics(
+                        sseSupport.configuredProviderUnavailableError(),
+                        new EmbeddingServiceTemporarilyUnavailableException("Provider rate limited", providerRefusal)))
+                .subscribeOn(Schedulers.boundedElastic());
+        return sseSupport.withRequestDiagnostics(failedStream, servletResponse, "/api/chat/stream");
+    }
 
     @Test
     void prepareDataStreamPublishesEveryChunkOnce() {
@@ -317,5 +437,35 @@ class SseSupportTest {
 
     private SseSupport createSseSupport() {
         return new SseSupport(objectMapper, new SimpleMeterRegistry());
+    }
+
+    @Test
+    void terminalErrorDiagnosticsWaitForDemandAndRemainAbsentAfterCancellation() {
+        SseSupport sseSupport = createSseSupport();
+        MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+        servletResponse.setHeader("X-Request-ID", "demand-correlated-request");
+        Flux<ServerSentEvent<String>> failedStream = sseSupport.withRequestDiagnostics(
+                sseSupport.configuredProviderUnavailableError(), servletResponse, "/api/chat/stream");
+        try (ExpectedLogEvents capturedLogs =
+                ExpectedLogEvents.capture((Logger) LoggerFactory.getLogger(SseSupport.class))) {
+            StepVerifier.create(failedStream, 0)
+                    .then(() -> assertTrue(capturedLogs.events().isEmpty()))
+                    .thenCancel()
+                    .verify();
+            assertTrue(capturedLogs.events().isEmpty());
+
+            StepVerifier.create(failedStream, 0)
+                    .then(() -> assertTrue(capturedLogs.events().isEmpty()))
+                    .thenRequest(1)
+                    .assertNext(errorEvent -> {
+                        assertEquals(EVENT_ERROR, errorEvent.event());
+                        assertEquals(1, capturedLogs.events().size());
+                        assertTrue(capturedLogs.events().getFirst().getKeyValuePairs().stream()
+                                .anyMatch(logField -> "requestId".equals(logField.key)
+                                        && "demand-correlated-request".equals(logField.value)));
+                    })
+                    .verifyComplete();
+            assertEquals(1, capturedLogs.events().size());
+        }
     }
 }

@@ -21,6 +21,11 @@ public interface ReportedStreamingFailure {
      */
     Throwable upstreamFailure();
 
+    /** Returns a retained finite protocol reason without treating an in-band failure as an HTTP refusal. */
+    default Optional<String> terminalReason() {
+        return Optional.empty();
+    }
+
     /**
      * Finds the first reported streaming failure in a cause chain without revisiting identity cycles.
      *
