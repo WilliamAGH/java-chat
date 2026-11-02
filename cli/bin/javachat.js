@@ -569,6 +569,24 @@ function renderEnrichmentMarker(markerBody) {
 }
 
 /**
+ * Resolves the marker close index from a run of closing braces.
+ *
+ * For a trailing run like `}}}` this selects the final `}}` so a content brace
+ * ending the marker body stays in the body instead of leaking as a stray.
+ * Mirrors the backend's EnrichmentPlaceholderizer.resolveCloseIndexFromBraceRun.
+ */
+function resolveCloseIndexFromBraceRun(text, runStart) {
+  let runLength = 0;
+  while (runStart + runLength < text.length && text[runStart + runLength] === "}") {
+    runLength++;
+  }
+  if (runLength < MARKER_CLOSE.length) {
+    return runStart;
+  }
+  return runStart + (runLength - MARKER_CLOSE.length);
+}
+
+/**
  * Converts enrichment markers to terminal blocks while text is still streaming.
  *
  * Markers routinely straddle two SSE chunks, so text from an opening `{{` is
@@ -593,8 +611,8 @@ function createEnrichmentMarkerRenderer() {
         }
         printable += heldText.slice(0, openIndex);
         heldText = heldText.slice(openIndex);
-        const closeIndex = heldText.indexOf(MARKER_CLOSE, MARKER_OPEN.length);
-        if (closeIndex === -1) {
+        const firstCloseIndex = heldText.indexOf(MARKER_CLOSE, MARKER_OPEN.length);
+        if (firstCloseIndex === -1) {
           if (heldText.length > MARKER_MAX_LENGTH) {
             printable += heldText;
             heldText = "";
@@ -602,6 +620,7 @@ function createEnrichmentMarkerRenderer() {
           }
           return printable;
         }
+        const closeIndex = resolveCloseIndexFromBraceRun(heldText, firstCloseIndex);
         printable += renderEnrichmentMarker(heldText.slice(MARKER_OPEN.length, closeIndex));
         heldText = heldText.slice(closeIndex + MARKER_CLOSE.length);
       }
