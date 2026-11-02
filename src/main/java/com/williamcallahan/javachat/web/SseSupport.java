@@ -125,6 +125,17 @@ public class SseSupport {
         response.addHeader(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform");
     }
 
+    /** Carries request correlation across the asynchronous preparation and provider callbacks. */
+    public Flux<ServerSentEvent<String>> withRequestDiagnostics(
+            Flux<ServerSentEvent<String>> streamEvents, HttpServletResponse servletResponse, String requestPath) {
+        StreamRequestObservation observation =
+                new StreamRequestObservation(servletResponse.getHeader("X-Request-ID"), requestPath, System.nanoTime());
+        return streamEvents.contextWrite(
+                streamContext -> streamContext.put(StreamRequestObservation.class, observation));
+    }
+
+    private record StreamRequestObservation(String requestId, String path, long startedNanos) {}
+
     /**
      * Prepares a raw content stream for SSE transmission with backpressure handling.
      * Filters empty chunks and applies the standard streaming configuration.
@@ -232,8 +243,26 @@ public class SseSupport {
             log.error("Failed to serialize SSE error payload", serializationFailure);
             json = ERROR_FALLBACK_JSON;
         }
-        return Flux.just(
-                ServerSentEvent.<String>builder().event(EVENT_ERROR).data(json).build());
+        ServerSentEvent<String> errorEvent =
+                ServerSentEvent.<String>builder().event(EVENT_ERROR).data(json).build();
+        return Flux.deferContextual(streamContext -> {
+            streamContext
+                    .<StreamRequestObservation>getOrEmpty(StreamRequestObservation.class)
+                    .ifPresent(observation -> log.atWarn()
+                            .setMessage("Search stream emitted a terminal error")
+                            .addKeyValue("event", "search_stream_failed")
+                            .addKeyValue("requestId", observation.requestId())
+                            .addKeyValue("path", observation.path())
+                            .addKeyValue("code", payload.code())
+                            .addKeyValue("stage", payload.stage())
+                            .addKeyValue("retryable", payload.retryable())
+                            .addKeyValue(
+                                    "durationMs",
+                                    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                                            System.nanoTime() - observation.startedNanos()))
+                            .log());
+            return Flux.just(errorEvent);
+        });
     }
 
     /**

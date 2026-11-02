@@ -19,7 +19,8 @@ import org.slf4j.spi.LoggingEventBuilder;
  * Captures bounded terminal context from an OpenAI-compatible streaming provider.
  *
  * <p>The exception retains the upstream cause for recovery decisions but emits exactly one structured alert
- * without projecting upstream bodies, arbitrary headers, or request identifiers.</p>
+ * without projecting upstream bodies or arbitrary headers. Gateway correlation and retry headers
+ * remain available for joining the provider refusal to its retained request.</p>
  */
 public final class OpenAiStreamingFailureException extends RuntimeException implements ReportedStreamingFailure {
     @Serial
@@ -43,6 +44,8 @@ public final class OpenAiStreamingFailureException extends RuntimeException impl
         UPSTREAM_HTTP_STATUS("upstreamHttpStatus"),
         UPSTREAM_CODE("upstreamCode"),
         UPSTREAM_TYPE("upstreamType"),
+        GATEWAY_REQUEST_ID("gatewayRequestId"),
+        RETRY_AFTER("retryAfter"),
         QUEUE_TIER("queueTier"),
         QUEUE_LANE("queueLane"),
         QUEUE_TIMEOUT_PHASE("queueTimeoutPhase"),
@@ -112,6 +115,8 @@ public final class OpenAiStreamingFailureException extends RuntimeException impl
     private final Integer upstreamHttpStatus;
     private final String upstreamCode;
     private final String upstreamType;
+    private final String gatewayRequestId;
+    private final String retryAfter;
     private final Map<QueueHeader, String> queueHeaderValues;
 
     private OpenAiStreamingFailureException(Throwable upstreamFailure, TerminalAttempt terminalAttempt) {
@@ -128,11 +133,19 @@ public final class OpenAiStreamingFailureException extends RuntimeException impl
             this.upstreamHttpStatus = serviceException.statusCode();
             this.upstreamCode = boundedOptionalValue(serviceException.code()).orElse(null);
             this.upstreamType = boundedOptionalValue(serviceException.type()).orElse(null);
+            this.gatewayRequestId = boundedOptionalValue(serviceException.headers().values("x-lgw-request-id").stream()
+                            .findFirst())
+                    .orElse(null);
+            this.retryAfter = boundedOptionalValue(serviceException.headers().values("retry-after").stream()
+                            .findFirst())
+                    .orElse(null);
             this.queueHeaderValues = captureQueueHeaderValues(serviceException);
         } else {
             this.upstreamHttpStatus = null;
             this.upstreamCode = null;
             this.upstreamType = null;
+            this.gatewayRequestId = null;
+            this.retryAfter = null;
             this.queueHeaderValues = Map.of();
         }
         this.failureKind = determineFailureKind(upstreamFailure, Optional.ofNullable(upstreamCode));
@@ -250,6 +263,12 @@ public final class OpenAiStreamingFailureException extends RuntimeException impl
         }
         if (upstreamType != null) {
             terminalAlert = terminalAlert.addKeyValue(AlertField.UPSTREAM_TYPE.fieldName(), upstreamType);
+        }
+        if (gatewayRequestId != null) {
+            terminalAlert = terminalAlert.addKeyValue(AlertField.GATEWAY_REQUEST_ID.fieldName(), gatewayRequestId);
+        }
+        if (retryAfter != null) {
+            terminalAlert = terminalAlert.addKeyValue(AlertField.RETRY_AFTER.fieldName(), retryAfter);
         }
         for (QueueHeader queueHeader : QueueHeader.values()) {
             if (queueHeaderValues.containsKey(queueHeader)) {

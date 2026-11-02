@@ -50,6 +50,24 @@ arrive before the `provider` event.
 Chat uses the shared OpenAI-compatible gateway with Claude Haiku 5.5 at low reasoning effort. An unavailable, rate-limited,
 or failed gateway request terminates the stream with an `error` event; no alternate provider exists.
 
+API responses include `X-Request-ID`, including security rejections and HTTP-200 SSE streams.
+Application logs distinguish HTTP completion (`api_request_completed`) from a terminal SSE
+error (`search_stream_failed`); HTTP 200 alone does not establish that the answer succeeded.
+Embedding rate-limit records retain the upstream status, workload, model, gateway request ID,
+and `Retry-After` when supplied. Missing retry timing does not replace the original provider cause.
+
+### Browser failure diagnostics
+
+POST `/api/diagnostics/search-failures` accepts bounded search-transport observations and returns
+202. It requires the same CSRF protection as other browser POSTs. Reports identify the API path,
+failure kind (`HTTP`, `SSE`, `NETWORK`, or `PROTOCOL`), optional HTTP status/request ID/error code/
+retry timing, page path, loaded module asset, and elapsed milliseconds. URL queries, prompts,
+cookies, authorization headers, and raw response bodies are not report fields and are not emitted into logs.
+
+Browser reports use `event=browser_search_failed` and `provenance=client_reported`; they are not
+verified server failures. A search failure sends one report without replaying the search. A failed
+diagnostic submission remains console-visible and never recursively reports itself.
+
 Example:
 
 ```bash

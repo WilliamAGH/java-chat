@@ -12,9 +12,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Logger;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
@@ -23,12 +25,15 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.json.JsonTest;
 import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.mock.web.MockHttpServletResponse;
 import reactor.core.Disposable;
 import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.TestSubscriber;
 
@@ -47,6 +52,32 @@ class SseSupportTest {
 
     @Autowired
     ObjectMapper objectMapper;
+
+    @Test
+    void retainsHttpRequestCorrelationWhenAnAsynchronousStreamEmitsAnError() {
+        SseSupport sseSupport = createSseSupport();
+        MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+        servletResponse.setHeader("X-Request-ID", "stream-correlation-test");
+        Flux<ServerSentEvent<String>> failedStream = Flux.defer(() -> sseSupport.configuredProviderUnavailableError())
+                .subscribeOn(Schedulers.boundedElastic());
+        try (ExpectedLogEvents capturedLogs =
+                ExpectedLogEvents.capture((Logger) LoggerFactory.getLogger(SseSupport.class))) {
+            List<ServerSentEvent<String>> emittedEvents = sseSupport
+                    .withRequestDiagnostics(failedStream, servletResponse, "/api/chat/stream")
+                    .collectList()
+                    .block();
+            assertEquals(
+                    EVENT_ERROR,
+                    Objects.requireNonNull(emittedEvents).getFirst().event());
+            assertEquals(1, capturedLogs.events().size());
+            assertTrue(capturedLogs.events().getFirst().getKeyValuePairs().stream()
+                    .anyMatch(logField ->
+                            "requestId".equals(logField.key) && "stream-correlation-test".equals(logField.value)));
+            assertTrue(capturedLogs.events().getFirst().getKeyValuePairs().stream()
+                    .anyMatch(
+                            logField -> "event".equals(logField.key) && "search_stream_failed".equals(logField.value)));
+        }
+    }
 
     @Test
     void prepareDataStreamPublishesEveryChunkOnce() {

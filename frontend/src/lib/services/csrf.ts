@@ -52,7 +52,7 @@ export function csrfHeader(): Record<string, string> {
   return { [CSRF_HEADER_NAME]: tokenText };
 }
 
-async function readCsrfError(
+export async function readApiError(
   httpResponse: Response,
   source: string,
 ): Promise<ApiErrorResponse | null> {
@@ -84,7 +84,7 @@ export async function extractApiErrorMessage(
   httpResponse: Response,
   source: string,
 ): Promise<string | null> {
-  const apiError = await readCsrfError(httpResponse, source);
+  const apiError = await readApiError(httpResponse, source);
   if (!apiError) {
     return null;
   }
@@ -154,7 +154,7 @@ export async function fetchWithCsrfRetry(
     return initialHttpResponse;
   }
 
-  const initialCsrfError = await readCsrfError(initialHttpResponse.clone(), source);
+  const initialCsrfError = await readApiError(initialHttpResponse.clone(), source);
   if (!initialCsrfError || !isRecoverableCsrfErrorMessage(initialCsrfError.message)) {
     return initialHttpResponse;
   }
@@ -174,7 +174,7 @@ export async function fetchWithCsrfRetry(
     return retriedHttpResponse;
   }
 
-  const retriedCsrfError = await readCsrfError(retriedHttpResponse.clone(), `${source}:retry`);
+  const retriedCsrfError = await readApiError(retriedHttpResponse.clone(), `${source}:retry`);
   if (retriedCsrfError && isRecoverableCsrfErrorMessage(retriedCsrfError.message)) {
     maybeToastExpired();
   }

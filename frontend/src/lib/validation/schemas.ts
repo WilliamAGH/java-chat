@@ -64,6 +64,23 @@ export const StreamStatusSchema = z.union([
 /** Error response from SSE error events. */
 export const StreamErrorSchema = z.object(sseEventFieldShape);
 
+/** Bounded, credential-free observations from the browser's search transport. */
+export const BrowserSearchFailureSchema = z.object({
+  path: z.string().startsWith("/api/").max(160),
+  kind: z.enum(["HTTP", "SSE", "NETWORK", "PROTOCOL"]),
+  httpStatus: z.number().int().min(100).max(599).optional(),
+  requestId: z.string().max(128).optional(),
+  code: z.string().max(128).optional(),
+  stage: z.string().max(64).optional(),
+  retryable: z.boolean().optional(),
+  retryAfterSeconds: z.number().nonnegative().optional(),
+  pagePath: z.string().max(160),
+  frontendAsset: z.string().max(160).optional(),
+  elapsedMs: z.number().nonnegative(),
+});
+
+export type BrowserSearchFailure = z.infer<typeof BrowserSearchFailureSchema>;
+
 /** Canonical text chunk emitted by SSE streams. */
 export const TextChunkSchema = z.object({
   text: z.string(),

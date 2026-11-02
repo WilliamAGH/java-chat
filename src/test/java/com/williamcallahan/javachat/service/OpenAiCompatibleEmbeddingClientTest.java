@@ -15,6 +15,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Logger;
 import com.openai.client.OpenAIClient;
 import com.openai.client.OpenAIClientAsync;
 import com.openai.core.RequestOptions;
@@ -24,6 +25,7 @@ import com.openai.errors.RateLimitException;
 import com.openai.models.embeddings.CreateEmbeddingResponse;
 import com.openai.models.embeddings.EmbeddingCreateParams;
 import com.openai.services.async.EmbeddingServiceAsync;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.io.InterruptedIOException;
 import java.time.Duration;
 import java.util.List;
@@ -40,6 +42,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLongArray;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 
 /**
  * Verifies OpenAI embedding responses preserve request ordering.
@@ -865,6 +868,68 @@ class OpenAiCompatibleEmbeddingClientTest {
             assertFalse(admissionFailure.providerContacted());
             assertTrue(admissionFailure.retryDelay().compareTo(Duration.ofSeconds(50)) > 0);
             assertTrue(admissionFailure.retryDelay().compareTo(Duration.ofSeconds(60)) <= 0);
+        }
+    }
+
+    @Test
+    void recordsProviderRateLimitWithTimingAndRequestIdentity() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        EmbeddingServiceAsync liveEmbeddingService = mockAsyncEmbeddingService(liveClient);
+        RateLimitException providerRejection = RateLimitException.builder()
+                .headers(Headers.builder()
+                        .put("Retry-After", "60")
+                        .put("x-lgw-request-id", "embedding-rejection-test")
+                        .build())
+                .build();
+        when(liveEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.failedFuture(providerRejection));
+
+        try (ExpectedLogEvents capturedLogs = ExpectedLogEvents.capture(
+                        (Logger) LoggerFactory.getLogger(OpenAiCompatibleEmbeddingClient.class));
+                OpenAiCompatibleEmbeddingClient embeddingClient =
+                        new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
+            EmbeddingServiceTemporarilyUnavailableException embeddingFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
+                    () -> embeddingClient.embed(
+                            LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING,
+                            List.of("test question"),
+                            LlmGatewayTier.LIVE));
+            assertSame(providerRejection, embeddingFailure.getCause());
+            assertTrue(capturedLogs.events().stream()
+                    .anyMatch(logEvent -> logEvent.getFormattedMessage().contains("Embedding provider rejected request")
+                            && logEvent.getKeyValuePairs().stream()
+                                    .anyMatch(logField -> "upstreamHttpStatus".equals(logField.key)
+                                            && Integer.valueOf(429).equals(logField.value))
+                            && logEvent.getKeyValuePairs().stream()
+                                    .anyMatch(logField -> "gatewayRequestId".equals(logField.key)
+                                            && "embedding-rejection-test".equals(logField.value))));
+        }
+    }
+
+    @Test
+    void missingRetryTimingDoesNotHideTheUpstreamRateLimitCause() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        EmbeddingServiceAsync liveEmbeddingService = mockAsyncEmbeddingService(liveClient);
+        RateLimitException providerRejection =
+                RateLimitException.builder().headers(Headers.builder().build()).build();
+        when(liveEmbeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(CompletableFuture.failedFuture(providerRejection));
+        try (ExpectedLogEvents capturedLogs = ExpectedLogEvents.capture(
+                        (Logger) LoggerFactory.getLogger(OpenAiCompatibleEmbeddingClient.class));
+                OpenAiCompatibleEmbeddingClient embeddingClient =
+                        new OpenAiCompatibleEmbeddingClient(liveClient, batchClient, gatewaySettings())) {
+            EmbeddingServiceTemporarilyUnavailableException embeddingFailure = assertThrows(
+                    EmbeddingServiceTemporarilyUnavailableException.class,
+                    () -> embeddingClient.embed(
+                            LlmGatewayTier.Purpose.SEARCH_QUERY_EMBEDDING,
+                            List.of("test question"),
+                            LlmGatewayTier.LIVE));
+            assertSame(providerRejection, embeddingFailure.getCause());
+            assertInstanceOf(RateLimitDecisionException.class, providerRejection.getSuppressed()[0]);
+            assertTrue(capturedLogs.events().stream().anyMatch(logEvent -> logEvent.getFormattedMessage()
+                    .contains("Embedding provider rejected request")));
         }
     }
 
