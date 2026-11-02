@@ -59,6 +59,7 @@ public class DocumentProcessor {
     private static final String LOG_PROCESSING_SET = "Processing documentation set";
     private static final String LOG_FILES_TO_PROCESS = "Files to process: {}";
     private static final String LOG_DUPLICATES_SKIPPED = "  Skipped {} duplicate files (already in Qdrant)";
+    private static final String LOG_EXCLUDED_SKIPPED = "  Excluded {} files (intentionally not indexed)";
     private static final String LOG_SKIP_PATH_ESCAPE = "Skipping documentation set (path escaped base directory)";
     private static final String LOG_SKIP_DIR_NOT_FOUND = "Skipping documentation set (directory not found)";
     private static final String LOG_SKIP_NO_ELIGIBLE = "Skipping documentation set (no eligible files)";
@@ -68,6 +69,7 @@ public class DocumentProcessor {
     private static final String LOG_PROCESSED_STATS = "Processed {} files in {}s ({} files/sec) ({})";
     private static final String LOG_TOTAL_PROCESSED = "Total new documents processed: {}";
     private static final String LOG_TOTAL_DUPLICATES = "Total duplicates skipped: {}";
+    private static final String LOG_TOTAL_EXCLUDED = "Total excluded files: {}";
     private static final String LOG_TOTAL_FAILED = "Documentation sets FAILED: {}";
     private static final String LOG_NEXT_STEP_QDRANT = "1. Verify in Qdrant Dashboard";
     private static final String LOG_NEXT_STEP_RETRIEVAL = "2. Test retrieval";
@@ -194,8 +196,10 @@ public class DocumentProcessor {
 
     private IngestionTotals accumulateOutcome(final IngestionTotals totals, final ProcessingOutcome outcome) {
         return switch (outcome) {
-            case ProcessingOutcome.Success success -> totals.addSuccess(success.processed(), success.duplicates());
-            case ProcessingOutcome.Failed failed -> totals.addFailed(failed.processed(), failed.duplicates());
+            case ProcessingOutcome.Success success ->
+                totals.addSuccess(success.processed(), success.duplicates(), success.excluded());
+            case ProcessingOutcome.Failed failed ->
+                totals.addFailed(failed.processed(), failed.duplicates(), failed.excluded());
         };
     }
 
@@ -206,14 +210,14 @@ public class DocumentProcessor {
             if (LOGGER.isWarnEnabled()) {
                 LOGGER.warn(LOG_SKIP_PATH_ESCAPE);
             }
-            return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0);
+            return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0, 0);
         }
 
         if (!Files.exists(docsPath) || !Files.isDirectory(docsPath)) {
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug(LOG_SKIP_DIR_NOT_FOUND);
             }
-            return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0);
+            return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0, 0);
         }
 
         try {
@@ -222,7 +226,7 @@ public class DocumentProcessor {
                 if (LOGGER.isDebugEnabled()) {
                     LOGGER.debug(LOG_SKIP_NO_ELIGIBLE);
                 }
-                return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0);
+                return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0, 0);
             }
 
             if (LOGGER.isInfoEnabled()) {
@@ -240,9 +244,15 @@ public class DocumentProcessor {
 
             final int failureCount = outcome.backlog().failedFiles();
             final long duplicates = outcome.backlog().skippedFiles();
+            final long excluded = outcome.backlog().excludedFiles();
             if (duplicates > 0) {
                 if (LOGGER.isInfoEnabled()) {
                     LOGGER.info(LOG_DUPLICATES_SKIPPED, duplicates);
+                }
+            }
+            if (excluded > 0) {
+                if (LOGGER.isInfoEnabled()) {
+                    LOGGER.info(LOG_EXCLUDED_SKIPPED, excluded);
                 }
             }
             if (outcome.backlog().pendingFiles() > 0 && LOGGER.isWarnEnabled()) {
@@ -255,15 +265,15 @@ public class DocumentProcessor {
                 if (LOGGER.isWarnEnabled()) {
                     LOGGER.warn("Ingestion completed with {} file failures", failureCount);
                 }
-                return new ProcessingOutcome.Failed(docSet.displayName(), processed, duplicates);
+                return new ProcessingOutcome.Failed(docSet.displayName(), processed, duplicates, excluded);
             }
             if (outcome.backlog().pendingFiles() > 0) {
-                return new ProcessingOutcome.Failed(docSet.displayName(), processed, duplicates);
+                return new ProcessingOutcome.Failed(docSet.displayName(), processed, duplicates, excluded);
             }
             String safeDocumentationSet =
                     docSet.indexedDocSet().replace('\r', '?').replace('\n', '?');
             LOGGER.info(LOG_DOCSET_POSTCONDITION, safeDocumentationSet);
-            return new ProcessingOutcome.Success(processed, duplicates);
+            return new ProcessingOutcome.Success(processed, duplicates, excluded);
 
         } catch (IOException | UncheckedIOException | IngestionAlreadyRunningException processingFailure) {
             if (LOGGER.isErrorEnabled()) {
@@ -272,7 +282,7 @@ public class DocumentProcessor {
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug(LOG_STACK_TRACE, processingFailure);
             }
-            return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0);
+            return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0, 0);
         }
     }
 
@@ -454,6 +464,7 @@ public class DocumentProcessor {
             LOGGER.info(LOG_BANNER_LINE);
             LOGGER.info(LOG_TOTAL_PROCESSED, totals.processed());
             LOGGER.info(LOG_TOTAL_DUPLICATES, totals.duplicates());
+            LOGGER.info(LOG_TOTAL_EXCLUDED, totals.excluded());
         }
     }
 
@@ -503,15 +514,17 @@ public class DocumentProcessor {
     /**
      * Accumulated totals across all documentation sets, tracking successes and failures separately.
      */
-    private record IngestionTotals(long processed, long duplicates, int failedSets) {
-        static final IngestionTotals ZERO = new IngestionTotals(0, 0, 0);
+    private record IngestionTotals(long processed, long duplicates, long excluded, int failedSets) {
+        static final IngestionTotals ZERO = new IngestionTotals(0, 0, 0, 0);
 
-        IngestionTotals addSuccess(final long newProcessed, final long newDuplicates) {
-            return new IngestionTotals(processed + newProcessed, duplicates + newDuplicates, failedSets);
+        IngestionTotals addSuccess(final long newProcessed, final long newDuplicates, final long newExcluded) {
+            return new IngestionTotals(
+                    processed + newProcessed, duplicates + newDuplicates, excluded + newExcluded, failedSets);
         }
 
-        IngestionTotals addFailed(final long newProcessed, final long newDuplicates) {
-            return new IngestionTotals(processed + newProcessed, duplicates + newDuplicates, failedSets + 1);
+        IngestionTotals addFailed(final long newProcessed, final long newDuplicates, final long newExcluded) {
+            return new IngestionTotals(
+                    processed + newProcessed, duplicates + newDuplicates, excluded + newExcluded, failedSets + 1);
         }
     }
 
@@ -519,9 +532,9 @@ public class DocumentProcessor {
      * Outcome of processing a single documentation set - distinguishes success, skip, and failure.
      */
     private sealed interface ProcessingOutcome {
-        record Success(long processed, long duplicates) implements ProcessingOutcome {}
+        record Success(long processed, long duplicates, long excluded) implements ProcessingOutcome {}
 
-        record Failed(String setName, long processed, long duplicates) implements ProcessingOutcome {}
+        record Failed(String setName, long processed, long duplicates, long excluded) implements ProcessingOutcome {}
     }
 
     /**
