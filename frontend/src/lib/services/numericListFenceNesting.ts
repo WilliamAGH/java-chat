@@ -231,7 +231,9 @@ export function nestNumericListFences(
         targetIndentation = 0;
         maximumSourceIndentation = COMMONMARK_MAX_FENCE_INDENTATION;
       } else {
-        nestedLines.push(`${bodyIndentation}${markdownLine}`);
+        const lineIndentation = leadingSpaceCount(markdownLine);
+        const padding = Math.max(0, targetIndentation - bodyIndentation.length - lineIndentation);
+        nestedLines.push(`${" ".repeat(padding)}${bodyIndentation}${markdownLine}`);
       }
       continue;
     }
