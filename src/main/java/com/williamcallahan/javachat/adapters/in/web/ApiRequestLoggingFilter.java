@@ -1,11 +1,13 @@
 package com.williamcallahan.javachat.adapters.in.web;
 
 import com.williamcallahan.javachat.support.StructuredLogValue;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletResponseWrapper;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
@@ -23,6 +25,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public final class ApiRequestLoggingFilter extends OncePerRequestFilter {
     private static final Logger log = LoggerFactory.getLogger(ApiRequestLoggingFilter.class);
     private static final String REQUEST_STARTED_ATTRIBUTE = ApiRequestLoggingFilter.class.getName() + ".started";
+    private static final String REQUEST_COMPLETED_ATTRIBUTE = ApiRequestLoggingFilter.class.getName() + ".completed";
+    private static final String ERROR_PENDING_ATTRIBUTE = ApiRequestLoggingFilter.class.getName() + ".errorPending";
     private static final String REQUEST_ID_HEADER = "X-Request-ID";
     private static final int MAX_REQUEST_LOG_FIELD_LENGTH = 256;
 
@@ -66,9 +70,14 @@ public final class ApiRequestLoggingFilter extends OncePerRequestFilter {
                     .addKeyValue("path", requestPath)
                     .log();
         }
-        apiFilterChain.doFilter(apiRequest, apiResponse);
+        boolean errorDispatch = apiRequest.getDispatcherType() == DispatcherType.ERROR;
+        apiFilterChain.doFilter(apiRequest, new ErrorDispatchResponse(apiRequest, apiResponse));
+        // sendError returns before the container renders its error page, including security denials.
         // Spring MVC performs a final ASYNC dispatch after an SSE emitter completes or fails.
-        if (!apiRequest.isAsyncStarted()) {
+        if (!apiRequest.isAsyncStarted()
+                && (errorDispatch || apiRequest.getAttribute(ERROR_PENDING_ATTRIBUTE) == null)
+                && apiRequest.getAttribute(REQUEST_COMPLETED_ATTRIBUTE) == null) {
+            apiRequest.setAttribute(REQUEST_COMPLETED_ATTRIBUTE, Boolean.TRUE);
             long startedNanos = (Long) apiRequest.getAttribute(REQUEST_STARTED_ATTRIBUTE);
             log.atLevel(apiResponse.getStatus() >= HttpStatus.BAD_REQUEST.value() ? Level.WARN : Level.INFO)
                     .setMessage("API request completed")
@@ -84,6 +93,39 @@ public final class ApiRequestLoggingFilter extends OncePerRequestFilter {
                                             apiResponse.getHeader("Retry-After"), MAX_REQUEST_LOG_FIELD_LENGTH)
                                     .text())
                     .log();
+        }
+    }
+
+    /** Retains the same completion ownership when the container nests its error page dispatch. */
+    @Override
+    protected void doFilterNestedErrorDispatch(
+            HttpServletRequest apiRequest, HttpServletResponse apiResponse, FilterChain apiFilterChain)
+            throws ServletException, IOException {
+        apiFilterChain.doFilter(apiRequest, apiResponse);
+        // The enclosing dispatch owns completion, after every outer filter has returned.
+        apiRequest.removeAttribute(ERROR_PENDING_ATTRIBUTE);
+    }
+
+    private static final class ErrorDispatchResponse extends HttpServletResponseWrapper {
+        private final HttpServletRequest apiRequest;
+
+        private ErrorDispatchResponse(HttpServletRequest apiRequest, HttpServletResponse apiResponse) {
+            super(apiResponse);
+            this.apiRequest = apiRequest;
+        }
+
+        /** Defers completion until the container renders the error response. */
+        @Override
+        public void sendError(int status) throws IOException {
+            apiRequest.setAttribute(ERROR_PENDING_ATTRIBUTE, Boolean.TRUE);
+            super.sendError(status);
+        }
+
+        /** Defers completion for error responses carrying a container-rendered message. */
+        @Override
+        public void sendError(int status, String message) throws IOException {
+            apiRequest.setAttribute(ERROR_PENDING_ATTRIBUTE, Boolean.TRUE);
+            super.sendError(status, message);
         }
     }
 

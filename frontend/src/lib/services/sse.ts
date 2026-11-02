@@ -29,6 +29,7 @@ const SSE_EVENT_CITATION = "citation";
 const SSE_EVENT_PROVIDER = "provider";
 const SSE_EVENT_TEXT = "text";
 const INVALID_SSE_EVENT_MESSAGE = "Received an invalid SSE event from the server";
+const DIAGNOSTIC_PAGE_PATH_MAX_LENGTH = 160;
 
 /** Optional request options for streaming fetch calls. */
 export interface StreamSseRequestOptions {
@@ -339,7 +340,7 @@ function reportStreamFailure(
     failureKind = "HTTP";
   } else if (streamFailure?.cause) {
     failureKind = "NETWORK";
-  } else if (streamFailure) {
+  } else if (streamFailure && httpResponse.body !== null) {
     failureKind = "SSE";
   }
   void reportSearchFailure({
@@ -351,7 +352,7 @@ function reportStreamFailure(
     stage: streamFailure?.stage,
     retryable: streamFailure?.retryable,
     retryAfterSeconds: streamFailure?.retryAfterSeconds,
-    pagePath: window.location.pathname,
+    pagePath: window.location.pathname.slice(0, DIAGNOSTIC_PAGE_PATH_MAX_LENGTH),
     frontendAsset: frontendScript ? new URL(frontendScript.src).pathname : undefined,
     elapsedMs: Math.round(performance.now() - startedAt),
   });

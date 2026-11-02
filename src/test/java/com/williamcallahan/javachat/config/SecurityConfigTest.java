@@ -23,6 +23,8 @@ import com.williamcallahan.javachat.application.auth.ApiKeyOperationUnavailableE
 import com.williamcallahan.javachat.application.auth.VerifiedApiKey;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import com.williamcallahan.javachat.web.CsrfController;
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.Cookie;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -79,6 +81,9 @@ class SecurityConfigTest {
 
     @Autowired
     MockMvc mockMvc;
+
+    @Autowired
+    ApiRequestLoggingFilter requestLogging;
 
     @MockitoBean
     ClerkApiKeyVerifier clerkApiKeyVerifier;
@@ -185,10 +190,46 @@ class SecurityConfigTest {
 
     @Test
     void returnsJsonWhenCsrfTokenIsMissing() throws Exception {
-        mockMvc.perform(post(CSRF_PROTECTED_ENDPOINT))
-                .andExpect(status().isForbidden())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.message").value(CSRF_INVALID_MESSAGE));
+        try (ExpectedLogEvents capturedLogs =
+                ExpectedLogEvents.capture((Logger) LoggerFactory.getLogger(ApiRequestLoggingFilter.class))) {
+            mockMvc.perform(post(CSRF_PROTECTED_ENDPOINT))
+                    .andExpect(status().isForbidden())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                    .andExpect(header().exists("X-Request-ID"))
+                    .andExpect(jsonPath("$.message").value(CSRF_INVALID_MESSAGE));
+            var completedRequests = capturedLogs.events().stream()
+                    .filter(logEvent -> "API request completed".equals(logEvent.getFormattedMessage()))
+                    .toList();
+            assertEquals(1, completedRequests.size());
+            assertTrue(completedRequests.getFirst().getKeyValuePairs().stream()
+                    .anyMatch(logField -> "status".equals(logField.key)
+                            && Integer.valueOf(403).equals(logField.value)));
+        }
+    }
+
+    @Test
+    void waitsForSecurityEntryPointErrorRendering() throws Exception {
+        try (ExpectedLogEvents capturedLogs =
+                ExpectedLogEvents.capture((Logger) LoggerFactory.getLogger(ApiRequestLoggingFilter.class))) {
+            MvcResult deniedExchange = mockMvc.perform(get(API_KEY_SUBJECT_ENDPOINT))
+                    .andExpect(status().isForbidden())
+                    .andExpect(header().exists("X-Request-ID"))
+                    .andReturn();
+            assertTrue(capturedLogs.events().stream()
+                    .noneMatch(logEvent -> "API request completed".equals(logEvent.getFormattedMessage())));
+            deniedExchange.getRequest().setDispatcherType(DispatcherType.ERROR);
+            deniedExchange.getRequest().setAttribute(RequestDispatcher.ERROR_REQUEST_URI, API_KEY_SUBJECT_ENDPOINT);
+            deniedExchange.getRequest().setRequestURI("/error");
+            requestLogging.doFilter(
+                    deniedExchange.getRequest(), deniedExchange.getResponse(), (errorRequest, errorResponse) -> {});
+            var completedRequests = capturedLogs.events().stream()
+                    .filter(logEvent -> "API request completed".equals(logEvent.getFormattedMessage()))
+                    .toList();
+            assertEquals(1, completedRequests.size());
+            assertTrue(completedRequests.getFirst().getKeyValuePairs().stream()
+                    .anyMatch(logField -> "status".equals(logField.key)
+                            && Integer.valueOf(403).equals(logField.value)));
+        }
     }
 
     @Test

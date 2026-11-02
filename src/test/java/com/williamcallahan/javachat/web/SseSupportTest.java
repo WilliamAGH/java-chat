@@ -438,4 +438,34 @@ class SseSupportTest {
     private SseSupport createSseSupport() {
         return new SseSupport(objectMapper, new SimpleMeterRegistry());
     }
+
+    @Test
+    void terminalErrorDiagnosticsWaitForDemandAndRemainAbsentAfterCancellation() {
+        SseSupport sseSupport = createSseSupport();
+        MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+        servletResponse.setHeader("X-Request-ID", "demand-correlated-request");
+        Flux<ServerSentEvent<String>> failedStream = sseSupport.withRequestDiagnostics(
+                sseSupport.configuredProviderUnavailableError(), servletResponse, "/api/chat/stream");
+        try (ExpectedLogEvents capturedLogs =
+                ExpectedLogEvents.capture((Logger) LoggerFactory.getLogger(SseSupport.class))) {
+            StepVerifier.create(failedStream, 0)
+                    .then(() -> assertTrue(capturedLogs.events().isEmpty()))
+                    .thenCancel()
+                    .verify();
+            assertTrue(capturedLogs.events().isEmpty());
+
+            StepVerifier.create(failedStream, 0)
+                    .then(() -> assertTrue(capturedLogs.events().isEmpty()))
+                    .thenRequest(1)
+                    .assertNext(errorEvent -> {
+                        assertEquals(EVENT_ERROR, errorEvent.event());
+                        assertEquals(1, capturedLogs.events().size());
+                        assertTrue(capturedLogs.events().getFirst().getKeyValuePairs().stream()
+                                .anyMatch(logField -> "requestId".equals(logField.key)
+                                        && "demand-correlated-request".equals(logField.value)));
+                    })
+                    .verifyComplete();
+            assertEquals(1, capturedLogs.events().size());
+        }
+    }
 }

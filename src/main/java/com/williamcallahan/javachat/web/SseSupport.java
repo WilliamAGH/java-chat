@@ -259,17 +259,19 @@ public class SseSupport {
      * Uses a localized fallback when error serialization itself fails, since this is the
      * terminal error path with nowhere further to propagate.
      */
-    public Flux<ServerSentEvent<String>> sseError(SseEventPayload payload) {
-        String json;
+    public Flux<ServerSentEvent<String>> sseError(SseEventPayload errorPayload) {
+        String errorJson;
         try {
-            json = jsonWriter.writeValueAsString(payload);
+            errorJson = jsonWriter.writeValueAsString(errorPayload);
         } catch (JsonProcessingException serializationFailure) {
             log.error("Failed to serialize SSE error payload", serializationFailure);
-            json = ERROR_FALLBACK_JSON;
+            errorJson = ERROR_FALLBACK_JSON;
         }
-        ServerSentEvent<String> errorEvent =
-                ServerSentEvent.<String>builder().event(EVENT_ERROR).data(json).build();
-        return Flux.deferContextual(streamContext -> {
+        ServerSentEvent<String> errorEvent = ServerSentEvent.<String>builder()
+                .event(EVENT_ERROR)
+                .data(errorJson)
+                .build();
+        return Flux.deferContextual(streamContext -> Flux.just(errorEvent).doOnNext(emittedError -> {
             streamContext
                     .<StreamRequestObservation>getOrEmpty(StreamRequestObservation.class)
                     .ifPresent(observation -> {
@@ -278,9 +280,9 @@ public class SseSupport {
                                 .addKeyValue("event", "search_stream_failed")
                                 .addKeyValue("requestId", observation.requestId())
                                 .addKeyValue("path", observation.path())
-                                .addKeyValue("code", payload.code())
-                                .addKeyValue("stage", payload.stage())
-                                .addKeyValue("retryable", payload.retryable())
+                                .addKeyValue("code", errorPayload.code())
+                                .addKeyValue("stage", errorPayload.stage())
+                                .addKeyValue("retryable", errorPayload.retryable())
                                 .addKeyValue(
                                         "terminalReason",
                                         streamContext
@@ -325,8 +327,7 @@ public class SseSupport {
                                 .orElse(streamFailureLog)
                                 .log();
                     });
-            return Flux.just(errorEvent);
-        });
+        }));
     }
 
     /**
