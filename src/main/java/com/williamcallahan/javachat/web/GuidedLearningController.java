@@ -427,8 +427,10 @@ public class GuidedLearningController extends BaseController {
                     .log();
         }
         boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
-        return sseSupport.streamErrorEvent(
-                GUIDED_CHAT_STREAM_ERROR_MESSAGE, GUIDED_CHAT_STREAM_ERROR_DETAILS, retryable);
+        return sseSupport.withFailureDiagnostics(
+                sseSupport.streamErrorEvent(
+                        GUIDED_CHAT_STREAM_ERROR_MESSAGE, GUIDED_CHAT_STREAM_ERROR_DETAILS, retryable),
+                error);
     }
 
     /**

@@ -15,6 +15,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ch.qos.logback.classic.Logger;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.openai.core.http.Headers;
+import com.openai.errors.RateLimitException;
+import com.williamcallahan.javachat.service.EmbeddingServiceTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -77,6 +80,52 @@ class SseSupportTest {
                     .anyMatch(
                             logField -> "event".equals(logField.key) && "search_stream_failed".equals(logField.value)));
         }
+    }
+
+    @Test
+    void concurrentSearchFailuresRetainTheirOwnGatewayRequestAssociation() {
+        SseSupport sseSupport = createSseSupport();
+        Flux<ServerSentEvent<String>> firstFailure =
+                observedProviderRefusal(sseSupport, "browser-first", "gateway-first");
+        Flux<ServerSentEvent<String>> secondFailure =
+                observedProviderRefusal(sseSupport, "browser-second", "gateway-second");
+        try (ExpectedLogEvents capturedLogs =
+                ExpectedLogEvents.capture((Logger) LoggerFactory.getLogger(SseSupport.class))) {
+            List<ServerSentEvent<String>> emittedEvents =
+                    Flux.merge(firstFailure, secondFailure).collectList().block();
+            assertEquals(2, Objects.requireNonNull(emittedEvents).size());
+            for (String requestSuffix : List.of("first", "second")) {
+                var associatedFailure = capturedLogs.events().stream()
+                        .filter(logEvent -> logEvent.getKeyValuePairs().stream()
+                                .anyMatch(logField -> "requestId".equals(logField.key)
+                                        && ("browser-" + requestSuffix).equals(logField.value)))
+                        .findFirst()
+                        .orElseThrow();
+                assertTrue(associatedFailure.getKeyValuePairs().stream()
+                        .anyMatch(logField -> "gatewayRequestId".equals(logField.key)
+                                && ("gateway-" + requestSuffix).equals(logField.value)));
+                assertTrue(associatedFailure.getKeyValuePairs().stream()
+                        .anyMatch(logField -> "upstreamHttpStatus".equals(logField.key)
+                                && Integer.valueOf(429).equals(logField.value)));
+            }
+        }
+    }
+
+    private static Flux<ServerSentEvent<String>> observedProviderRefusal(
+            SseSupport sseSupport, String browserRequestId, String gatewayRequestId) {
+        MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+        servletResponse.setHeader("X-Request-ID", browserRequestId);
+        RateLimitException providerRefusal = RateLimitException.builder()
+                .headers(Headers.builder()
+                        .put("x-lgw-request-id", gatewayRequestId)
+                        .put("Retry-After", "12")
+                        .build())
+                .build();
+        Flux<ServerSentEvent<String>> failedStream = Flux.defer(() -> sseSupport.withFailureDiagnostics(
+                        sseSupport.configuredProviderUnavailableError(),
+                        new EmbeddingServiceTemporarilyUnavailableException("Provider rate limited", providerRefusal)))
+                .subscribeOn(Schedulers.boundedElastic());
+        return sseSupport.withRequestDiagnostics(failedStream, servletResponse, "/api/chat/stream");
     }
 
     @Test

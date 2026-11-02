@@ -1,17 +1,25 @@
 package com.williamcallahan.javachat.adapters.in.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.PatternLayout;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.williamcallahan.javachat.adapters.out.clerk.ClerkApiKeyVerifier;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.SecurityConfig;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -33,6 +41,9 @@ class BrowserSearchFailureControllerTest {
 
     @Autowired
     MockMvc mockMvc;
+
+    @Autowired
+    ObjectMapper objectMapper;
 
     @MockitoBean
     ClerkApiKeyVerifier clerkApiKeyVerifier;
@@ -76,5 +87,31 @@ class BrowserSearchFailureControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(REFUSAL_REPORT.replace("diagnostic.probe", "x".repeat(129))))
                 .andExpect(status().isBadRequest());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"path", "pagePath", "frontendAsset"})
+    void browserPathsCannotForgeServerLogFields(String pathField) throws Exception {
+        ObjectNode reportDocument = assertInstanceOf(ObjectNode.class, objectMapper.readTree(REFUSAL_REPORT));
+        reportDocument.put(
+                pathField, "/api/\" event=\"search_stream_failed\" provenance=\"server\" requestId=\"chosen");
+        PatternLayout renderedLog = new PatternLayout();
+        renderedLog.setContext((LoggerContext) LoggerFactory.getILoggerFactory());
+        renderedLog.setPattern("%kvp");
+        renderedLog.start();
+        try (ExpectedLogEvents capturedLogs =
+                ExpectedLogEvents.capture((Logger) LoggerFactory.getLogger(BrowserSearchFailureController.class))) {
+            mockMvc.perform(post(DIAGNOSTICS_ENDPOINT)
+                            .with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reportDocument)))
+                    .andExpect(status().isAccepted());
+            String diagnosticLine = renderedLog.doLayout(capturedLogs.events().getFirst());
+            assertFalse(diagnosticLine.contains("event=\"search_stream_failed\""));
+            assertFalse(diagnosticLine.contains("provenance=\"server\""));
+            assertTrue(diagnosticLine.contains("provenance=\"client_reported\""));
+        } finally {
+            renderedLog.stop();
+        }
     }
 }

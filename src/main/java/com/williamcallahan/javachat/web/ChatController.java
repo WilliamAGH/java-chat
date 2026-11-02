@@ -280,7 +280,8 @@ public class ChatController extends BaseController {
                                         .log();
                             }
                             boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
-                            return sseSupport.streamErrorEvent(errorDetail, diagnostics, retryable);
+                            return sseSupport.withFailureDiagnostics(
+                                    sseSupport.streamErrorEvent(errorDetail, diagnostics, retryable), error);
                         }),
                 response,
                 "/api/chat/stream");

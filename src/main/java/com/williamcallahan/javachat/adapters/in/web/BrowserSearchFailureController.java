@@ -29,7 +29,10 @@ public final class BrowserSearchFailureController {
                 .setMessage("Browser reported a search failure")
                 .addKeyValue("event", "browser_search_failed")
                 .addKeyValue("provenance", "client_reported")
-                .addKeyValue("path", failureReport.path())
+                .addKeyValue(
+                        "path",
+                        StructuredLogValue.bounded(failureReport.path(), MAX_DIAGNOSTIC_FIELD_LENGTH)
+                                .text())
                 .addKeyValue("kind", failureReport.kind())
                 .addKeyValue("httpStatus", failureReport.httpStatus())
                 .addKeyValue(
@@ -46,8 +49,14 @@ public final class BrowserSearchFailureController {
                                 .text())
                 .addKeyValue("retryable", failureReport.retryable())
                 .addKeyValue("retryAfterSeconds", failureReport.retryAfterSeconds())
-                .addKeyValue("pagePath", failureReport.pagePath())
-                .addKeyValue("frontendAsset", failureReport.frontendAsset())
+                .addKeyValue(
+                        "pagePath",
+                        StructuredLogValue.bounded(failureReport.pagePath(), MAX_DIAGNOSTIC_FIELD_LENGTH)
+                                .text())
+                .addKeyValue(
+                        "frontendAsset",
+                        StructuredLogValue.bounded(failureReport.frontendAsset(), MAX_DIAGNOSTIC_FIELD_LENGTH)
+                                .text())
                 .addKeyValue("elapsedMs", failureReport.elapsedMs())
                 .log();
         return ResponseEntity.accepted().build();

@@ -6,7 +6,9 @@ import static com.williamcallahan.javachat.web.SseConstants.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
+import com.openai.errors.OpenAIServiceException;
 import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
+import com.williamcallahan.javachat.support.StructuredLogValue;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.http.HttpServletResponse;
@@ -21,6 +23,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Component;
@@ -39,6 +42,7 @@ import reactor.core.publisher.Mono;
 @Component
 public class SseSupport {
     private static final Logger log = LoggerFactory.getLogger(SseSupport.class);
+    private static final int MAX_PROVIDER_DIAGNOSTIC_LENGTH = 128;
     private static final String SOURCE_AVAILABILITY_NOTE =
             "Note: Matching source documents were not available to JavaChat for this question, so this answer uses the model's general knowledge.";
     private static final String PREVIOUS_SOURCE_AVAILABILITY_SUFFIX =
@@ -135,6 +139,21 @@ public class SseSupport {
     }
 
     private record StreamRequestObservation(String requestId, String path, long startedNanos) {}
+
+    /** Joins the request's terminal event to its own provider refusal, independent of callback threads. */
+    public Flux<ServerSentEvent<String>> withFailureDiagnostics(
+            Flux<ServerSentEvent<String>> errorEvents, Throwable searchFailure) {
+        Set<Throwable> inspectedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable failureCause = searchFailure;
+        while (failureCause != null && inspectedFailures.add(failureCause)) {
+            if (failureCause instanceof OpenAIServiceException providerFailure) {
+                return errorEvents.contextWrite(
+                        streamContext -> streamContext.put(OpenAIServiceException.class, providerFailure));
+            }
+            failureCause = failureCause.getCause();
+        }
+        return errorEvents;
+    }
 
     /**
      * Prepares a raw content stream for SSE transmission with backpressure handling.
@@ -248,19 +267,52 @@ public class SseSupport {
         return Flux.deferContextual(streamContext -> {
             streamContext
                     .<StreamRequestObservation>getOrEmpty(StreamRequestObservation.class)
-                    .ifPresent(observation -> log.atWarn()
-                            .setMessage("Search stream emitted a terminal error")
-                            .addKeyValue("event", "search_stream_failed")
-                            .addKeyValue("requestId", observation.requestId())
-                            .addKeyValue("path", observation.path())
-                            .addKeyValue("code", payload.code())
-                            .addKeyValue("stage", payload.stage())
-                            .addKeyValue("retryable", payload.retryable())
-                            .addKeyValue(
-                                    "durationMs",
-                                    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
-                                            System.nanoTime() - observation.startedNanos()))
-                            .log());
+                    .ifPresent(observation -> {
+                        LoggingEventBuilder streamFailureLog = log.atWarn()
+                                .setMessage("Search stream emitted a terminal error")
+                                .addKeyValue("event", "search_stream_failed")
+                                .addKeyValue("requestId", observation.requestId())
+                                .addKeyValue("path", observation.path())
+                                .addKeyValue("code", payload.code())
+                                .addKeyValue("stage", payload.stage())
+                                .addKeyValue("retryable", payload.retryable())
+                                .addKeyValue(
+                                        "durationMs",
+                                        java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                                                System.nanoTime() - observation.startedNanos()));
+                        streamContext
+                                .<OpenAIServiceException>getOrEmpty(OpenAIServiceException.class)
+                                .ifPresent(providerFailure -> streamFailureLog
+                                        .addKeyValue("upstreamHttpStatus", providerFailure.statusCode())
+                                        .addKeyValue(
+                                                "upstreamCode",
+                                                StructuredLogValue.bounded(
+                                                                providerFailure
+                                                                        .code()
+                                                                        .orElse("unknown"),
+                                                                MAX_PROVIDER_DIAGNOSTIC_LENGTH)
+                                                        .text())
+                                        .addKeyValue(
+                                                "gatewayRequestId",
+                                                StructuredLogValue.bounded(
+                                                                providerFailure
+                                                                        .headers()
+                                                                        .values("x-lgw-request-id")
+                                                                        .stream()
+                                                                        .findFirst()
+                                                                        .orElse("unknown"),
+                                                                MAX_PROVIDER_DIAGNOSTIC_LENGTH)
+                                                        .text())
+                                        .addKeyValue(
+                                                "retryAfter",
+                                                StructuredLogValue.bounded(
+                                                                providerFailure.headers().values("retry-after").stream()
+                                                                        .findFirst()
+                                                                        .orElse("unknown"),
+                                                                MAX_PROVIDER_DIAGNOSTIC_LENGTH)
+                                                        .text()));
+                        streamFailureLog.log();
+                    });
             return Flux.just(errorEvent);
         });
     }
