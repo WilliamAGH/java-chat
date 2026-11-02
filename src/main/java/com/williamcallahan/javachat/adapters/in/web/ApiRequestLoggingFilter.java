@@ -55,11 +55,16 @@ public final class ApiRequestLoggingFilter extends OncePerRequestFilter {
         if (apiRequest.getAttribute(REQUEST_STARTED_ATTRIBUTE) == null) {
             apiRequest.setAttribute(REQUEST_STARTED_ATTRIBUTE, System.nanoTime());
             apiResponse.setHeader(REQUEST_ID_HEADER, requestId);
-            log.info(
-                    "event=api_request_started requestId={} method={} path={}",
-                    requestId,
-                    apiRequest.getMethod(),
-                    requestPath);
+            log.atInfo()
+                    .setMessage("API request started")
+                    .addKeyValue("event", "api_request_started")
+                    .addKeyValue("requestId", requestId)
+                    .addKeyValue(
+                            "method",
+                            StructuredLogValue.bounded(apiRequest.getMethod(), MAX_REQUEST_LOG_FIELD_LENGTH)
+                                    .text())
+                    .addKeyValue("path", requestPath)
+                    .log();
         }
         apiFilterChain.doFilter(apiRequest, apiResponse);
         // Spring MVC performs a final ASYNC dispatch after an SSE emitter completes or fails.

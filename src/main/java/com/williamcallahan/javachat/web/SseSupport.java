@@ -282,7 +282,7 @@ public class SseSupport {
                                                 System.nanoTime() - observation.startedNanos()));
                         streamContext
                                 .<OpenAIServiceException>getOrEmpty(OpenAIServiceException.class)
-                                .ifPresent(providerFailure -> streamFailureLog
+                                .map(providerFailure -> streamFailureLog
                                         .addKeyValue("upstreamHttpStatus", providerFailure.statusCode())
                                         .addKeyValue(
                                                 "upstreamCode",
@@ -310,8 +310,9 @@ public class SseSupport {
                                                                         .findFirst()
                                                                         .orElse("unknown"),
                                                                 MAX_PROVIDER_DIAGNOSTIC_LENGTH)
-                                                        .text()));
-                        streamFailureLog.log();
+                                                        .text()))
+                                .orElse(streamFailureLog)
+                                .log();
                     });
             return Flux.just(errorEvent);
         });

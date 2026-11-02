@@ -9,6 +9,7 @@ import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.ServletException;
+import java.io.IOException;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -17,7 +18,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 /** Verifies that an escaping exception is not recorded as a successful response before error dispatch. */
 class ApiRequestLoggingFilterTest {
     @Test
-    void recordsTheErrorDispatchOutcomeInsteadOfAPrematureSuccess() throws Exception {
+    void recordsTheErrorDispatchOutcomeInsteadOfAPrematureSuccess() throws ServletException, IOException {
         ApiRequestLoggingFilter requestLogging = new ApiRequestLoggingFilter();
         MockHttpServletRequest apiRequest = new MockHttpServletRequest("GET", "/api/chat/citations");
         MockHttpServletResponse apiResponse = new MockHttpServletResponse();
