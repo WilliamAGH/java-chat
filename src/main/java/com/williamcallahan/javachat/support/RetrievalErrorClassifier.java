@@ -12,36 +12,24 @@ import java.util.concurrent.TimeoutException;
  */
 public final class RetrievalErrorClassifier {
 
-    /** Owns the stable diagnostic label and vector-store retry policy for each failure category. */
+    /** Owns the vector-store retry policy for each failure category. */
     private enum RetrievalErrorCategory {
-        NOT_FOUND("404 Not Found", false),
-        UNAUTHORIZED("401 Unauthorized", false),
-        FORBIDDEN("403 Forbidden", false),
-        RATE_LIMITED("429 Rate Limited", true),
-        CONNECTION_ERROR("Connection Error", true),
-        EMBEDDING_SERVICE_UNAVAILABLE("Embedding Service Unavailable", false),
-        UNKNOWN("Unknown Error", false);
+        NOT_FOUND(false),
+        UNAUTHORIZED(false),
+        FORBIDDEN(false),
+        RATE_LIMITED(true),
+        CONNECTION_ERROR(true),
+        EMBEDDING_SERVICE_UNAVAILABLE(false),
+        UNKNOWN(false);
 
-        private final String errorLabel;
         private final boolean retryableVectorStoreFailure;
 
-        RetrievalErrorCategory(String errorLabel, boolean retryableVectorStoreFailure) {
-            this.errorLabel = errorLabel;
+        RetrievalErrorCategory(boolean retryableVectorStoreFailure) {
             this.retryableVectorStoreFailure = retryableVectorStoreFailure;
         }
     }
 
     private RetrievalErrorClassifier() {}
-
-    /**
-     * Determines a stable error category from exception types, messages, and causes.
-     *
-     * @param failure failure encountered during retrieval
-     * @return normalized error category label
-     */
-    public static String determineErrorType(Throwable failure) {
-        return classify(failure).errorLabel;
-    }
 
     private static RetrievalErrorCategory classify(Throwable failure) {
         return classifyGrpcStatus(failure).orElseGet(() -> classifyNonGrpcFailure(failure));
