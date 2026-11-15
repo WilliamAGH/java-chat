@@ -35,14 +35,18 @@ describe("CLI authorization request", () => {
       state: "0123456789abcdefghijklmnopqrstuvwxyz_AB",
     };
 
-    expect(CliAuthorizationQuerySchema.safeParse({
-      ...authorizationQuery,
-      label: "😀".repeat(32),
-    }).success).toBe(true);
-    expect(CliAuthorizationQuerySchema.safeParse({
-      ...authorizationQuery,
-      label: "😀".repeat(33),
-    }).success).toBe(false);
+    expect(
+      CliAuthorizationQuerySchema.safeParse({
+        ...authorizationQuery,
+        label: "😀".repeat(32),
+      }).success,
+    ).toBe(true);
+    expect(
+      CliAuthorizationQuerySchema.safeParse({
+        ...authorizationQuery,
+        label: "😀".repeat(33),
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects malformed loopback parameters", async () => {

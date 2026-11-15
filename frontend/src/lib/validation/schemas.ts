@@ -67,16 +67,31 @@ export const StreamErrorSchema = z.object(sseEventFieldShape);
 /** Bounded, credential-free observations from the browser's search transport. */
 // Native length checks retain the UTF-16 limits used by Java and HTML controls.
 export const BrowserSearchFailureSchema = z.object({
-  path: z.string().startsWith("/api/").check(z.property("length", z.number().max(160))),
+  path: z
+    .string()
+    .startsWith("/api/")
+    .check(z.property("length", z.number().max(160))),
   kind: z.enum(["HTTP", "SSE", "NETWORK", "PROTOCOL"]),
   httpStatus: z.int().min(100).max(599).optional(),
-  requestId: z.string().check(z.property("length", z.number().max(128))).optional(),
-  code: z.string().check(z.property("length", z.number().max(128))).optional(),
-  stage: z.string().check(z.property("length", z.number().max(64))).optional(),
+  requestId: z
+    .string()
+    .check(z.property("length", z.number().max(128)))
+    .optional(),
+  code: z
+    .string()
+    .check(z.property("length", z.number().max(128)))
+    .optional(),
+  stage: z
+    .string()
+    .check(z.property("length", z.number().max(64)))
+    .optional(),
   retryable: z.boolean().optional(),
   retryAfterSeconds: z.number().nonnegative().optional(),
   pagePath: z.string().check(z.property("length", z.number().max(160))),
-  frontendAsset: z.string().check(z.property("length", z.number().max(160))).optional(),
+  frontendAsset: z
+    .string()
+    .check(z.property("length", z.number().max(160)))
+    .optional(),
   elapsedMs: z.number().nonnegative(),
 });
 
@@ -159,17 +174,27 @@ export const ContactSubmissionSchema = z.object({
     .string()
     .trim()
     .min(1, { error: CONTACT_NAME_REQUIRED_MESSAGE })
-    .check(z.property("length", z.number().max(CONTACT_NAME_MAX_LENGTH, {
-      error: CONTACT_NAME_TOO_LONG_MESSAGE,
-    }))),
+    .check(
+      z.property(
+        "length",
+        z.number().max(CONTACT_NAME_MAX_LENGTH, {
+          error: CONTACT_NAME_TOO_LONG_MESSAGE,
+        }),
+      ),
+    ),
   email: z.email({ error: CONTACT_EMAIL_INVALID_MESSAGE }),
   message: z
     .string()
     .trim()
     .min(1, { error: CONTACT_MESSAGE_REQUIRED_MESSAGE })
-    .check(z.property("length", z.number().max(CONTACT_MESSAGE_MAX_LENGTH, {
-      error: CONTACT_MESSAGE_TOO_LONG_MESSAGE,
-    }))),
+    .check(
+      z.property(
+        "length",
+        z.number().max(CONTACT_MESSAGE_MAX_LENGTH, {
+          error: CONTACT_MESSAGE_TOO_LONG_MESSAGE,
+        }),
+      ),
+    ),
   website: z.string(),
   renderedAt: z.int().positive(),
 });
@@ -187,12 +212,19 @@ export const ContactAcceptedSchema = z.object({
 export const CliAuthorizationQuerySchema = z.object({
   port: z.coerce.number().int().min(1).max(65_535),
   state: z.string().regex(/^[A-Za-z0-9_-]{32,128}$/),
-  label: z.string().trim().min(1).check(z.property("length", z.number().max(64))),
+  label: z
+    .string()
+    .trim()
+    .min(1)
+    .check(z.property("length", z.number().max(64))),
 });
 
 /** Validates Clerk's one-time API-key creation response before the secret leaves the SDK boundary. */
 export const CliApiKeyCreationSchema = z.object({
-  secret: z.string().startsWith("ak_").check(z.property("length", z.number().max(512))),
+  secret: z
+    .string()
+    .startsWith("ak_")
+    .check(z.property("length", z.number().max(512))),
 });
 
 // =============================================================================

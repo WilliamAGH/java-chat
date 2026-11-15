@@ -89,10 +89,12 @@ describe("ContactSubmissionSchema", () => {
     if (beyondLimit.success) {
       throw new Error("Expected the backend's UTF-16 contact bounds to reject oversized fields");
     }
-    expect(beyondLimit.error.issues.find((issue) => issue.path[0] === "name")?.message)
-      .toBe(`Name must be ${CONTACT_NAME_MAX_LENGTH} characters or fewer`);
-    expect(beyondLimit.error.issues.find((issue) => issue.path[0] === "message")?.message)
-      .toBe(`Message must be ${CONTACT_MESSAGE_MAX_LENGTH} characters or fewer`);
+    expect(beyondLimit.error.issues.find((issue) => issue.path[0] === "name")?.message).toBe(
+      `Name must be ${CONTACT_NAME_MAX_LENGTH} characters or fewer`,
+    );
+    expect(beyondLimit.error.issues.find((issue) => issue.path[0] === "message")?.message).toBe(
+      `Message must be ${CONTACT_MESSAGE_MAX_LENGTH} characters or fewer`,
+    );
   });
 
   it("rejects a malformed email", () => {
