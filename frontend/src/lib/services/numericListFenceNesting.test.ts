@@ -100,7 +100,7 @@ describe("numeric list fence nesting", () => {
     }
   });
 
-  it("accepts CommonMark closing indentation after a column-zero opening fence", () => {
+  it("preserves bare fences past CommonMark closing indentation as content after a column-zero opening fence", () => {
     for (const fenceMarker of ["```", "~~~"]) {
       for (const closingOffset of [1, 2, 3, 4]) {
         const closingIndentation = " ".repeat(3 + closingOffset);
@@ -117,7 +117,71 @@ describe("numeric list fence nesting", () => {
 
           expect(nestedCodeBlocks).toHaveLength(1);
           expect(nestedCodeBlocks[0].textContent).toContain("template body");
-          expect(nestedCodeBlocks[0].textContent?.includes(fenceMarker)).toBe(closingOffset === 4);
+          expect(nestedCodeBlocks[0].textContent?.includes(fenceMarker)).toBe(true);
+          expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
+        }
+      }
+    }
+  });
+
+  it("keeps an indented bare fence used as content nested inside the list item", () => {
+    const markdown = ["1. Example of nested:", "```text", "    ```", "more", "```"].join("\n");
+
+    for (const isStreaming of [false, true]) {
+      const renderedContainer = renderMarkdown(markdown, isStreaming);
+      const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
+
+      expect(nestedCodeBlocks).toHaveLength(1);
+      expect(nestedCodeBlocks[0].textContent).toContain("```\nmore");
+      expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
+      expect(renderedContainer.querySelectorAll(":scope > p")).toHaveLength(0);
+    }
+  });
+
+  it("keeps indented bare-fence content nested for deep numeric markers", () => {
+    for (const numericListMarker of ["14.", "123."]) {
+      const requiredIndentation = " ".repeat(numericListMarker.length + 1);
+      const markdown = [
+        `${numericListMarker} Item`,
+        "```text",
+        `${requiredIndentation}\`\`\``,
+        "more",
+        "```",
+      ].join("\n");
+
+      for (const isStreaming of [false, true]) {
+        const renderedContainer = renderMarkdown(markdown, isStreaming);
+        const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
+        const orderedLists = renderedContainer.querySelectorAll("ol");
+
+        expect(orderedLists).toHaveLength(1);
+        expect(nestedCodeBlocks).toHaveLength(1);
+        expect(nestedCodeBlocks[0].textContent).toContain("```\nmore");
+        expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
+        expect(renderedContainer.querySelectorAll(":scope > p")).toHaveLength(0);
+      }
+    }
+  });
+
+  it("still closes the block at CommonMark-valid closing indentation (offset 0 to 3)", () => {
+    for (const fenceMarker of ["```", "~~~"]) {
+      for (const closingSpaces of [0, 1, 2, 3]) {
+        const markdown = [
+          "1. Template example",
+          `${fenceMarker}text`,
+          "template body",
+          `${" ".repeat(closingSpaces)}${fenceMarker}`,
+        ].join("\n");
+
+        for (const isStreaming of [false, true]) {
+          const renderedContainer = renderMarkdown(markdown, isStreaming);
+          const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
+
+          expect(nestedCodeBlocks).toHaveLength(1);
+          expect(nestedCodeBlocks[0].textContent).toContain("template body");
+          expect(nestedCodeBlocks[0].textContent?.includes(fenceMarker)).toBe(false);
+          expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
+          expect(renderedContainer.querySelectorAll(":scope > p")).toHaveLength(0);
         }
       }
     }
