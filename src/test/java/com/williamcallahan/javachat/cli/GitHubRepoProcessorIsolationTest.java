@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -154,6 +155,32 @@ class GitHubRepoProcessorIsolationTest {
         verify(processorFixture.hybridVectorService()).scrollAllUrlsInCollection(COLLECTION_NAME);
         verifyNoMoreInteractions(processorFixture.hybridVectorService());
         verifyNoInteractions(processorFixture.ingestedFilePruneService());
+    }
+
+    @Test
+    void skippedOversizedUrlStaysActiveWhileGenuinelyDeletedFileIsPurged(@TempDir Path repositoryRoot)
+            throws IOException {
+        for (int fileIndex = 0; fileIndex < ELIGIBLE_FILE_COUNT; fileIndex++) {
+            Files.writeString(repositoryRoot.resolve("Source" + fileIndex + ".java"), "class Source {}");
+        }
+        String oversizedUrl = "https://github.com/openai/java-chat/blob/main/package-lock.json";
+        String deletedUrl = "https://github.com/openai/java-chat/blob/main/Deleted.java";
+        ProcessorFixture processorFixture = processorFixture();
+        when(processorFixture.hybridVectorService().scrollAllUrlsInCollection(COLLECTION_NAME))
+                .thenReturn(Set.of(oversizedUrl, deletedUrl));
+        when(processorFixture
+                        .fileProcessor()
+                        .process(
+                                any(SourceCodeFileIngestionProcessor.RepositoryIngestionContext.class),
+                                any(Path.class)))
+                .thenReturn(new SourceFileProcessingResult(LocalDocsFileOutcome.skippedFile(), oversizedUrl));
+
+        processorFixture.processor().processRepository(repositoryMetadata(repositoryRoot));
+
+        verify(processorFixture.ingestedFilePruneService())
+                .pruneCollectionFileStrict(COLLECTION_NAME, deletedUrl, null);
+        verify(processorFixture.ingestedFilePruneService(), never())
+                .pruneCollectionFileStrict(COLLECTION_NAME, oversizedUrl, null);
     }
 
     private static GitHubRepoMetadata repositoryMetadata(Path repositoryRoot) {
