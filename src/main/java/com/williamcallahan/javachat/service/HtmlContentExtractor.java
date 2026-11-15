@@ -222,13 +222,16 @@ public class HtmlContentExtractor {
      */
     private boolean isNavigationElement(Element element) {
         String className = AsciiTextNormalizer.toLowerAscii(element.className());
+        Set<String> classTokens = element.classNames().stream()
+                .map(AsciiTextNormalizer::toLowerAscii)
+                .collect(Collectors.toSet());
         String id = AsciiTextNormalizer.toLowerAscii(element.id());
         String text = AsciiTextNormalizer.toLowerAscii(element.text());
 
         return className.contains("nav")
                 || className.contains("menu")
                 || className.contains("sidebar")
-                || className.contains("header")
+                || classTokens.contains("header")
                 || className.contains("footer")
                 || id.contains("nav")
                 || id.contains("menu")
