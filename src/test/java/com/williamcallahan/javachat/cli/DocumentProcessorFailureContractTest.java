@@ -40,6 +40,7 @@ class DocumentProcessorFailureContractTest {
     private static final String DOCUMENT_PROCESSING_FAILED = "DOCUMENT PROCESSING FAILED";
     private static final String TOTAL_PROCESSED_ONE_DOCUMENT = "Total new documents processed: 1";
     private static final String TOTAL_DUPLICATES_ZERO_DOCUMENTS = "Total duplicates skipped: 0";
+    private static final String TOTAL_EXCLUDED_ZERO_DOCUMENTS = "Total excluded files: 0";
     private static final String TOTAL_FAILED_ONE_SET = "Documentation sets FAILED: 1";
     private static final String FAILURE_PHASE = "synthetic-ingestion";
     private static final String SENSITIVE_FAILURE_DETAILS = "api-key=synthetic-private-value";
@@ -81,6 +82,7 @@ class DocumentProcessorFailureContractTest {
                                 2,
                                 1,
                                 0,
+                                0,
                                 1,
                                 1,
                                 0,
@@ -97,6 +99,7 @@ class DocumentProcessorFailureContractTest {
                                 2,
                                 1,
                                 1,
+                                0,
                                 0,
                                 0,
                                 0,
@@ -130,6 +133,7 @@ class DocumentProcessorFailureContractTest {
         assertTrue(containsLogMessage(DOCUMENT_PROCESSING_FAILED));
         assertTrue(containsLogMessage(TOTAL_PROCESSED_ONE_DOCUMENT));
         assertTrue(containsLogMessage(TOTAL_DUPLICATES_ZERO_DOCUMENTS));
+        assertTrue(containsLogMessage(TOTAL_EXCLUDED_ZERO_DOCUMENTS));
         assertTrue(containsLogMessage(TOTAL_FAILED_ONE_SET));
         assertTrue(containsLogMessage(
                 "File failed (phase=" + FAILURE_PHASE + "): " + failedDocument + "??" + FORGED_LOG_LINE));

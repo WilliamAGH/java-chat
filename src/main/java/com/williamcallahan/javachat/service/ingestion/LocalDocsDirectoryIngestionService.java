@@ -105,6 +105,7 @@ public final class LocalDocsDirectoryIngestionService implements LocalDocumentat
 
                 int batchProcessedCount = 0;
                 int batchSkippedCount = 0;
+                int batchExcludedCount = 0;
                 int batchFailedCount = 0;
                 for (LocalDocsFileOutcome fileOutcome :
                         fileProcessor.processBatch(realSelectedRoot, fileBatch, ingestionIdentities)) {
@@ -112,12 +113,15 @@ public final class LocalDocsDirectoryIngestionService implements LocalDocumentat
                         batchProcessedCount++;
                     } else if (fileOutcome.failure().isPresent()) {
                         batchFailedCount++;
+                    } else if (fileOutcome instanceof LocalDocsFileOutcome.Excluded) {
+                        batchExcludedCount++;
                     } else {
                         batchSkippedCount++;
                     }
                     fileOutcome.failure().ifPresent(failures::add);
                 }
-                backlogStatus = backlogStatus.completeBatch(batchProcessedCount, batchSkippedCount, batchFailedCount);
+                backlogStatus = backlogStatus.completeBatch(
+                        batchProcessedCount, batchSkippedCount, batchExcludedCount, batchFailedCount);
                 ingestionRunStore.write(realSelectedRoot, backlogStatus, eligibleFileInventory.inventoryFingerprint());
                 runStopped = batchFailedCount > 0;
                 selectedFileIndex = batchEndIndex;

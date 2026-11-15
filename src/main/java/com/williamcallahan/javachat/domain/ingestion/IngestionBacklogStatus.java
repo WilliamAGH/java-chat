@@ -9,7 +9,8 @@ import java.util.Objects;
  * @param eligibleFiles ingestable files discovered beneath the selected directory
  * @param inspectedFiles files that reached a terminal per-file outcome
  * @param processedFiles files that produced newly indexed chunks
- * @param skippedFiles files already indexed or intentionally excluded
+ * @param skippedFiles files already indexed (unchanged duplicates that retain their Qdrant points)
+ * @param excludedFiles files intentionally excluded from indexing (held zero Qdrant points)
  * @param failedFiles files that reached a typed failure
  * @param pendingFiles files still waiting to be inspected
  * @param inProgressFiles files currently owned by the active ingestion batch
@@ -21,6 +22,7 @@ public record IngestionBacklogStatus(
         int inspectedFiles,
         int processedFiles,
         int skippedFiles,
+        int excludedFiles,
         int failedFiles,
         int pendingFiles,
         int inProgressFiles,
@@ -47,11 +49,13 @@ public record IngestionBacklogStatus(
         requireNonNegative("inspectedFiles", inspectedFiles);
         requireNonNegative("processedFiles", processedFiles);
         requireNonNegative("skippedFiles", skippedFiles);
+        requireNonNegative("excludedFiles", excludedFiles);
         requireNonNegative("failedFiles", failedFiles);
         requireNonNegative("pendingFiles", pendingFiles);
         requireNonNegative("inProgressFiles", inProgressFiles);
-        if (inspectedFiles != processedFiles + skippedFiles + failedFiles) {
-            throw new IllegalArgumentException("Inspected files must equal processed, skipped, and failed files");
+        if (inspectedFiles != processedFiles + skippedFiles + excludedFiles + failedFiles) {
+            throw new IllegalArgumentException(
+                    "Inspected files must equal processed, skipped, excluded, and failed files");
         }
         if (eligibleFiles != inspectedFiles + pendingFiles + inProgressFiles) {
             throw new IllegalArgumentException("Eligible files must equal inspected, pending, and in-progress files");
@@ -67,14 +71,14 @@ public record IngestionBacklogStatus(
      */
     public static IngestionBacklogStatus notStarted(String directory, int eligibleFiles) {
         return new IngestionBacklogStatus(
-                Lifecycle.NOT_STARTED, eligibleFiles, 0, 0, 0, 0, eligibleFiles, 0, directory);
+                Lifecycle.NOT_STARTED, eligibleFiles, 0, 0, 0, 0, 0, eligibleFiles, 0, directory);
     }
 
     /**
      * Creates the initial durable state after a process claims the directory.
      */
     public static IngestionBacklogStatus running(String directory, int eligibleFiles) {
-        return new IngestionBacklogStatus(Lifecycle.RUNNING, eligibleFiles, 0, 0, 0, 0, eligibleFiles, 0, directory);
+        return new IngestionBacklogStatus(Lifecycle.RUNNING, eligibleFiles, 0, 0, 0, 0, 0, eligibleFiles, 0, directory);
     }
 
     /**
@@ -96,6 +100,7 @@ public record IngestionBacklogStatus(
                 inspectedFiles,
                 processedFiles,
                 skippedFiles,
+                excludedFiles,
                 failedFiles,
                 pendingFiles - batchFileCount,
                 batchFileCount,
@@ -105,11 +110,13 @@ public record IngestionBacklogStatus(
     /**
      * Records all terminal outcomes returned by the active batch.
      */
-    public IngestionBacklogStatus completeBatch(int processedCount, int skippedCount, int failedCount) {
+    public IngestionBacklogStatus completeBatch(
+            int processedCount, int skippedCount, int excludedCount, int failedCount) {
         requireNonNegative("processedCount", processedCount);
         requireNonNegative("skippedCount", skippedCount);
+        requireNonNegative("excludedCount", excludedCount);
         requireNonNegative("failedCount", failedCount);
-        int terminalOutcomeCount = processedCount + skippedCount + failedCount;
+        int terminalOutcomeCount = processedCount + skippedCount + excludedCount + failedCount;
         if (terminalOutcomeCount > inProgressFiles) {
             throw new IllegalArgumentException("Batch outcomes exceed the in-progress file count");
         }
@@ -120,6 +127,7 @@ public record IngestionBacklogStatus(
                 inspectedFiles + terminalOutcomeCount,
                 processedFiles + processedCount,
                 skippedFiles + skippedCount,
+                excludedFiles + excludedCount,
                 failedFiles + failedCount,
                 pendingFiles + unattemptedCount,
                 0,
@@ -140,6 +148,7 @@ public record IngestionBacklogStatus(
                 inspectedFiles,
                 processedFiles,
                 skippedFiles,
+                excludedFiles,
                 failedFiles,
                 pendingFiles,
                 0,
@@ -161,15 +170,16 @@ public record IngestionBacklogStatus(
         }
         if (failedFiles > 0) {
             return new IngestionBacklogStatus(
-                    Lifecycle.PARTIAL, eligibleFiles, 0, 0, 0, 0, eligibleFiles, 0, directory);
+                    Lifecycle.PARTIAL, eligibleFiles, 0, 0, 0, 0, 0, eligibleFiles, 0, directory);
         }
-        int terminalSuccessCount = processedFiles + skippedFiles;
+        int terminalSuccessCount = processedFiles + skippedFiles + excludedFiles;
         return new IngestionBacklogStatus(
                 Lifecycle.PARTIAL,
                 eligibleFiles,
                 terminalSuccessCount,
                 processedFiles,
                 skippedFiles,
+                excludedFiles,
                 0,
                 eligibleFiles - terminalSuccessCount,
                 0,
@@ -194,6 +204,7 @@ public record IngestionBacklogStatus(
                 abandonedBacklog.inspectedFiles,
                 abandonedBacklog.processedFiles,
                 abandonedBacklog.skippedFiles,
+                abandonedBacklog.excludedFiles,
                 0,
                 abandonedBacklog.pendingFiles,
                 0,
