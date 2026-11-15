@@ -198,6 +198,21 @@ export function attachUserButton(userButtonHost: HTMLDivElement): () => void {
 function warmPrecisionAppearance(darkBaseTheme: Appearance["theme"]): Appearance {
   return {
     theme: darkBaseTheme,
+    elements: {
+      modalBackdrop: {
+        paddingLeft: "calc(env(safe-area-inset-left) + var(--space-5))",
+        paddingRight: "calc(env(safe-area-inset-right) + var(--space-5))",
+      },
+      modalContent: {
+        maxWidth: "100%",
+      },
+      rootBox: {
+        minWidth: 0,
+      },
+      cardBox: {
+        maxWidth: "100%",
+      },
+    },
     options: {
       logoImageUrl: "/assets/javachat_cup_star_256.png",
     },

@@ -26,7 +26,7 @@
         class="toast__dismiss"
         type="button"
         aria-label={`Dismiss ${severityLabel[notice.severity] ?? 'notice'}`}
-        on:click={() => dismissToast(notice.id)}
+        onclick={() => dismissToast(notice.id)}
       >
         ✕
       </button>
@@ -37,10 +37,12 @@
 <style>
   .toast-container {
     position: fixed;
-    right: var(--space-6);
+    left: calc(var(--space-6) + env(safe-area-inset-left));
+    right: calc(var(--space-6) + env(safe-area-inset-right));
     bottom: var(--space-6);
     display: flex;
     flex-direction: column;
+    align-items: flex-end;
     gap: var(--space-3);
     z-index: 40;
     pointer-events: none;
@@ -52,8 +54,8 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: var(--space-3);
-    min-width: min(320px, 90vw);
-    max-width: 420px;
+    min-width: min(320px, 100%);
+    max-width: min(420px, 100%);
     padding: var(--space-3) var(--space-4);
     border-radius: 16px;
     background: var(--color-bg-secondary);
@@ -118,8 +120,8 @@
 
   @media (max-width: 640px) {
     .toast-container {
-      left: var(--space-4);
-      right: var(--space-4);
+      left: calc(var(--space-4) + env(safe-area-inset-left));
+      right: calc(var(--space-4) + env(safe-area-inset-right));
       bottom: var(--space-4);
     }
 

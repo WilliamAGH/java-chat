@@ -111,6 +111,8 @@
     height: 100vh;
     height: 100dvh;
     overflow: hidden;
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
   }
 
   .main-content {

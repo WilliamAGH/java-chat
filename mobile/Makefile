@@ -1,17 +1,17 @@
 # Every lane runs on the Mac build host. Any other host (the laptop, Linux peers) forwards the goals
 # and command-line variables, each shell-quoted, to a warm mirror of this checkout there through the
 # host tool remote-slot (dotfiles, ~/.local/bin). The environment, gitignored files, and make's own
-# flags do not cross, and every output (installs, archives, receipts) stays on that host. GitHub
-# Actions jobs already run on the Mac their workflow picked.
-ifeq ($(filter command line,$(origin APPLE_BUILD_HOST))$(GITHUB_ACTIONS),)
+# flags do not cross, and every output (installs, archives, receipts) stays on that host.
+# An explicit APPLE_BUILD_HOST also names the executing host for a CI lane.
+ifeq ($(filter command line,$(origin APPLE_BUILD_HOST)),)
 APPLE_BUILD_HOST := $(or $(shell remote-slot apple-host),$(error remote-slot apple-host named no Mac build host; update the dotfiles host tool remote-slot or pass APPLE_BUILD_HOST))
 endif
-ifeq ($(filter $(APPLE_BUILD_HOST),$(shell hostname -s))$(GITHUB_ACTIONS),)
+ifeq ($(filter $(APPLE_BUILD_HOST),$(shell hostname -s)),)
 APPLE_BUILD_HOST_VARIABLES := $(strip $(foreach variable,$(sort $(.VARIABLES)),$(if $(filter command line,$(origin $(variable))),'$(variable)=$(subst ','\'',$(value $(variable)))')))
 .DEFAULT_GOAL := apple-build-host
 .PHONY: apple-build-host $(MAKECMDGOALS)
 apple-build-host:
-	remote-slot run $(APPLE_BUILD_HOST) -- make $(MAKECMDGOALS) $(APPLE_BUILD_HOST_VARIABLES)
+	remote-slot run $(APPLE_BUILD_HOST) $(if $(filter ios-test,$(MAKECMDGOALS)),$(if $(filter-out ios-test,$(MAKECMDGOALS)),,--weight 0)) -- make $(MAKECMDGOALS) $(APPLE_BUILD_HOST_VARIABLES)
 ifneq ($(MAKECMDGOALS),)
 $(MAKECMDGOALS): apple-build-host ; @:
 endif
@@ -155,14 +155,43 @@ ios:
 
 ios-test:
 	@test -n "$(IOS_SIMULATOR_ID)" || \
-		(echo "Set IOS_SIMULATOR_ID to an installed, booted simulator UDID." >&2; exit 2)
-	xcodebuild \
-		-project iosApp/JavaChat.xcodeproj \
-		-scheme JavaChat \
-		-configuration Debug \
-		-destination 'platform=iOS Simulator,id=$(IOS_SIMULATOR_ID)' \
-		-derivedDataPath iosApp/build-test \
-		test CODE_SIGNING_ALLOWED=NO
+		(echo "Set IOS_SIMULATOR_ID to an installed simulator UDID." >&2; exit 2)
+	aventure-compute run --lane java-chat-ios-test-build --weight 8 \
+		--resource "$$HOME/Library/Developer/CoreSimulator/Devices/$(IOS_SIMULATOR_ID)/aventure-test-lane.lock" -- \
+		xcodebuild \
+			-project iosApp/JavaChat.xcodeproj \
+			-scheme JavaChat \
+			-configuration Debug \
+			-destination 'platform=iOS Simulator,id=$(IOS_SIMULATOR_ID)' \
+			-derivedDataPath iosApp/build-test \
+			build-for-testing CODE_SIGNING_ALLOWED=NO
+	@set -e; \
+		mkdir -p iosApp/build-test/receipts; \
+		receipt_dir="$$(mktemp -d "$$PWD/iosApp/build-test/receipts/ios-test.XXXXXX")"; \
+		receipt="$$receipt_dir/Tests.xcresult"; \
+		aventure-compute run --lane java-chat-ios-test --weight 8 \
+			--resource "$$HOME/Library/Developer/CoreSimulator/Devices/$(IOS_SIMULATOR_ID)/aventure-test-lane.lock" -- \
+			ios-simulator-session "$(IOS_SIMULATOR_ID)" - xcodebuild \
+				-project iosApp/JavaChat.xcodeproj \
+				-scheme JavaChat \
+				-configuration Debug \
+				-destination 'platform=iOS Simulator,id=$(IOS_SIMULATOR_ID)' \
+				-derivedDataPath iosApp/build-test \
+				-resultBundlePath "$$receipt" \
+				$(IOS_TEST_ARGS) -parallel-testing-enabled NO \
+				test-without-building CODE_SIGNING_ALLOWED=NO; \
+		summary="$$(xcrun xcresulttool get test-results summary --path "$$receipt" --compact)"; \
+		printf '%s\n' "$$summary" | jq -e '.passedTests > 0 and .failedTests == 0 and .skippedTests == 0 and .passedTests == .totalTestCount' || \
+			{ echo "Native tests did not all execute and pass: $$receipt" >&2; exit 1; }; \
+		if [ -n "$(filter -only-testing:%,$(IOS_TEST_ARGS))" ]; then \
+			xcrun xcresulttool get test-results tests --path "$$receipt" --compact > "$$receipt_dir/tests.json"; \
+			for selected_test in $(filter -only-testing:%,$(IOS_TEST_ARGS)); do \
+				selected_test="$${selected_test#-only-testing:}"; \
+				jq -e --arg selected "$$selected_test" 'any(.. | objects | select(.nodeType == "Test Case" and .result == "Passed"); .nodeIdentifierURL | endswith("/" + $$selected) or contains("/" + $$selected + "/"))' "$$receipt_dir/tests.json" || \
+					{ echo "Requested native test selector did not execute: $$selected_test" >&2; exit 1; }; \
+			done; \
+		fi; \
+		echo "Native test result: $$receipt"
 
 ios-archive: signing-session
 	xcodebuild \
