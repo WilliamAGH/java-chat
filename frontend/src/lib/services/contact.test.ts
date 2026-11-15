@@ -73,6 +73,28 @@ describe("ContactSubmissionSchema", () => {
     expect(validation.success).toBe(false);
   });
 
+  it("preserves UTF-16 contact limits and field guidance for astral text", () => {
+    const atLimit = {
+      ...createValidSubmission(),
+      name: "😀".repeat(CONTACT_NAME_MAX_LENGTH / 2),
+      message: "😀".repeat(CONTACT_MESSAGE_MAX_LENGTH / 2),
+    };
+    expect(ContactSubmissionSchema.safeParse(atLimit).success).toBe(true);
+
+    const beyondLimit = ContactSubmissionSchema.safeParse({
+      ...atLimit,
+      name: `${atLimit.name}a`,
+      message: `${atLimit.message}a`,
+    });
+    if (beyondLimit.success) {
+      throw new Error("Expected the backend's UTF-16 contact bounds to reject oversized fields");
+    }
+    expect(beyondLimit.error.issues.find((issue) => issue.path[0] === "name")?.message)
+      .toBe(`Name must be ${CONTACT_NAME_MAX_LENGTH} characters or fewer`);
+    expect(beyondLimit.error.issues.find((issue) => issue.path[0] === "message")?.message)
+      .toBe(`Message must be ${CONTACT_MESSAGE_MAX_LENGTH} characters or fewer`);
+  });
+
   it("rejects a malformed email", () => {
     const validation = ContactSubmissionSchema.safeParse({
       ...createValidSubmission(),
