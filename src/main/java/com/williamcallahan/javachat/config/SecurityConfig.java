@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.adapters.in.web.security.ClerkApiKeyAuthenticationFilter;
 import com.williamcallahan.javachat.adapters.in.web.security.ClerkAuthorizedPartyValidator;
 import com.williamcallahan.javachat.adapters.in.web.security.CsrfAccessDeniedHandler;
+import com.williamcallahan.javachat.adapters.in.web.security.GenericAccessDeniedHandler;
 import com.williamcallahan.javachat.adapters.out.clerk.ClerkApiKeyVerifier;
+import java.util.LinkedHashMap;
 import java.util.List;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
@@ -14,6 +16,7 @@ import org.springframework.boot.autoconfigure.security.oauth2.resource.OAuth2Res
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
@@ -24,8 +27,12 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.access.DelegatingAccessDeniedHandler;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.csrf.InvalidCsrfTokenException;
+import org.springframework.security.web.csrf.MissingCsrfTokenException;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -118,7 +125,14 @@ public class SecurityConfig {
         CookieCsrfTokenRepository csrfTokenRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
         csrfTokenRepository.setCookieCustomizer(csrfCookie -> csrfCookie.sameSite("Lax"));
         CsrfTokenRequestAttributeHandler requestHandler = new CsrfTokenRequestAttributeHandler();
-        CsrfAccessDeniedHandler accessDeniedHandler = new CsrfAccessDeniedHandler(objectMapper);
+        AccessDeniedHandler csrfHandler = new CsrfAccessDeniedHandler(objectMapper);
+        AccessDeniedHandler genericHandler = new GenericAccessDeniedHandler(objectMapper);
+        LinkedHashMap<Class<? extends AccessDeniedException>, AccessDeniedHandler> accessDeniedHandlers =
+                new LinkedHashMap<>();
+        accessDeniedHandlers.put(MissingCsrfTokenException.class, csrfHandler);
+        accessDeniedHandlers.put(InvalidCsrfTokenException.class, csrfHandler);
+        AccessDeniedHandler accessDeniedHandler =
+                new DelegatingAccessDeniedHandler(accessDeniedHandlers, genericHandler);
 
         http.cors(c -> c.configurationSource(corsConfigurationSource))
                 .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository)

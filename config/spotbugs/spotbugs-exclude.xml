@@ -381,6 +381,16 @@
     </Match>
 
     <!--
+        RevokeApiKeyAuthIntegrationTest reads the XSRF-TOKEN cookie issued by /api/security/csrf
+        to attach a valid CSRF token while exercising the revoke-endpoint authorization paths; it
+        does not persist application secrets in cookies.
+    -->
+    <Match>
+        <Bug pattern="COOKIE_USAGE"/>
+        <Class name="com.williamcallahan.javachat.web.RevokeApiKeyAuthIntegrationTest"/>
+    </Match>
+
+    <!--
         Manual extraction runners walk repository-owned documentation roots projected from the
         canonical source manifests. They do not accept filesystem paths from runtime users.
     -->
