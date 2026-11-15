@@ -11,9 +11,9 @@ callback is then completed by the canonical Clerk client in the hosted app.
 
 The desktop shell adds standard macOS Copy Link and Open in Default Browser
 actions and requires macOS 26 on Intel or Apple silicon. The iOS target is a
-universal iPhone and iPad app that requires iOS 27. It follows the
-installed-current simulator policy: use a compatible simulator already
-installed on the Mac and identify it by UDID.
+universal iPhone and iPad app that requires iOS 27. Simulator verification
+uses the installed iOS/iPadOS 27.2 runtime and an explicitly owned device
+identified by UDID.
 
 ## Local unsigned builds
 
@@ -22,9 +22,22 @@ make -C mobile desktop
 make -C mobile desktop-test
 make -C mobile ios
 
-xcrun simctl list devices booted
-make -C mobile ios-test IOS_SIMULATOR_ID="<booted simulator UDID>"
+xcrun simctl list devices available
+make -C mobile ios-test IOS_SIMULATOR_ID="<installed simulator UDID>"
 ```
+
+`ios` only compiles. `ios-test` builds the test products before starting the
+simulator, then runs them in a leased session that shuts the simulator down.
+Choose a simulator you own by its explicit UDID. On the executing Mac,
+`aventure-compute`, `ios-simulator-session`, and `jq` must be available on
+`PATH`. The session executable must accept a UDID, `-` for no StoreKit
+configuration, and the foreground command and its arguments.
+
+Pass Xcode test selectors with `IOS_TEST_ARGS`, for example
+`IOS_TEST_ARGS='-only-testing:JavaChatTests/OAuthPolicyTests'`. The result
+bundle is retained under `iosApp/build-test/receipts`; a run must execute tests
+without failures or skips. These unit tests do not prove rendered WebKit or a
+completed system OAuth flow.
 
 Both projects use the same explicit `ai.javachat` bundle ID and automatic
 signing under the `william@csweb.io` Apple Developer team `NB356A75PU`. The
