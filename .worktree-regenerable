@@ -6,3 +6,5 @@ src/main/resources/static/theme-boot.js
 data/rate-limit-state.json
 # Pipeline log the logback-spring.xml file appender writes while the app runs.
 logs/pipeline.log
+# Fetch log scripts/fetch_all_docs.sh truncates and rewrites at the start of every run (LOG_FILE).
+fetch_all_docs.log
