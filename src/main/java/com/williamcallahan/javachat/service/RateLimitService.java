@@ -9,7 +9,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 /**
  * Coordinates provider availability decisions from persisted and in-memory rate-limit state.
@@ -139,24 +138,6 @@ public class RateLimitService {
         }
 
         RateLimitDecision decision = decisionResolver.resolveFromOpenAiHeaders(requiredException.headers());
-        applyRateLimit(requiredProvider, decision);
-    }
-
-    /**
-     * Records a rate limit from WebClient exceptions using Retry-After/X-RateLimit-Reset headers.
-     *
-     * @throws RateLimitDecisionException when headers are missing/invalid or error type is unsupported
-     */
-    public void recordRateLimitFromException(ApiProvider provider, Throwable error) {
-        ApiProvider requiredProvider = Objects.requireNonNull(provider, "provider");
-        Throwable requiredError = Objects.requireNonNull(error, "error");
-
-        if (!(requiredError instanceof WebClientResponseException webClientError)) {
-            throw new RateLimitDecisionException(
-                    "Rate-limit recording requires WebClientResponseException with headers", requiredError);
-        }
-
-        RateLimitDecision decision = decisionResolver.resolveFromWebClientException(webClientError);
         applyRateLimit(requiredProvider, decision);
     }
 
