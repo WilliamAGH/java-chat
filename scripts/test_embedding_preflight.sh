@@ -40,6 +40,7 @@ curl() {
     local request_body=""
     local request_url=""
     local batch_tier_seen="false"
+    local client_host_header=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
             -o)
@@ -53,6 +54,9 @@ curl() {
             -H)
                 if [ "$2" = "X-Tier: batch" ]; then
                     batch_tier_seen="true"
+                fi
+                if [[ "$2" == "X-LGW-Client-Host: "* ]]; then
+                    client_host_header="${2#X-LGW-Client-Host: }"
                 fi
                 shift 2
                 ;;
@@ -75,8 +79,9 @@ curl() {
     jq -cn \
         --arg url "$request_url" \
         --argjson batchTier "$batch_tier_seen" \
+        --arg clientHost "$client_host_header" \
         --argjson body "${request_body:-null}" \
-        '{url: $url, batchTier: $batchTier, body: $body}' \
+        '{url: $url, batchTier: $batchTier, clientHost: $clientHost, body: $body}' \
         >> "$EMBEDDING_TEST_CAPTURE"
 
     if [[ "$request_url" == */models ]]; then
@@ -156,11 +161,33 @@ EMBEDDING_TEST_MODE=success check_embedding_server embedding_test_log
 if ! jq -e -s '
     length == 3
     and all(.[]; .batchTier == true)
+    and all(.[]; .clientHost == $clientHost)
     and any(.[]; .url == "https://gateway.test/v1/models")
     and ([.[] | select(.url | endswith("/embeddings")) | .body.input | length] == [1, 8])
     and all(.[] | select(.url | endswith("/embeddings")); .body.model == "qwen/qwen3-embedding-4b")
-' "$EMBEDDING_TEST_CAPTURE" >/dev/null; then
-    fail_embedding_preflight_test "gateway probes did not use the batch tier, model list, and batches 1 and 8"
+' --arg clientHost "$GATEWAY_CLIENT_HOST" "$EMBEDDING_TEST_CAPTURE" >/dev/null; then
+    fail_embedding_preflight_test "gateway probes did not use the batch tier, client host, model list, and batches 1 and 8"
+fi
+if [ -z "$GATEWAY_CLIENT_HOST" ]; then
+    fail_embedding_preflight_test "a native run with a DNS-label host name resolved no gateway client host"
+fi
+
+EMBEDDING_TEST_MARKERS="$EMBEDDING_TEST_WORK_DIRECTORY/markers"
+mkdir -p "$EMBEDDING_TEST_MARKERS"
+printf 'swarm-worker-2\n' > "$EMBEDDING_TEST_MARKERS/node-name"
+: > "$EMBEDDING_TEST_MARKERS/container-image"
+if [ "$(resolve_gateway_client_host "$EMBEDDING_TEST_MARKERS/absent" "$EMBEDDING_TEST_MARKERS/none" Build-Node-3.tail.example.net)" != "build-node-3" ]; then
+    fail_embedding_preflight_test "a native run did not send its short lowercase host name"
+fi
+if [ "$(resolve_gateway_client_host "$EMBEDDING_TEST_MARKERS/node-name" "$EMBEDDING_TEST_MARKERS/container-image" 3f9c2a7b81d4)" != "swarm-worker-2" ]; then
+    fail_embedding_preflight_test "a container run did not send its mounted node name"
+fi
+if [ -n "$(resolve_gateway_client_host "$EMBEDDING_TEST_MARKERS/absent" "$EMBEDDING_TEST_MARKERS/container-image" 3f9c2a7b81d4 2>/dev/null)" ]; then
+    fail_embedding_preflight_test "a container run without the node-name mount sent its container id"
+fi
+printf 'Swarm-Worker-2\n' > "$EMBEDDING_TEST_MARKERS/node-name"
+if [ -n "$(resolve_gateway_client_host "$EMBEDDING_TEST_MARKERS/node-name" "$EMBEDDING_TEST_MARKERS/container-image" 3f9c2a7b81d4 2>/dev/null)" ]; then
+    fail_embedding_preflight_test "an invalid node-name marker was sent"
 fi
 if [ "$(cat "$EMBEDDING_TEST_SLEEP_CAPTURE")" != "1" ]; then
     fail_embedding_preflight_test "gateway probes were not paced at one request per second"
@@ -310,4 +337,4 @@ for rejected_mode in count order null nonnumeric dimension; do
     fi
 done
 
-printf 'PASS: gateway preflight requires the canonical model/dimensions, batch tier, paced batches 1/8, Retry-After, ordering, and numeric values.\n'
+printf 'PASS: gateway preflight requires the canonical model/dimensions, batch tier, client host, paced batches 1/8, Retry-After, ordering, and numeric values.\n'
