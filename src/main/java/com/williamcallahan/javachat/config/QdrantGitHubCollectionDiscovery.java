@@ -290,7 +290,8 @@ public final class QdrantGitHubCollectionDiscovery {
             ListenableFuture<CollectionInfo> collectionInfoRequest,
             int expectedDimensions,
             String denseVectorName,
-            String sparseVectorName) {
+            String sparseVectorName)
+            throws InterruptedException {
         try {
             CollectionInfo collectionInfo = collectionInfoRequest.get(GRPC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
@@ -345,9 +346,6 @@ public final class QdrantGitHubCollectionDiscovery {
                             + payloadIndex.getKey() + "'");
                 }
             }
-        } catch (InterruptedException _) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("GitHub collection validation interrupted for '" + collectionName + "'");
         } catch (ExecutionException executionException) {
             if (isTransientGrpcFailure(executionException.getCause())) {
                 throw new GitHubDiscoveryUnavailableException(
