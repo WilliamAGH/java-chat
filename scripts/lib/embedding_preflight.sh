@@ -23,6 +23,51 @@ if [[ "${GATEWAY_MAX_RETRY_AFTER_SECONDS:-}" != "86400" ]]; then
 fi
 readonly GATEWAY_MAX_RETRY_AFTER_SECONDS
 
+# Names the sending machine in X-LGW-Client-Host by LlmGatewayClientHost's rule: the mounted node-name
+# marker; inside the image without it, no header and one ERROR (the container's host name is its id);
+# else the short lowercase host name. Prints the label, or nothing to omit the header.
+resolve_gateway_client_host() {
+    local node_name_marker="$1"
+    local container_image_marker="$2"
+    local platform_host_name="$3"
+    local dns_label_pattern='^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+    local marker_rejection=""
+    local client_host=""
+    if [ -e "$node_name_marker" ]; then
+        if [ ! -f "$node_name_marker" ]; then
+            marker_rejection="it is not a regular file"
+        elif [ ! -r "$node_name_marker" ]; then
+            marker_rejection="it is unreadable"
+        elif [ "$(wc -c < "$node_name_marker")" -gt 64 ]; then
+            marker_rejection="it is longer than 64 bytes"
+        else
+            IFS= read -r -d '' client_host < "$node_name_marker" || true
+            client_host="${client_host%$'\n'}"
+            [[ "$client_host" =~ $dns_label_pattern ]] \
+                || marker_rejection="it must hold one lowercase DNS label (a-z, 0-9, hyphen) and at most one trailing line feed"
+        fi
+    elif [ -e "$container_image_marker" ]; then
+        marker_rejection="it is not mounted in this container"
+    else
+        client_host="$(printf '%s' "${platform_host_name%%.*}" | tr '[:upper:]' '[:lower:]')"
+        [[ "$client_host" =~ $dns_label_pattern ]] || client_host=""
+    fi
+    if [ -n "$marker_rejection" ]; then
+        printf 'ERROR gateway client host marker %s ignored because %s; requests omit X-LGW-Client-Host.\n' \
+            "$node_name_marker" "$marker_rejection" >&2
+        return 0
+    fi
+    printf '%s' "$client_host"
+}
+
+GATEWAY_CLIENT_HOST="$(resolve_gateway_client_host /run/aventure/node-name /etc/aventure/container-image "${HOSTNAME:-}")"
+readonly GATEWAY_CLIENT_HOST
+GATEWAY_CLIENT_HOST_CURL_HEADERS=()
+if [ -n "$GATEWAY_CLIENT_HOST" ]; then
+    GATEWAY_CLIENT_HOST_CURL_HEADERS=(-H "X-LGW-Client-Host: $GATEWAY_CLIENT_HOST")
+fi
+readonly GATEWAY_CLIENT_HOST_CURL_HEADERS
+
 trim_embedding_credential() {
     local embedding_credential="$1"
     embedding_credential="${embedding_credential#"${embedding_credential%%[![:space:]]*}"}"
@@ -144,6 +189,7 @@ validate_embedding_probe_payload() {
             -H "Authorization: Bearer $embedding_key" \
             -H "Content-Type: application/json" \
             -H "X-Tier: batch" \
+            ${GATEWAY_CLIENT_HOST_CURL_HEADERS[@]+"${GATEWAY_CLIENT_HOST_CURL_HEADERS[@]}"} \
             --data "$probe_body" \
             "$embedding_endpoint" || true)"
         if [ -z "$http_status_code" ]; then
@@ -278,6 +324,7 @@ check_embedding_server() {
     model_list_status="$(curl -sS --connect-timeout 5 --max-time 30 -o "$model_list_body_file" -w "%{http_code}" \
         -H "Authorization: Bearer $embedding_key" \
         -H "X-Tier: batch" \
+        ${GATEWAY_CLIENT_HOST_CURL_HEADERS[@]+"${GATEWAY_CLIENT_HOST_CURL_HEADERS[@]}"} \
         "${OPENAI_BASE_URL}/models" || true)"
     if [ "$model_list_status" != "200" ] \
         || ! jq -e --arg model "$embedding_model" 'any(.data[]?; .id == $model)' "$model_list_body_file" >/dev/null; then

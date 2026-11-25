@@ -447,6 +447,7 @@ public class OpenAIStreamingService {
                 // SDK retry sleeps interfere with reactive cancellation.
                 .maxRetries(0)
                 .putHeader(LlmGatewayTier.REQUEST_TIER_HEADER, requestTier)
+                .putAllHeaders(LlmGatewayClientHost.clientHeaders())
                 .build();
     }
 

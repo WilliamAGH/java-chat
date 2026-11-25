@@ -100,7 +100,8 @@ FROM builder AS ingestion
 RUN apt-get update && apt-get install -y --no-install-recommends jq python3 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1001 appuser \
-    && useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash appuser
+    && useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash appuser \
+    && mkdir -p /etc/aventure && printf 'java-chat-ingestion\n' > /etc/aventure/container-image
 
 COPY scripts/process_all_to_qdrant.sh scripts/
 COPY scripts/qdrant_writer_lease.py scripts/
@@ -136,6 +137,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 
 # 2. Create non-root user (never changes)
 RUN useradd -u 1001 -m -s /bin/bash appuser
+
+# Tells LlmGatewayClientHost this process runs in the image, where the container's host name is its container id:
+# X-LGW-Client-Host then comes only from the /run/aventure/node-name mount, and is omitted (with one ERROR) without it.
+RUN mkdir -p /etc/aventure && printf 'java-chat\n' > /etc/aventure/container-image
 
 WORKDIR /app
 

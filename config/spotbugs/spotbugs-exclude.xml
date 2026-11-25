@@ -146,6 +146,16 @@
         <Bug pattern="CRLF_INJECTION_LOGS"/>
         <Class name="com.williamcallahan.javachat.service.OpenAiRequestFactory"/>
     </Match>
+
+    <!--
+        LlmGatewayClientHost reads the deployment's fixed node-name and container-image markers, whose
+        absolute paths are the deployment contract, and logs only those constant paths, constant reasons,
+        and exception types; the marker's contents are validated and never logged.
+    -->
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS,DMI_HARDCODED_ABSOLUTE_FILENAME"/>
+        <Class name="com.williamcallahan.javachat.service.LlmGatewayClientHost"/>
+    </Match>
     <Match>
         <Bug pattern="CRLF_INJECTION_LOGS"/>
         <Class name="com.williamcallahan.javachat.service.RateLimitHeaderParser"/>
