@@ -267,4 +267,58 @@ class HtmlContentExtractorTest {
         assertTrue(extraction.anchoredSections().isEmpty());
         assertTrue(document.selectFirst("nav") != null, "Extraction must use a clone before removing navigation");
     }
+
+    @Test
+    void pageHeaderWrapperRetainsNestedHeading() {
+        Document document = Jsoup.parse("""
+            <html><body><main>
+              <div class="page-header"><h1>Important Page Title</h1></div>
+              <p>Body text that should always remain.</p>
+            </main></body></html>
+            """);
+        HtmlContentExtractor extractor = new HtmlContentExtractor();
+
+        String extractedText = extractor.extractCleanContent(document);
+
+        assertTrue(extractedText.contains("Important Page Title"), "nested h1 in page-header must survive");
+        assertTrue(extractedText.contains("Body text that should always remain."), "sibling body text must survive");
+    }
+
+    @Test
+    void exactHeaderClassTokenIsStillRemoved() {
+        Document document = Jsoup.parse("""
+            <html><body><main>
+              <div class="header"><h1>Site Header Title</h1></div>
+              <p>Body text that should always remain.</p>
+            </main></body></html>
+            """);
+        HtmlContentExtractor extractor = new HtmlContentExtractor();
+
+        String extractedText = extractor.extractCleanContent(document);
+
+        assertFalse(extractedText.contains("Site Header Title"), "exact header class token must still be removed");
+        assertTrue(extractedText.contains("Body text that should always remain."), "sibling body text must survive");
+    }
+
+    @Test
+    void compositeNavClassesAreStillRemoved() {
+        Document document = Jsoup.parse("""
+            <html><body><main>
+              <div class="top-nav"><a href="/">Home</a></div>
+              <div class="main-nav"><a href="/about">About</a></div>
+              <div class="header-nav"><a href="/docs">Docs</a></div>
+              <div class="primary-nav"><a href="/blog">Blog</a></div>
+              <p>Body text that should always remain.</p>
+            </main></body></html>
+            """);
+        HtmlContentExtractor extractor = new HtmlContentExtractor();
+
+        String extractedText = extractor.extractCleanContent(document);
+
+        assertFalse(extractedText.contains("Home"), "top-nav must still be removed");
+        assertFalse(extractedText.contains("About"), "main-nav must still be removed");
+        assertFalse(extractedText.contains("Docs"), "header-nav must still be removed");
+        assertFalse(extractedText.contains("Blog"), "primary-nav must still be removed");
+        assertTrue(extractedText.contains("Body text that should always remain."), "body text must survive");
+    }
 }
