@@ -84,6 +84,7 @@ class OpenAICompletionStatusTest {
             capturedRequest.set(new CapturedCompletionRequest(
                     exchange.getRequestHeaders().getFirst("X-Tier"),
                     exchange.getRequestHeaders().getFirst("X-User-ID"),
+                    exchange.getRequestHeaders().getFirst(LlmGatewayClientHost.CLIENT_HOST_HEADER),
                     requestBody));
             byte[] responseBody = """
                     {"id":"resp_wire","object":"response","created_at":0,
@@ -171,6 +172,11 @@ class OpenAICompletionStatusTest {
         assertEquals(
                 (requestTier.equals("batch") ? LlmGatewayTier.BATCH : LlmGatewayTier.LIVE).workloadHeader(purpose),
                 gatewayRequest.workloadHeader());
+        assertEquals(
+                LlmGatewayClientHost.clientHeaders()
+                        .get(LlmGatewayClientHost.CLIENT_HOST_HEADER)
+                        .getFirst(),
+                gatewayRequest.clientHostHeader());
         assertFalse(
                 gatewayRequest.requestBody().path("prompt_cache_key").asText().isBlank());
         if (includeUsage) {
@@ -492,7 +498,8 @@ class OpenAICompletionStatusTest {
         return responseService;
     }
 
-    private record CapturedCompletionRequest(String tierHeader, String workloadHeader, JsonNode requestBody) {}
+    private record CapturedCompletionRequest(
+            String tierHeader, String workloadHeader, String clientHostHeader, JsonNode requestBody) {}
 
     private record CompletionFailureScenario(
             Response providerCompletion,

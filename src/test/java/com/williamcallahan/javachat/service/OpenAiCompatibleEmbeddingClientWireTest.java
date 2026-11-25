@@ -69,6 +69,11 @@ class OpenAiCompatibleEmbeddingClientWireTest {
 
         assertEquals(3, capturedRequests.size());
         assertEquals("java-chat:embeddingWarmup:batch", capturedRequests.get(2).workloadHeader());
+        String expectedClientHost = LlmGatewayClientHost.clientHeaders()
+                .get(LlmGatewayClientHost.CLIENT_HOST_HEADER)
+                .getFirst();
+        capturedRequests.forEach(
+                capturedRequest -> assertEquals(expectedClientHost, capturedRequest.clientHostHeader()));
         assertGatewayRequest(capturedRequests.get(0), "production-z", 1);
         assertGatewayRequest(capturedRequests.get(1), "batch", BATCH_INPUT_COUNT);
     }
@@ -83,6 +88,7 @@ class OpenAiCompatibleEmbeddingClientWireTest {
                 exchange.getRequestHeaders().getFirst("Authorization"),
                 exchange.getRequestHeaders().getFirst("X-Tier"),
                 exchange.getRequestHeaders().getFirst("X-User-ID"),
+                exchange.getRequestHeaders().getFirst(LlmGatewayClientHost.CLIENT_HOST_HEADER),
                 embeddingRequest));
 
         ArrayNode inputTexts = (ArrayNode) embeddingRequest.path("input");
@@ -140,5 +146,6 @@ class OpenAiCompatibleEmbeddingClientWireTest {
             String authorizationHeader,
             String tierHeader,
             String workloadHeader,
+            String clientHostHeader,
             JsonNode embeddingRequest) {}
 }
