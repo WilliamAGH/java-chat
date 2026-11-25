@@ -40,7 +40,8 @@ class QueryVersionExtractorTest {
     @Test
     void rejectsExplicitQuantityPhrasesWithoutSuppressingReleaseRequests() {
         for (String quantityNoun : List.of(
-                "day", "days", "hour", "hours", "minute", "minutes", "second", "seconds", "times", "line", "lines")) {
+                "day", "days", "hour", "hours", "minute", "minutes", "second", "seconds", "times", "line", "lines",
+                "week", "weeks", "month", "months", "year", "years")) {
             assertEquals(
                     List.of(),
                     QueryVersionExtractor.extractVersionNumbers("Java 100 " + quantityNoun + " of practice"));
@@ -50,6 +51,28 @@ class QueryVersionExtractorTest {
         assertEquals(List.of("21"), QueryVersionExtractor.extractVersionNumbers("Java 21 time API"));
         assertEquals(List.of("25"), QueryVersionExtractor.extractVersionNumbers("Java 25 examples"));
         assertEquals(List.of("21"), QueryVersionExtractor.extractVersionNumbers("Java 100 days of code in Java 21"));
+        assertEquals(List.of("21"), QueryVersionExtractor.extractVersionNumbers("Java 100 months of code in Java 21"));
+    }
+
+    @Test
+    void rejectsTemporalQuantityPhrasingsWhereJavaPrecedesTheDigits() {
+        assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers("switched to Java 6 months ago"));
+        assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers("I have Java 5 years of experience"));
+        assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers("Java 5 years experience"));
+        assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers("been on Java 8 months"));
+        assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers("learned Java 4 weeks ago"));
+        assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers("ran Java 11 hours straight"));
+        assertEquals(List.of(), QueryVersionExtractor.extractVersionNumbers("practiced Java 3 years on the side"));
+    }
+
+    @Test
+    void extractsReleaseRequestsAdjacentToNonQuantitySuffixWords() {
+        assertEquals(List.of("25"), QueryVersionExtractor.extractVersionNumbers("Java 25 monthly cadence"));
+        assertEquals(List.of("25"), QueryVersionExtractor.extractVersionNumbers("Java 25 yearly release schedule"));
+        assertEquals(List.of("25"), QueryVersionExtractor.extractVersionNumbers("Java 25 weekly digest"));
+        assertEquals(List.of("21"), QueryVersionExtractor.extractVersionNumbers("Java 21 API"));
+        assertEquals(
+                List.of("25", "21"), QueryVersionExtractor.extractVersionNumbers("Java 25 examples and Java 21 notes"));
     }
 
     @Test
