@@ -92,10 +92,107 @@ describe("numeric list fence nesting", () => {
 
         for (const isStreaming of [false, true]) {
           const renderedContainer = renderMarkdown(markdown, isStreaming);
+          const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
 
-          expect(renderedContainer.querySelectorAll("ol > li pre > code")).toHaveLength(1);
+          expect(nestedCodeBlocks).toHaveLength(1);
+          expect(nestedCodeBlocks[0].textContent).toBe("{{name}}\n");
           expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
         }
+      }
+    }
+  });
+
+  it("keeps column-zero and continuation-aligned fences nested with intact body", () => {
+    for (const fenceMarker of ["```", "~~~"]) {
+      for (const bodyIndent of [0, 1, 2, 3]) {
+        const indent = " ".repeat(bodyIndent);
+        const markdown = [
+          "1. Run this:",
+          `${indent}${fenceMarker}bash`,
+          `${indent}npm install`,
+          `${indent}${fenceMarker}`,
+        ].join("\n");
+
+        for (const isStreaming of [false, true]) {
+          const renderedContainer = renderMarkdown(markdown, isStreaming);
+          const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
+
+          expect(nestedCodeBlocks).toHaveLength(1);
+          expect(nestedCodeBlocks[0].textContent).toBe("npm install\n");
+          expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
+        }
+      }
+    }
+  });
+
+  it("renders over-indented fence body without spurious leading spaces", () => {
+    for (const fenceMarker of ["```", "~~~"]) {
+      for (const bodyIndent of [4, 5, 6]) {
+        const indent = " ".repeat(bodyIndent);
+        const markdown = [
+          "1. Run this:",
+          `${indent}${fenceMarker}bash`,
+          `${indent}npm install`,
+          `${indent}${fenceMarker}`,
+        ].join("\n");
+
+        for (const isStreaming of [false, true]) {
+          const renderedContainer = renderMarkdown(markdown, isStreaming);
+          const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
+
+          expect(nestedCodeBlocks).toHaveLength(1);
+          expect(nestedCodeBlocks[0].textContent).toBe("npm install\n");
+          expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
+        }
+      }
+    }
+  });
+
+  it("renders over-indented fences under multi-digit list markers without corruption", () => {
+    for (const numericListMarker of ["12.", "100."]) {
+      const requiredIndentation = " ".repeat(numericListMarker.length + 1);
+      for (const bodyIndent of [
+        requiredIndentation.length + 1,
+        requiredIndentation.length + 2,
+        requiredIndentation.length + 3,
+      ]) {
+        const indent = " ".repeat(bodyIndent);
+        const markdown = [
+          `${numericListMarker} Run this:`,
+          `${indent}\`\`\`bash`,
+          `${indent}npm install`,
+          `${indent}\`\`\``,
+        ].join("\n");
+
+        for (const isStreaming of [false, true]) {
+          const renderedContainer = renderMarkdown(markdown, isStreaming);
+          const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
+
+          expect(nestedCodeBlocks).toHaveLength(1);
+          expect(nestedCodeBlocks[0].textContent).toBe("npm install\n");
+          expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
+        }
+      }
+    }
+  });
+
+  it("preserves ragged body line indentation under an over-indented opener", () => {
+    for (const fenceMarker of ["```", "~~~"]) {
+      const markdown = [
+        "1. Run this:",
+        `    ${fenceMarker}bash`,
+        "    lineA",
+        "lineB",
+        `    ${fenceMarker}`,
+      ].join("\n");
+
+      for (const isStreaming of [false, true]) {
+        const renderedContainer = renderMarkdown(markdown, isStreaming);
+        const nestedCodeBlocks = renderedContainer.querySelectorAll("ol > li pre > code");
+
+        expect(nestedCodeBlocks).toHaveLength(1);
+        expect(nestedCodeBlocks[0].textContent).toBe("lineA\nlineB\n");
+        expect(renderedContainer.querySelectorAll(":scope > pre")).toHaveLength(0);
       }
     }
   });
